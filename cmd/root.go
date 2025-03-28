@@ -4,8 +4,17 @@ import (
 	"log"
 
 	"github.com/spf13/cobra"
-	"github.com/stellar/freighter-backend-v2/internal/config"
 )
+
+type Config struct {
+	RpcConfig      RPCConfig
+	RedisConfig    RedisConfig
+	HorizonConfig  HorizonConfig
+	PricesConfig   PricesConfig
+	BlockaidConfig BlockaidConfig
+	CoinbaseConfig CoinbaseConfig
+	AppConfig      AppConfig
+}
 
 // SubCommand defines the interface for all subcommands
 type SubCommand interface {
@@ -32,7 +41,7 @@ func Execute() error {
 func init() {
 	registerSubCommands(
 		&serveCmd{
-			cfg: &config.Config{},
+			cfg: &Config{},
 		},
 	)
 }

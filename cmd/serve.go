@@ -2,11 +2,55 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-	"github.com/stellar/freighter-backend-v2/internal/config"
 )
 
+type AppConfig struct {
+	Mode      string
+	SentryKey string
+}
+
+type RPCConfig struct {
+	RpcPubnetURL  string
+	RpcTestnetURL string
+}
+
+type RedisConfig struct {
+	ConnectionName string
+	Host           string
+	Port           int
+}
+
+type HorizonConfig struct {
+	HorizonPubnetURL  string
+	HorizonTestnetURL string
+}
+
+type PricesConfig struct {
+	HorizonURL                     string
+	DisableTokenPrices             bool
+	BatchUpdateDelayMilliseconds   int
+	CalculationTimeoutMilliseconds int
+	UpdateIntervalMilliseconds     int
+	UpdateBatchSize                int
+	StalenessThreshold             int
+}
+
+type BlockaidConfig struct {
+	BlockaidAPIKey                         string
+	UseBlockaidDappScanning                bool
+	UseBlockaidTxScanning                  bool
+	UseBlockaidAssetScanning               bool
+	UseBlockaidAssetWarningReporting       bool
+	UseBlockaidTransactionWarningReporting bool
+}
+
+type CoinbaseConfig struct {
+	CoinbaseAPIKey    string
+	CoinbaseAPISecret string
+}
+
 type serveCmd struct {
-	cfg *config.Config
+	cfg *Config
 }
 
 func (s *serveCmd) Command() *cobra.Command {
