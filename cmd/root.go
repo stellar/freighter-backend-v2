@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/spf13/cobra"
+	"github.com/stellar/freighter-backend-v2/internal/config"
 )
 
 // SubCommand defines the interface for all subcommands
@@ -30,7 +31,9 @@ func Execute() error {
 
 func init() {
 	registerSubCommands(
-		&serveCmd{},
+		&serveCmd{
+			cfg: &config.Config{},
+		},
 	)
 }
 
