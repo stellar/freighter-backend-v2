@@ -1,4 +1,4 @@
 .cursor
 .vscode
 .idea
-.env
+*.env
