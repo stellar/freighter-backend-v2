@@ -7,6 +7,12 @@ type Config struct {
 	PricesConfig   PricesConfig
 	BlockaidConfig BlockaidConfig
 	CoinbaseConfig CoinbaseConfig
+	AppConfig      AppConfig
+}
+
+type AppConfig struct {
+	Mode string
+	SentryKey string
 }
 
 type RPCConfig struct {
@@ -26,14 +32,17 @@ type HorizonConfig struct {
 }
 
 type PricesConfig struct {
+	HorizonURL string
+	DisableTokenPrices bool
 	BatchUpdateDelayMilliseconds   int
 	CalculationTimeoutMilliseconds int
 	UpdateIntervalMilliseconds     int
 	UpdateBatchSize                int
-	PriceStalenessThreshold        int
+	StalenessThreshold             int
 }
 
 type BlockaidConfig struct {
+	BlockaidAPIKey string
 	UseBlockaidDappScanning                bool
 	UseBlockaidTxScanning                  bool
 	UseBlockaidAssetScanning               bool

@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 )
@@ -24,6 +22,9 @@ func (s *serveCmd) Command() *cobra.Command {
 		},
 	}
 
+	// App Config
+	cmd.Flags().StringVar(&s.cfg.AppConfig.Mode, "mode", "development", "The mode of the server")
+
 	// RPC Config
 	cmd.Flags().StringVar(&s.cfg.RpcConfig.RpcPubnetURL, "rpc-pubnet-url", "", "The URL of the pubnet RPC")
 	cmd.Flags().StringVar(&s.cfg.RpcConfig.RpcTestnetURL, "rpc-testnet-url", "https://horizon-testnet.stellar.org", "The URL of the testnet RPC")
@@ -38,13 +39,16 @@ func (s *serveCmd) Command() *cobra.Command {
 	cmd.Flags().IntVar(&s.cfg.RedisConfig.Port, "redis-port", 6379, "The Redis port")
 
 	// Prices Config
-	cmd.Flags().IntVar(&s.cfg.PricesConfig.BatchUpdateDelayMilliseconds, "prices-batch-update-delay", 5000, "Delay between batch updates in milliseconds")
-	cmd.Flags().IntVar(&s.cfg.PricesConfig.CalculationTimeoutMilliseconds, "prices-calculation-timeout", 10000, "Timeout for price calculations in milliseconds")
-	cmd.Flags().IntVar(&s.cfg.PricesConfig.UpdateIntervalMilliseconds, "prices-update-interval", 30000, "Interval between price updates in milliseconds")
-	cmd.Flags().IntVar(&s.cfg.PricesConfig.UpdateBatchSize, "prices-update-batch-size", 50, "Size of price update batches")
-	cmd.Flags().IntVar(&s.cfg.PricesConfig.PriceStalenessThreshold, "prices-staleness-threshold", 300000, "Threshold for price staleness")
+	cmd.Flags().BoolVar(&s.cfg.PricesConfig.DisableTokenPrices, "disable-token-prices", false, "Disable token prices")
+	cmd.Flags().StringVar(&s.cfg.PricesConfig.HorizonURL, "token-prices-horizon-url", "https://horizon.stellar.org", "The URL of the Horizon")
+	cmd.Flags().IntVar(&s.cfg.PricesConfig.BatchUpdateDelayMilliseconds, "token-prices-batch-update-delay", 5000, "Delay between batch updates in milliseconds")
+	cmd.Flags().IntVar(&s.cfg.PricesConfig.CalculationTimeoutMilliseconds, "token-prices-calculation-timeout", 10000, "Timeout for price calculations in milliseconds")
+	cmd.Flags().IntVar(&s.cfg.PricesConfig.UpdateIntervalMilliseconds, "token-prices-update-interval", 30000, "Interval between price updates in milliseconds")
+	cmd.Flags().IntVar(&s.cfg.PricesConfig.UpdateBatchSize, "token-prices-update-batch-size", 50, "Size of price update batches")
+	cmd.Flags().IntVar(&s.cfg.PricesConfig.StalenessThreshold, "token-prices-staleness-threshold", 300000, "Threshold for price staleness")
 
 	// Blockaid Config
+	cmd.Flags().StringVar(&s.cfg.BlockaidConfig.BlockaidAPIKey, "blockaid-api-key", "", "Blockaid API key")
 	cmd.Flags().BoolVar(&s.cfg.BlockaidConfig.UseBlockaidDappScanning, "use-blockaid-dapp-scanning", false, "Enable Blockaid dapp scanning")
 	cmd.Flags().BoolVar(&s.cfg.BlockaidConfig.UseBlockaidTxScanning, "use-blockaid-tx-scanning", false, "Enable Blockaid transaction scanning")
 	cmd.Flags().BoolVar(&s.cfg.BlockaidConfig.UseBlockaidAssetScanning, "use-blockaid-asset-scanning", false, "Enable Blockaid asset scanning")
@@ -58,11 +62,5 @@ func (s *serveCmd) Command() *cobra.Command {
 }
 
 func (s *serveCmd) Run() error {
-	// Print out config values to verify flag parsing
-	fmt.Printf("RPC Pubnet URL: %s\n", s.cfg.RpcConfig.RpcPubnetURL)
-	fmt.Printf("Horizon Testnet URL: %s\n", s.cfg.HorizonConfig.HorizonTestnetURL)
-	fmt.Printf("Redis Host: %s\n", s.cfg.RedisConfig.Host)
-	fmt.Printf("Use Blockaid Dapp Scanning: %v\n", s.cfg.BlockaidConfig.UseBlockaidDappScanning)
-
 	return nil
 }
