@@ -1,0 +1,39 @@
+api:
+  port: 9090
+
+database:
+  host: db.example.com
+  port: 5432
+  name: freighter_prod
+  user: freighter_user
+  # password should be set via environment variable for security 
+
+rpc:
+  pubnet_url: https://public-node.stellar.org
+  testnet_url: https://horizon-testnet.stellar.org
+
+redis:
+  connection_name: freighter_redis
+  host: localhost
+  port: 6379
+
+horizon:
+  pubnet_url: https://horizon.stellar.org
+  testnet_url: https://horizon-testnet.stellar.org
+
+prices:
+  batch_update_delay_ms: 100
+  calculation_timeout_ms: 5000
+  update_interval_ms: 60000
+  update_batch_size: 50
+  price_staleness_threshold: 300000
+
+blockaid:
+  use_blockaid_dapp_scanning: false
+  use_blockaid_tx_scanning: false
+  use_blockaid_asset_scanning: false
+  use_blockaid_asset_warning_reporting: false
+  use_blockaid_transaction_warning_reporting: false
+
+coinbase:
+  # api_key and api_secret should be set via environment variables for security 
