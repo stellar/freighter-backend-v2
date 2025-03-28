@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 )
 
@@ -68,13 +70,14 @@ func (s *serveCmd) Command() *cobra.Command {
 
 	// App Config
 	cmd.Flags().StringVar(&s.cfg.AppConfig.Mode, "mode", "development", "The mode of the server")
+	cmd.Flags().StringVar(&s.cfg.AppConfig.SentryKey, "sentry-key", "", "The Sentry key")
 
 	// RPC Config
 	cmd.Flags().StringVar(&s.cfg.RpcConfig.RpcPubnetURL, "rpc-pubnet-url", "", "The URL of the pubnet RPC")
-	cmd.Flags().StringVar(&s.cfg.RpcConfig.RpcTestnetURL, "rpc-testnet-url", "https://horizon-testnet.stellar.org", "The URL of the testnet RPC")
+	cmd.Flags().StringVar(&s.cfg.RpcConfig.RpcTestnetURL, "rpc-testnet-url", "https://soroban-testnet.stellar.org/", "The URL of the testnet RPC")
 
 	// Horizon Config
-	cmd.Flags().StringVar(&s.cfg.HorizonConfig.HorizonPubnetURL, "horizon-pubnet-url", "https://horizon.stellar.org", "The URL of the pubnet Horizon")
+	cmd.Flags().StringVar(&s.cfg.HorizonConfig.HorizonPubnetURL, "horizon-pubnet-url", "https://horizon.stellar.org/", "The URL of the pubnet Horizon")
 	cmd.Flags().StringVar(&s.cfg.HorizonConfig.HorizonTestnetURL, "horizon-testnet-url", "https://horizon-testnet.stellar.org", "The URL of the testnet Horizon")
 
 	// Redis Config
@@ -106,5 +109,6 @@ func (s *serveCmd) Command() *cobra.Command {
 }
 
 func (s *serveCmd) Run() error {
+	fmt.Println(s.cfg)
 	return nil
 }

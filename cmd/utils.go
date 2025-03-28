@@ -2,18 +2,25 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	"path/filepath"
+	"runtime"
+	"strings"
 )
 
 const (
 	envPrefix         = "FREIGHTER_BACKEND"
-	envConfigFileName = "freighter-backend.env"
-	envConfigFilePath = "./configs"
+	envConfigFileName = "freighter-backend-config"
 )
+
+// getProjectRoot returns the path to the project root directory
+func getProjectRoot() string {
+	_, filename, _, _ := runtime.Caller(0)
+	// Go up one directory from the cmd directory to get to the project root
+	return filepath.Dir(filepath.Dir(filename))
+}
 
 func initializeConfig(cmd *cobra.Command) error {
 	v := viper.New()
@@ -21,9 +28,8 @@ func initializeConfig(cmd *cobra.Command) error {
 	// Set the base name of the config file, without the file extension.
 	v.SetConfigName(envConfigFileName)
 
-	// Set as many paths as you like where viper should look for the
-	// config file. We are only looking in the current working directory.
-	v.AddConfigPath(envConfigFilePath)
+	// Set the config file path to the absolute path
+	v.AddConfigPath(filepath.Join(getProjectRoot(), "configs"))
 
 	// Attempt to read the config file, gracefully ignoring errors
 	// caused by a config file not being found. Return an error
@@ -33,17 +39,9 @@ func initializeConfig(cmd *cobra.Command) error {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			return err
 		}
+	} else {
+		fmt.Println("Using config file:", v.ConfigFileUsed())
 	}
-
-	// When we bind flags to environment variables expect that the
-	// environment variables are prefixed, e.g. a flag like --number
-	// binds to an environment variable STING_NUMBER. This helps
-	// avoid conflicts.
-	v.SetEnvPrefix(envPrefix)
-
-	// Environment variables can't have dashes in them, so bind them to their equivalent
-	// keys with underscores, e.g. --favorite-color to STING_FAVORITE_COLOR
-	v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 
 	// Bind to environment variables
 	// Works great for simple config names, but needs help for names
@@ -58,13 +56,13 @@ func initializeConfig(cmd *cobra.Command) error {
 
 func bindFlags(cmd *cobra.Command, v *viper.Viper) {
 	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		// Determine the naming convention of the flags when represented in the config file
-		configName := f.Name
-
-		// Apply the viper config value to the flag when the flag is not set and viper has a value
-		if !f.Changed && v.IsSet(configName) {
-			val := v.Get(configName)
+		// Since viper reads config names with an underscore, 
+		// we need to bind the flag name to the environment variable by replacing dashes with underscores.
+		configNameWithUnderscores := strings.ReplaceAll(f.Name, "-", "_")
+		if !f.Changed && v.IsSet(configNameWithUnderscores) {
+			val := v.Get(configNameWithUnderscores)
 			cmd.Flags().Set(f.Name, fmt.Sprintf("%v", val))
+			return
 		}
 	})
 }
