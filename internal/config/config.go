@@ -11,7 +11,7 @@ type Config struct {
 }
 
 type AppConfig struct {
-	Mode string
+	Mode      string
 	SentryKey string
 }
 
@@ -32,8 +32,8 @@ type HorizonConfig struct {
 }
 
 type PricesConfig struct {
-	HorizonURL string
-	DisableTokenPrices bool
+	HorizonURL                     string
+	DisableTokenPrices             bool
 	BatchUpdateDelayMilliseconds   int
 	CalculationTimeoutMilliseconds int
 	UpdateIntervalMilliseconds     int
@@ -42,7 +42,7 @@ type PricesConfig struct {
 }
 
 type BlockaidConfig struct {
-	BlockaidAPIKey string
+	BlockaidAPIKey                         string
 	UseBlockaidDappScanning                bool
 	UseBlockaidTxScanning                  bool
 	UseBlockaidAssetScanning               bool
