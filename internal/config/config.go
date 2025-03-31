@@ -13,8 +13,8 @@ type Config struct {
 type AppConfig struct {
 	FreighterBackendHost string
 	FreighterBackendPort int
-	Mode      string
-	SentryKey string
+	Mode                 string
+	SentryKey            string
 }
 
 type RPCConfig struct {

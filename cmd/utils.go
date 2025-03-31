@@ -5,10 +5,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"github.com/stellar/freighter-backend-v2/internal/logger"
 )
 
 const (
@@ -56,7 +56,7 @@ func initializeConfig(cmd *cobra.Command) error {
 
 func bindFlags(cmd *cobra.Command, v *viper.Viper) {
 	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		// Since viper reads config names with an underscore, 
+		// Since viper reads config names with an underscore,
 		// we need to bind the flag name to the environment variable by replacing dashes with underscores.
 		configNameWithUnderscores := strings.ReplaceAll(f.Name, "-", "_")
 		if !f.Changed && v.IsSet(configNameWithUnderscores) {
