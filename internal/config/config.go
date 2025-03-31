@@ -11,6 +11,8 @@ type Config struct {
 }
 
 type AppConfig struct {
+	FreighterBackendHost string
+	FreighterBackendPort int
 	Mode      string
 	SentryKey string
 }
@@ -24,6 +26,7 @@ type RedisConfig struct {
 	ConnectionName string
 	Host           string
 	Port           int
+	Password       string
 }
 
 type HorizonConfig struct {

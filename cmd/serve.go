@@ -29,6 +29,8 @@ func (s *serveCmd) Command() *cobra.Command {
 	}
 
 	// App Config
+	cmd.Flags().StringVar(&s.cfg.AppConfig.FreighterBackendHost, "freighter-backend-host", "localhost", "The host of the freighter backend server")
+	cmd.Flags().IntVar(&s.cfg.AppConfig.FreighterBackendPort, "freighter-backend-port", 3002, "The port of the freighter backend server")
 	cmd.Flags().StringVar(&s.cfg.AppConfig.Mode, "mode", "development", "The mode of the server")
 	cmd.Flags().StringVar(&s.cfg.AppConfig.SentryKey, "sentry-key", "", "The Sentry key")
 
@@ -44,6 +46,7 @@ func (s *serveCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.cfg.RedisConfig.ConnectionName, "redis-connection-name", "freighter-redis", "The name of the Redis connection")
 	cmd.Flags().StringVar(&s.cfg.RedisConfig.Host, "redis-host", "localhost", "The Redis host")
 	cmd.Flags().IntVar(&s.cfg.RedisConfig.Port, "redis-port", 6379, "The Redis port")
+	cmd.Flags().StringVar(&s.cfg.RedisConfig.Password, "redis-password", "", "Redis password")
 
 	// Prices Config
 	cmd.Flags().BoolVar(&s.cfg.PricesConfig.DisableTokenPrices, "disable-token-prices", false, "Disable token prices")
