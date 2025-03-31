@@ -11,7 +11,6 @@ import (
 )
 
 const (
-	envPrefix         = "FREIGHTER_BACKEND"
 	envConfigFileName = "freighter-backend-config"
 )
 
