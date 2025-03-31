@@ -1,3 +1,2 @@
 check:
 	./scripts/check.sh
-	
