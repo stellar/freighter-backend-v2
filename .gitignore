@@ -1,0 +1,4 @@
+.cursor
+.vscode
+.idea
+*.env
