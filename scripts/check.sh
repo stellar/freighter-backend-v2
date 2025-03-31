@@ -25,4 +25,4 @@ fi
 echo -e "\n=== Running go generate ==="
 ./scripts/gogenerate.sh
 
-echo -e "\n✅ All checks completed successfully" 
+echo -e "\n✅ All checks completed successfully"

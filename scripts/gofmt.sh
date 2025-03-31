@@ -14,4 +14,4 @@ if [ -n "$UNFORMATTED" ]; then
   echo "Code formatting completed."
 else
   echo "✅ All files are properly formatted."
-fi 
+fi

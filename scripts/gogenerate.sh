@@ -5,4 +5,5 @@ set -e
 echo "Running go generate..."
 go generate ./...
 
-echo "✅ Go generate completed successfully" 
+echo "✅ Go generate completed successfully"
+ 

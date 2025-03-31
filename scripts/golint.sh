@@ -12,4 +12,4 @@ fi
 echo "Running staticcheck..."
 staticcheck ./...
 
-echo "✅ Staticcheck completed successfully" 
+echo "✅ Staticcheck completed successfully"
