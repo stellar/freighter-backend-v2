@@ -1,58 +1,14 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
+	"github.com/stellar/freighter-backend-v2/internal/api"
+	"github.com/stellar/freighter-backend-v2/internal/config"
+	"github.com/stellar/freighter-backend-v2/internal/logger"
 )
 
-type AppConfig struct {
-	Mode      string
-	SentryKey string
-}
-
-type RPCConfig struct {
-	RpcPubnetURL  string
-	RpcTestnetURL string
-}
-
-type RedisConfig struct {
-	ConnectionName string
-	Host           string
-	Port           int
-}
-
-type HorizonConfig struct {
-	HorizonPubnetURL  string
-	HorizonTestnetURL string
-}
-
-type PricesConfig struct {
-	HorizonURL                     string
-	DisableTokenPrices             bool
-	BatchUpdateDelayMilliseconds   int
-	CalculationTimeoutMilliseconds int
-	UpdateIntervalMilliseconds     int
-	UpdateBatchSize                int
-	StalenessThreshold             int
-}
-
-type BlockaidConfig struct {
-	BlockaidAPIKey                         string
-	UseBlockaidDappScanning                bool
-	UseBlockaidTxScanning                  bool
-	UseBlockaidAssetScanning               bool
-	UseBlockaidAssetWarningReporting       bool
-	UseBlockaidTransactionWarningReporting bool
-}
-
-type CoinbaseConfig struct {
-	CoinbaseAPIKey    string
-	CoinbaseAPISecret string
-}
-
 type serveCmd struct {
-	cfg *Config
+	cfg *config.Config
 }
 
 func (s *serveCmd) Command() *cobra.Command {
@@ -61,7 +17,11 @@ func (s *serveCmd) Command() *cobra.Command {
 		Short:         "Start the server",
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			return initializeConfig(cmd)
+			if err := initializeConfig(cmd); err != nil {
+				return err
+			}
+			logger.Info("Initializing server with config", "config", s.cfg)
+			return nil
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return s.Run()
@@ -109,6 +69,7 @@ func (s *serveCmd) Command() *cobra.Command {
 }
 
 func (s *serveCmd) Run() error {
-	fmt.Println(s.cfg)
-	return nil
+	logger.Info("Starting API server")
+	server := api.NewApiServer(s.cfg)
+	return server.Start()
 }

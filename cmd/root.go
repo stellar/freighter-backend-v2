@@ -1,20 +1,10 @@
 package cmd
 
 import (
-	"log"
-
 	"github.com/spf13/cobra"
+	"github.com/stellar/freighter-backend-v2/internal/config"
+	"github.com/stellar/freighter-backend-v2/internal/logger"
 )
-
-type Config struct {
-	RpcConfig      RPCConfig
-	RedisConfig    RedisConfig
-	HorizonConfig  HorizonConfig
-	PricesConfig   PricesConfig
-	BlockaidConfig BlockaidConfig
-	CoinbaseConfig CoinbaseConfig
-	AppConfig      AppConfig
-}
 
 // SubCommand defines the interface for all subcommands
 type SubCommand interface {
@@ -29,7 +19,7 @@ var rootCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		err := cmd.Help()
 		if err != nil {
-			log.Fatalf("Error calling help command: %s", err.Error())
+			logger.Error("Error calling help command", "error", err)
 		}
 	},
 }
@@ -41,7 +31,7 @@ func Execute() error {
 func init() {
 	registerSubCommands(
 		&serveCmd{
-			cfg: &Config{},
+			cfg: &config.Config{},
 		},
 	)
 }

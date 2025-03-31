@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"github.com/stellar/freighter-backend-v2/internal/logger"
 )
 
 const (
@@ -39,7 +40,7 @@ func initializeConfig(cmd *cobra.Command) error {
 			return err
 		}
 	} else {
-		fmt.Println("Using config file:", v.ConfigFileUsed())
+		logger.Info("Using config file:", "file", v.ConfigFileUsed())
 	}
 
 	// Bind to environment variables
