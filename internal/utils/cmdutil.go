@@ -16,13 +16,6 @@ const (
 	envConfigFileName = "freighter-backend-config"
 )
 
-// getProjectRoot returns the path to the project root directory
-func getProjectRoot() string {
-	_, filename, _, _ := runtime.Caller(0)
-	// Go up one directory from the cmd directory to get to the project root
-	return filepath.Dir(filepath.Dir(filename))
-}
-
 // InitializeConfig initializes the configuration using viper
 func InitializeConfig(cmd *cobra.Command) error {
 	v := viper.New()
@@ -54,6 +47,13 @@ func InitializeConfig(cmd *cobra.Command) error {
 	bindFlags(cmd, v)
 
 	return nil
+}
+
+// getProjectRoot returns the path to the project root directory
+func getProjectRoot() string {
+	_, filename, _, _ := runtime.Caller(0)
+	// Go up one directory from the cmd directory to get to the project root
+	return filepath.Dir(filepath.Dir(filename))
 }
 
 func bindFlags(cmd *cobra.Command, v *viper.Viper) {
