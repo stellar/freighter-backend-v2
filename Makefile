@@ -12,10 +12,6 @@ docker-build:
 docker-up:
 	docker-compose -f deployments/docker-compose.yml -p freighter-backend up
 
-# Start the containers in detached mode
-docker-up-d:
-	docker-compose -f deployments/docker-compose.yml -p freighter-backend up -d
-
 # Stop the containers
 docker-down:
 	docker-compose -f deployments/docker-compose.yml -p freighter-backend down
@@ -31,6 +27,3 @@ docker-clean:
 
 # Build and start containers in one command
 docker-build-up: docker-build docker-up
-
-# Build and start containers in detached mode
-docker-build-up-d: docker-build docker-up-d
