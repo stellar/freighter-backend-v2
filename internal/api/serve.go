@@ -15,13 +15,19 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/store"
 )
 
+const (
+	DefaultReadTimeout  = 10 * time.Second
+	DefaultWriteTimeout = 10 * time.Second
+	DefaultIdleTimeout  = 120 * time.Second
+	ServerShutdownTimeout = 10 * time.Second
+)
+
 type Service interface {
 	Ping(ctx context.Context) error
 }
 
 type ApiServer struct {
 	cfg *config.Config
-	srv *http.Server
 }
 
 func NewApiServer(cfg *config.Config) *ApiServer {
@@ -58,18 +64,18 @@ func (s *ApiServer) setupHandlers() *http.ServeMux {
 }
 
 func (s *ApiServer) startServer(mux *http.ServeMux) {
-	s.srv = &http.Server{
+	server := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", s.cfg.AppConfig.FreighterBackendHost, s.cfg.AppConfig.FreighterBackendPort),
 		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  DefaultReadTimeout,
+		WriteTimeout: DefaultWriteTimeout,
+		IdleTimeout:  DefaultIdleTimeout,
 	}
 
 	// Start the server in a goroutine
 	go func() {
-		logger.Info("Starting HTTP server", "address", s.srv.Addr)
-		if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logger.Info("Starting HTTP server", "address", server.Addr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("HTTP server error", "error", err)
 		}
 	}()
@@ -81,10 +87,10 @@ func (s *ApiServer) startServer(mux *http.ServeMux) {
 
 	// Graceful shutdown
 	logger.Info("Shutting down server...")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), ServerShutdownTimeout)
 	defer cancel()
 
-	if err := s.srv.Shutdown(ctx); err != nil {
+	if err := server.Shutdown(ctx); err != nil {
 		logger.Error("Server forced to shutdown", "error", err)
 	}
 
