@@ -10,15 +10,16 @@ import (
 	"time"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
+	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/store"
 )
 
 const (
-	DefaultReadTimeout  = 10 * time.Second
-	DefaultWriteTimeout = 10 * time.Second
-	DefaultIdleTimeout  = 120 * time.Second
+	DefaultReadTimeout    = 10 * time.Second
+	DefaultWriteTimeout   = 10 * time.Second
+	DefaultIdleTimeout    = 120 * time.Second
 	ServerShutdownTimeout = 10 * time.Second
 )
 
@@ -40,8 +41,9 @@ func (s *ApiServer) Start() error {
 		return err
 	}
 
-	mux := s.setupHandlers()
-	s.startServer(mux)
+	mux := s.initHandlers()
+	handler := s.initMiddleware(mux)
+	s.startServer(handler)
 	return nil
 }
 
@@ -55,18 +57,26 @@ func (s *ApiServer) initServices() error {
 	return nil
 }
 
-func (s *ApiServer) setupHandlers() *http.ServeMux {
+func (s *ApiServer) initHandlers() *http.ServeMux {
 	mux := http.NewServeMux()
-
-	// Health endpoint
 	mux.HandleFunc("GET /api/v1/ping", handlers.HealthCheckHandler)
 	return mux
 }
 
-func (s *ApiServer) startServer(mux *http.ServeMux) {
+func (s *ApiServer) initMiddleware(mux *http.ServeMux) http.Handler {
+	middlewares := []middleware.Middleware{
+		middleware.LoggingMiddleware(),
+	}
+
+	// Apply the middlewares to the mux
+	handler := middleware.Chain(mux, middlewares...)
+	return handler
+}
+
+func (s *ApiServer) startServer(handler http.Handler) {
 	server := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", s.cfg.AppConfig.FreighterBackendHost, s.cfg.AppConfig.FreighterBackendPort),
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  DefaultReadTimeout,
 		WriteTimeout: DefaultWriteTimeout,
 		IdleTimeout:  DefaultIdleTimeout,
