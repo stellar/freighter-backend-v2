@@ -23,10 +23,6 @@ const (
 	ServerShutdownTimeout = 10 * time.Second
 )
 
-type Service interface {
-	Ping(ctx context.Context) error
-}
-
 type ApiServer struct {
 	cfg *config.Config
 }
