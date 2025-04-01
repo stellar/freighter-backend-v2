@@ -33,7 +33,7 @@ RUN groupadd -r freighter && useradd -r -g freighter freighter && \
     chown -R freighter:freighter /app
 
 # Set default environment variables
-ENV FREIGHTER_BACKEND_HOST=localhost \
+ENV FREIGHTER_BACKEND_HOST=0.0.0.0 \
     FREIGHTER_BACKEND_PORT=3002 \
     REDIS_HOST=redis \
     REDIS_PORT=6379 \
