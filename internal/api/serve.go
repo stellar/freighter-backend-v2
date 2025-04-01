@@ -61,7 +61,8 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 
 func (s *ApiServer) initMiddleware(mux *http.ServeMux) http.Handler {
 	middlewares := []middleware.Middleware{
-		middleware.LoggingMiddleware(),
+		middleware.Logging(),
+		middleware.ResponseHeader(),
 	}
 
 	// Apply the middlewares to the mux
