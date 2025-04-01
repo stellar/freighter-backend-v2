@@ -6,20 +6,19 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/stellar/freighter-backend-v2/internal/config"
 )
 
 type RedisStore struct {
 	redis *redis.Client
 }
 
-func NewRedisStore(cfg *config.Config) (*RedisStore, error) {
-	addr := fmt.Sprintf("%s:%d", cfg.RedisConfig.Host, cfg.RedisConfig.Port)
+func NewRedisStore(host string, port int, password string) (*RedisStore, error) {
+	addr := fmt.Sprintf("%s:%d", host, port)
 
 	return &RedisStore{
 		redis: redis.NewClient(&redis.Options{
 			Addr:     addr,
-			Password: cfg.RedisConfig.Password,
+			Password: password,
 		}),
 	}, nil
 }

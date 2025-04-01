@@ -25,6 +25,7 @@ const (
 
 type ApiServer struct {
 	cfg *config.Config
+	redis *store.RedisStore
 }
 
 func NewApiServer(cfg *config.Config) *ApiServer {
@@ -44,12 +45,12 @@ func (s *ApiServer) Start() error {
 }
 
 func (s *ApiServer) initServices() error {
-	_, err := store.NewRedisStore(s.cfg)
+	redisConn, err := store.NewRedisStore(s.cfg.RedisConfig.Host, s.cfg.RedisConfig.Port, s.cfg.RedisConfig.Password)
 	if err != nil {
 		logger.Error("Failed to initialize Redis store", "error", err)
 		return err
 	}
-
+	s.redis = redisConn
 	return nil
 }
 
