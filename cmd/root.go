@@ -2,8 +2,9 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
+	"github.com/stellar/freighter-backend-v2/cmd/serve"
+	"github.com/stellar/freighter-backend-v2/internal/config"
 )
 
 // SubCommand defines the interface for all subcommands
@@ -29,15 +30,11 @@ func Execute() error {
 }
 
 func init() {
-	registerSubCommands(
-		&serveCmd{
-			cfg: &config.Config{},
+	cmds := []SubCommand{
+		&serve.ServeCmd{
+			Cfg: &config.Config{},
 		},
-	)
-}
-
-// registerCommands registers multiple commands with the root command
-func registerSubCommands(cmds ...SubCommand) {
+	}
 	for _, cmd := range cmds {
 		rootCmd.AddCommand(cmd.Command())
 	}

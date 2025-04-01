@@ -1,14 +1,15 @@
-package cmd
+package utils
 
 import (
 	"fmt"
+	"path/filepath"
+	"runtime"
+	"strings"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
-	"path/filepath"
-	"runtime"
-	"strings"
 )
 
 const (
@@ -22,7 +23,8 @@ func getProjectRoot() string {
 	return filepath.Dir(filepath.Dir(filename))
 }
 
-func initializeConfig(cmd *cobra.Command) error {
+// InitializeConfig initializes the configuration using viper
+func InitializeConfig(cmd *cobra.Command) error {
 	v := viper.New()
 
 	// Set the base name of the config file, without the file extension.
