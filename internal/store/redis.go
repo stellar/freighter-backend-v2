@@ -43,8 +43,3 @@ func (s *RedisStore) Set(ctx context.Context, key string, value interface{}, exp
 func (s *RedisStore) Close() error {
 	return s.redis.Close()
 }
-
-// TSGet retrieves a value from Redis timeseries structure
-func (s *RedisStore) TSGet(ctx context.Context, key string) (redis.TSTimestampValue, error) {
-	return s.redis.TSGet(ctx, key).Result()
-}
