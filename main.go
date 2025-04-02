@@ -7,7 +7,8 @@ import (
 )
 
 func main() {
-	if err := cmd.Execute(); err != nil {
+	rootCmd := cmd.NewRootCmd()
+	if err := rootCmd.Execute(); err != nil {
 		log.Fatalf("Error executing command: %s", err.Error())
 	}
 }

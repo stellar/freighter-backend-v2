@@ -14,7 +14,9 @@ func TestRootCmd_Execute(t *testing.T) {
 
 	// Create a buffer to capture output
 	b := bytes.NewBufferString("")
-	rootCmd.SetOut(b)
+	rootCmd := NewRootCmd()
+	rootCmd.cmd.SetOut(b)
+	rootCmd.cmd.SetArgs([]string{})
 
 	// Test with no arguments (should show help)
 	err := rootCmd.Execute()
@@ -34,10 +36,11 @@ func TestRootCmd_ExecuteWithServeCommand(t *testing.T) {
 
 	// Create a buffer to capture output
 	b := bytes.NewBufferString("")
-	rootCmd.SetOut(b)
+	rootCmd := NewRootCmd()
+	rootCmd.cmd.SetOut(b)
 
 	// Test with serve command
-	rootCmd.SetArgs([]string{"serve", "--help"})
+	rootCmd.cmd.SetArgs([]string{"serve", "--help"})
 	err := rootCmd.Execute()
 	require.NoError(t, err)
 

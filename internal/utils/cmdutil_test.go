@@ -16,43 +16,43 @@ func TestInitializeConfig(t *testing.T) {
 	defaultMode := "development"
 
 	testCases := []struct {
-		name string
-		cliArgs []string
-		envVars map[string]string
+		name              string
+		cliArgs           []string
+		envVars           map[string]string
 		configFileContent string
-		expectedValues map[string]string
-		expectError bool
+		expectedValues    map[string]string
+		expectError       bool
 	}{
 		{
-			name: "Uses command line flags", 
-			cliArgs: []string{"--freighter-backend-host", "test-host", "--freighter-backend-port", "8000", "--mode", "test-mode"}, 
-			envVars: map[string]string{},
+			name:              "Uses command line flags",
+			cliArgs:           []string{"--freighter-backend-host", "test-host", "--freighter-backend-port", "8000", "--mode", "test-mode"},
+			envVars:           map[string]string{},
 			configFileContent: "",
 			expectedValues: map[string]string{
 				"freighter-backend-host": "test-host",
 				"freighter-backend-port": "8000",
-				"mode": "test-mode",
+				"mode":                   "test-mode",
 			},
 			expectError: false,
 		},
 		{
-			name: "Uses environment variables when no command line flags are provided",
+			name:    "Uses environment variables when no command line flags are provided",
 			cliArgs: []string{},
 			envVars: map[string]string{
 				"FREIGHTER_BACKEND_HOST": "test-host",
 				"FREIGHTER_BACKEND_PORT": "8000",
-				"MODE": "test-mode",
+				"MODE":                   "test-mode",
 			},
 			configFileContent: "",
 			expectedValues: map[string]string{
 				"freighter-backend-host": "test-host",
 				"freighter-backend-port": "8000",
-				"mode": "test-mode",
+				"mode":                   "test-mode",
 			},
 			expectError: false,
 		},
 		{
-			name: "Uses config file when no command line flags or environment variables are provided",
+			name:    "Uses config file when no command line flags or environment variables are provided",
 			cliArgs: []string{},
 			envVars: map[string]string{},
 			configFileContent: `
@@ -63,7 +63,7 @@ func TestInitializeConfig(t *testing.T) {
 			expectedValues: map[string]string{
 				"freighter-backend-host": "test-host",
 				"freighter-backend-port": "8000",
-				"mode": "test-mode",
+				"mode":                   "test-mode",
 			},
 			expectError: false,
 		},
@@ -79,12 +79,12 @@ func TestInitializeConfig(t *testing.T) {
 			expectedValues: map[string]string{
 				"freighter-backend-host": "host_from_flag", // Flag wins
 				"freighter-backend-port": "9090",
-				"mode": defaultMode,
+				"mode":                   defaultMode,
 			},
 			expectError: false,
 		},
 		{
-			name: "Returns error when config file is invalid",
+			name:    "Returns error when config file is invalid",
 			envVars: nil,
 			configFileContent: `
 				FREIGHTER_BACKEND_HOST = "config_host"

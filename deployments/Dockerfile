@@ -34,8 +34,7 @@ RUN groupadd -r freighter && useradd -r -g freighter freighter && \
 
 # Add metadata
 LABEL org.opencontainers.image.title="Freighter Backend" \
-      org.opencontainers.image.description="Freighter Backend Service" \
-      org.opencontainers.image.version="1.0.0"
+      org.opencontainers.image.description="Freighter Backend Service"
 
 # Switch to non-root user
 USER freighter

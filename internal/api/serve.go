@@ -24,7 +24,7 @@ const (
 )
 
 type ApiServer struct {
-	cfg *config.Config
+	cfg   *config.Config
 	redis *store.RedisStore
 }
 
