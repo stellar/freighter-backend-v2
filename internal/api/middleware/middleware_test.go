@@ -101,5 +101,6 @@ func TestMiddleware_ResponseHeader(t *testing.T) {
 	chain.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
 }
