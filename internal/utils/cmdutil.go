@@ -2,8 +2,8 @@ package utils
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -13,47 +13,55 @@ import (
 )
 
 const (
-	envConfigFileName = "freighter-backend-config"
+	envConfigFileName = "freighter-backend"
 )
 
 // InitializeConfig initializes the configuration using viper
 func InitializeConfig(cmd *cobra.Command) error {
 	v := viper.New()
 
-	// Set the base name of the config file, without the file extension.
-	v.SetConfigName(envConfigFileName)
+	// Check if a specific config file path was provided via flag
+	configFilePath, _ := cmd.Flags().GetString("config-path")
 
-	// Set the config file path to the absolute path
-	v.AddConfigPath(filepath.Join(getProjectRoot(), "configs"))
-
-	// Attempt to read the config file, gracefully ignoring errors
-	// caused by a config file not being found. Return an error
-	// if we cannot parse the config file.
-	if err := v.ReadInConfig(); err != nil {
-		// It's okay if there isn't a config file
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return err
-		}
+	if configFilePath != "" {
+		// Use the specific config file path provided
+		v.SetConfigFile(configFilePath)
 	} else {
-		logger.Info("Using config file:", "file", v.ConfigFileUsed())
+		// No specific path provided, search in standard locations
+		v.SetConfigName(envConfigFileName) // Name of config file (without extension)
+		v.AddConfigPath(".")               // Search in current directory
+
+		// Search in user's config directory (e.g., ~/.config/freighter-backend)
+		userConfigDir, err := os.UserConfigDir()
+		if err == nil {
+			v.AddConfigPath(filepath.Join(userConfigDir, envConfigFileName))
+		} else {
+			logger.Warn("Could not determine user config directory", "error", err)
+		}
+
+		// Search in system-wide config directory (e.g., /etc/freighter-backend)
+		v.AddConfigPath("/etc/freighter-backend")
 	}
 
-	// Bind to environment variables
-	// Works great for simple config names, but needs help for names
-	// like --favorite-color which we fix in the bindFlags function
+	// Attempt to read the config file.
+	// Viper gracefully handles Not Found errors if no config file is present in searched paths.
+	if err := v.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			return fmt.Errorf("error reading config file: %w", err)
+		}
+		logger.Debug("No config file found or specified. Using defaults/env vars/flags.")
+	} else {
+		logger.Info("Using config file", "path", v.ConfigFileUsed())
+	}
+
+	// Bind to environment variables (e.g., FREIGHTER_BACKEND_PORT)
 	v.AutomaticEnv()
+	v.SetEnvKeyReplacer(strings.NewReplacer("-", "_")) // Match env var format (e.g., freighter-backend-port -> FREIGHTER_BACKEND_PORT)
 
 	// Bind the current command's flags to viper
 	bindFlags(cmd, v)
 
 	return nil
-}
-
-// getProjectRoot returns the path to the project root directory
-func getProjectRoot() string {
-	_, filename, _, _ := runtime.Caller(0)
-	// Go up one directory from the cmd directory to get to the project root
-	return filepath.Dir(filepath.Dir(filename))
 }
 
 func bindFlags(cmd *cobra.Command, v *viper.Viper) {

@@ -29,6 +29,11 @@ func (s *ServeCmd) Command() *cobra.Command {
 		},
 	}
 
+	// Add a persistent flag for the config file path
+	// This needs to be persistent so it's available in PersistentPreRunE
+	var configFilePath string
+	cmd.PersistentFlags().StringVar(&configFilePath, "config-path", "", "Path to config file (e.g., /etc/freighter/config.toml)")
+
 	// App Config
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.FreighterBackendHost, "freighter-backend-host", "localhost", "The host of the freighter backend server")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.FreighterBackendPort, "freighter-backend-port", 3002, "The port of the freighter backend server")
