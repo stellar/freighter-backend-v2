@@ -1,20 +1,11 @@
 package cmd
 
 import (
-	"log"
-
 	"github.com/spf13/cobra"
+	"github.com/stellar/freighter-backend-v2/cmd/serve"
+	"github.com/stellar/freighter-backend-v2/internal/config"
+	"github.com/stellar/freighter-backend-v2/internal/logger"
 )
-
-type Config struct {
-	RpcConfig      RPCConfig
-	RedisConfig    RedisConfig
-	HorizonConfig  HorizonConfig
-	PricesConfig   PricesConfig
-	BlockaidConfig BlockaidConfig
-	CoinbaseConfig CoinbaseConfig
-	AppConfig      AppConfig
-}
 
 // SubCommand defines the interface for all subcommands
 type SubCommand interface {
@@ -22,33 +13,36 @@ type SubCommand interface {
 	Run() error
 }
 
-var rootCmd = &cobra.Command{
-	Use:           "freighter-backend",
-	Short:         "Freighter Backend Server",
-	SilenceErrors: true,
-	Run: func(cmd *cobra.Command, args []string) {
-		err := cmd.Help()
-		if err != nil {
-			log.Fatalf("Error calling help command: %s", err.Error())
-		}
-	},
+type RootCmd struct {
+	cmd *cobra.Command
 }
 
-func Execute() error {
-	return rootCmd.Execute()
-}
-
-func init() {
-	registerSubCommands(
-		&serveCmd{
-			cfg: &Config{},
+func NewRootCmd() *RootCmd {
+	cmd := &cobra.Command{
+		Use:           "freighter-backend",
+		Short:         "Freighter Backend Server",
+		SilenceErrors: true,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := cmd.Help()
+			if err != nil {
+				logger.Error("Error calling help command", "error", err)
+			}
 		},
-	)
+	}
+
+	subcommands := []SubCommand{
+		&serve.ServeCmd{
+			Cfg: &config.Config{},
+		},
+	}
+	for _, subcmd := range subcommands {
+		cmd.AddCommand(subcmd.Command())
+	}
+	return &RootCmd{
+		cmd: cmd,
+	}
 }
 
-// registerCommands registers multiple commands with the root command
-func registerSubCommands(cmds ...SubCommand) {
-	for _, cmd := range cmds {
-		rootCmd.AddCommand(cmd.Command())
-	}
+func (r *RootCmd) Execute() error {
+	return r.cmd.Execute()
 }
