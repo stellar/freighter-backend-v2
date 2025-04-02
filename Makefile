@@ -41,10 +41,10 @@ vet: ## Run go vet checks
 	@echo "==> Running go vet..."
 	go vet ./...
 
-lint: ## Run staticcheck linter (requires: go install honnef.co/go/tools/cmd/staticcheck@latest)
-	@echo "==> Running staticcheck..."
-	@command -v staticcheck >/dev/null 2>&1 || { echo >&2 "ERROR: staticcheck not found. Install it: go install honnef.co/go/tools/cmd/staticcheck@latest"; exit 1; }
-	staticcheck ./...
+lint: ## Run golangci-lint linter (requires: brew install golangci-lint or equivalent)
+	@echo "==> Running golangci-lint..."
+	@command -v golangci-lint >/dev/null 2>&1 || { echo >&2 "ERROR: golangci-lint not found. Install it: https://golangci-lint.run/usage/install/"; exit 1; }
+	golangci-lint run ./...
 
 generate: ## Run go generate
 	@echo "==> Running go generate..."

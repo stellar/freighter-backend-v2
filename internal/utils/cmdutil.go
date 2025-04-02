@@ -71,7 +71,10 @@ func bindFlags(cmd *cobra.Command, v *viper.Viper) {
 		configNameWithUnderscores := strings.ReplaceAll(f.Name, "-", "_")
 		if !f.Changed && v.IsSet(configNameWithUnderscores) {
 			val := v.Get(configNameWithUnderscores)
-			cmd.Flags().Set(f.Name, fmt.Sprintf("%v", val))
+			err := cmd.Flags().Set(f.Name, fmt.Sprintf("%v", val))
+			if err != nil {
+				logger.Error("Error setting flag value", "error", err)
+			}
 			return
 		}
 	})

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMiddleware_Chain(t *testing.T) {
@@ -68,12 +69,14 @@ func TestMiddleware_Logging(t *testing.T) {
 	chain.ServeHTTP(rec, req)
 
 	// Restore logger and read output
-	w.Close()             // Close the writer end of the pipe
+	err := w.Close()
+	require.NoError(t, err)
 	os.Stdout = oldStdout // Restore the real stdout
 
 	// Read captured output from the reader end of the pipe
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, err = io.Copy(&buf, r)
+	require.NoError(t, err)
 	logOutput := buf.String()
 
 	assert.Equal(t, http.StatusOK, rec.Code)

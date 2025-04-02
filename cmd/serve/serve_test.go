@@ -63,8 +63,10 @@ func TestServeCmd_Execute(t *testing.T) {
 		configUsed = true
 
 		// This will print to the buffer you set with cmd.SetOut(b)
-		fmt.Fprintf(cmd.OutOrStdout(), "freighter-backend-host=%s\n", cmd.Flag("freighter-backend-host").Value)
-		fmt.Fprintf(cmd.OutOrStdout(), "mode=%s\n", cmd.Flag("mode").Value)
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "freighter-backend-host=%s\n", cmd.Flag("freighter-backend-host").Value)
+		require.NoError(t, err)
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "mode=%s\n", cmd.Flag("mode").Value)
+		require.NoError(t, err)
 
 		return nil
 	}
