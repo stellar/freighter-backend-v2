@@ -35,7 +35,7 @@ func Logging() Middleware {
 			}
 			next.ServeHTTP(rw, r)
 			duration := time.Since(startTime)
-			logger.Info("Request completed",
+			logger.InfoWithContext(r.Context(), "Request completed",
 				"status", rw.status,
 				"method", r.Method,
 				"url", r.URL.String(),

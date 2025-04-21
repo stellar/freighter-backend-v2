@@ -27,8 +27,7 @@ func Recover() Middleware {
 					panic(err)
 				}
 
-				ctx := r.Context()
-				logger.ErrorWithContext(ctx, "Request panicked",
+				logger.ErrorWithContext(r.Context(), "Request panicked",
 					"status", http.StatusInternalServerError,
 					"error", err,
 					"method", r.Method,
