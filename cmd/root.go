@@ -22,11 +22,12 @@ func NewRootCmd() *RootCmd {
 		Use:           "freighter-backend",
 		Short:         "Freighter Backend Server",
 		SilenceErrors: true,
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			err := cmd.Help()
 			if err != nil {
 				logger.Error("Error calling help command", "error", err)
 			}
+			return nil
 		},
 	}
 
