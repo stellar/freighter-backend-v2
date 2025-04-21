@@ -1,0 +1,6 @@
+.cursor
+.vscode
+.idea
+*.env
+*.toml
+*debug*

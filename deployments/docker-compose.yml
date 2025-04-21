@@ -1,0 +1,63 @@
+services:
+  api:
+    container_name: freighter-backend-api
+    build:
+      context: ../
+      dockerfile: deployments/Dockerfile
+    ports:
+      - "3002:3002"
+    volumes:
+      - ../configs:/app/configs
+    environment:
+      - FREIGHTER_BACKEND_HOST=0.0.0.0
+      - FREIGHTER_BACKEND_PORT=3002
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MODE=development
+    command: ["./freighter-backend", "serve"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:3002/api/v1/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  redis:
+    container_name: freighter-backend-redis
+    image: redis/redis-stack:latest
+    ports:
+      - "6379:6379"
+      - "8001:8001"  # RedisInsight port
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  default:
+    driver: bridge
