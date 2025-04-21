@@ -32,6 +32,8 @@ func Recover() Middleware {
 					"error", err,
 					"method", r.Method,
 					"url", r.URL.String())
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprintln(w, err)
 			}()
 
 			next.ServeHTTP(w, r)

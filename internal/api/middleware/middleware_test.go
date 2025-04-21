@@ -104,3 +104,20 @@ func TestMiddleware_ResponseHeader(t *testing.T) {
 	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
 	assert.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
 }
+
+func TestMiddleware_Recover(t *testing.T) {
+	t.Parallel()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("test panic")
+	})
+	recoverMiddleware := Recover()
+	chain := recoverMiddleware(handler)
+
+	req := httptest.NewRequest("GET", "/", nil)
+	rec := httptest.NewRecorder()
+	chain.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "panic: test panic")
+}
