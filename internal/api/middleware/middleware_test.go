@@ -48,8 +48,6 @@ func TestMiddleware_Chain(t *testing.T) {
 }
 
 func TestMiddleware_Logging(t *testing.T) {
-	t.Parallel()
-
 	// Capture stdout to check log output. This approach has limitations
 	// because it relies on manipulating global state (os.Stdout) and
 	// assumes the global logger hasn't been initialized elsewhere.
