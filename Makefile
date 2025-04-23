@@ -88,11 +88,14 @@ all: tidy check test build ## Run tidy, checks, tests, and build
 # ==================================================================================== #
 # DOCKER OPERATIONS
 # ==================================================================================== #
+# Check if we need to prepend docker commands with sudo
+SUDO := $(shell docker version >/dev/null 2>&1 || echo "sudo")
+
 docker-build-local: ## Build docker image locally using compose
 	docker compose -f deployments/docker-compose.yml -p freighter-backend build
 
 docker-build-tag: ## Build docker image and tag it
-	$(SUDO) DOCKER_BUILDKIT=1 docker build -t $(TAG) -f deployments/Dockerfile --label org.opencontainers.image.created="$(BUILD_TIME)" .
+	$(SUDO) docker build --pull --label org.opencontainers.image.created="$(BUILD_TIME)" -t $(TAG) -f deployments/Dockerfile .
 
 docker-up: ## Start docker containers using compose
 	docker compose -f deployments/docker-compose.yml -p freighter-backend up
