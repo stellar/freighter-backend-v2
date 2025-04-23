@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y tini wget && \
 WORKDIR /app
 
 # Copy binary from builder with explicit permissions
-COPY --from=builder --chmod=755 /bin/freighter-backend /app/
+COPY --from=builder /bin/freighter-backend /app/
 
 # Copy any additional required files (like configs)
 COPY --from=builder /app/freighter-backend/configs ./configs
