@@ -92,12 +92,12 @@ docker-build-local: ## Build docker image locally using compose
 	docker compose -f deployments/docker-compose.yml -p freighter-backend build
 
 docker-build-tag: ## Build docker image and tag it
-	DOCKER_BUILDKIT=1 docker build -t $(TAG) -f deployments/Dockerfile --label org.opencontainers.image.created="$(BUILD_TIME)" .
+	$(SUDO) docker build -t $(TAG) -f deployments/Dockerfile --label org.opencontainers.image.created="$(BUILD_TIME)" .
 
 docker-up: ## Start docker containers using compose
 	docker compose -f deployments/docker-compose.yml -p freighter-backend up
 
 docker-push: ## Push tagged docker image
-	docker push $(TAG)
+	$(SUDO) docker push $(TAG)
 
 docker-build-up: docker-build-local docker-up ## Build locally and start containers
