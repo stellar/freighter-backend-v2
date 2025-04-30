@@ -25,7 +25,7 @@ type Protocol struct {
 	Name        string   `json:"name"`
 	Tags        []string `json:"tags"`
 	URL         string   `json:"website_url"`
-	IconS3Key   string   `json:"icon_s3_key"`
+	IconURL     string   `json:"icon_url"`
 	Description string   `json:"description"`
 	Blacklisted bool     `json:"blacklisted"`
 }
@@ -50,11 +50,14 @@ func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
 	err = json.NewEncoder(w).Encode(protocols)
 	if err != nil {
-		logger.Error(fmt.Sprintf("Failed to encode protocols to JSON response: %v", err))
+		errString := fmt.Sprintf("Failed to encode protocols to JSON response: %v", err)
+		logger.Error(errString)
+		http.Error(w, errString, http.StatusInternalServerError)
+		return
 	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 }
