@@ -22,12 +22,12 @@ func NewProtocolsHandler(protocolsConfigPath string) *ProtocolsHandler {
 }
 
 type Protocol struct {
-	Name        string   `json:"name"`
-	Tags        []string `json:"tags"`
-	URL         string   `json:"website_url"`
-	IconURL     string   `json:"icon_url"`
-	Description string   `json:"description"`
-	Blacklisted bool     `json:"blacklisted"`
+	Name          string   `json:"name"`
+	Tags          []string `json:"tags"`
+	URL           string   `json:"website_url"`
+	IconURL       string   `json:"icon_url"`
+	Description   string   `json:"description"`
+	IsBlacklisted bool     `json:"is_blacklisted"`
 }
 
 // GetProtocols handles requests to fetch the list of supported protocols.
@@ -59,5 +59,6 @@ func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
 }
