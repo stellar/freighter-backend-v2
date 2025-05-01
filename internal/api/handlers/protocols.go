@@ -30,6 +30,10 @@ type Protocol struct {
 	IsBlacklisted bool     `json:"is_blacklisted"`
 }
 
+type GetProtocolsResponse struct {
+	Data []Protocol `json:"data"`
+}
+
 // GetProtocols handles requests to fetch the list of supported protocols.
 // It reads the protocol information based on the configured path.
 func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +54,11 @@ func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	err = json.NewEncoder(w).Encode(protocols)
+	response := GetProtocolsResponse{
+		Data: protocols,
+	}
+
+	err = json.NewEncoder(w).Encode(response)
 	if err != nil {
 		errString := fmt.Sprintf("Failed to encode protocols to JSON response: %v", err)
 		logger.Error(errString)
