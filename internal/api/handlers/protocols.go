@@ -38,10 +38,12 @@ type GetProtocolsResponse struct {
 // GetProtocols handles requests to fetch the list of supported protocols.
 // It reads the protocol information based on the configured path.
 func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
+
 	data, err := os.ReadFile(h.protocolsConfigPath)
 	if err != nil {
 		errStr := fmt.Sprintf("failed to read protocols config: %v", err)
-		logger.Error(errStr)
+		logger.ErrorWithContext(ctx, errStr)
 		return WithHttpStatus(errors.New(errStr), http.StatusInternalServerError)
 	}
 
@@ -49,7 +51,7 @@ func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) 
 	err = json.Unmarshal(data, &protocols)
 	if err != nil {
 		errStr := fmt.Sprintf("failed to unmarshal protocols config: %v", err)
-		logger.Error(errStr)
+		logger.ErrorWithContext(ctx, errStr)
 		return WithHttpStatus(errors.New(errStr), http.StatusInternalServerError)
 	}
 
@@ -60,7 +62,7 @@ func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) 
 	err = json.NewEncoder(w).Encode(response)
 	if err != nil {
 		errStr := fmt.Sprintf("failed to encode protocols to JSON response: %v", err)
-		logger.Error(errStr)
+		logger.ErrorWithContext(ctx, errStr)
 		return WithHttpStatus(errors.New(errStr), http.StatusInternalServerError)
 	}
 	return nil

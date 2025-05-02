@@ -1,16 +1,20 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 )
 
-func HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
+func HealthCheckHandler(w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
+
 	_, err := w.Write([]byte("OK"))
 	if err != nil {
-		logger.Error("Error writing health check response", "error", err)
+		errStr := fmt.Sprintf("writing health check response: %v", err)
+		logger.ErrorWithContext(ctx, errStr)
+		return WithHttpStatus(err, http.StatusInternalServerError)
 	}
+	return nil
 }

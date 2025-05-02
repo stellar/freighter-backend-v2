@@ -12,7 +12,7 @@ func CustomHandler(f HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		err := f(w, r)
 		if err != nil {
-			var status int
+			status := http.StatusInternalServerError
 			var apiError *Error
 			if errors.As(err, &apiError) {
 				status = apiError.HttpStatus()

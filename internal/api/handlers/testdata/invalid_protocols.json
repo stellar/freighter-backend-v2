@@ -1,0 +1,10 @@
+[
+    {
+      "name": "Blend"
+      "tags": ["Lending", "Borrowing"],
+      "website_url": "https://mainnet.blend.capital/",
+      "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/blend.svg",
+      "description": "Blend is a DeFi protocol that allows any entity to create or utilize an immutable lending market that fits its needs.",
+      "is_blacklisted": false
+    }
+]
