@@ -26,7 +26,6 @@ const (
 type ApiServer struct {
 	cfg             *config.Config
 	redis           *store.RedisStore
-	protocolsHandler *handlers.ProtocolsHandler
 }
 
 func NewApiServer(cfg *config.Config) *ApiServer {
@@ -52,15 +51,15 @@ func (s *ApiServer) initServices() error {
 		return err
 	}
 	s.redis = redisConn
-	s.protocolsHandler = handlers.NewProtocolsHandler(s.cfg.AppConfig.ProtocolsConfigPath)
-
 	return nil
 }
 
 func (s *ApiServer) initHandlers() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/ping", handlers.HealthCheckHandler)
-	mux.HandleFunc("GET /api/v1/protocols", s.protocolsHandler.GetProtocols)
+
+	protocolsHandler := handlers.NewProtocolsHandler(s.cfg.AppConfig.ProtocolsConfigPath)
+	mux.HandleFunc("GET /api/v1/protocols", handlers.CustomHandler(protocolsHandler.GetProtocols))
 	return mux
 }
 

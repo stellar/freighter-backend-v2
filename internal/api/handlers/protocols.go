@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -36,22 +37,20 @@ type GetProtocolsResponse struct {
 
 // GetProtocols handles requests to fetch the list of supported protocols.
 // It reads the protocol information based on the configured path.
-func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) {
+func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) error {
 	data, err := os.ReadFile(h.protocolsConfigPath)
 	if err != nil {
-		errString := fmt.Sprintf("Failed to read protocols config: %v", err)
-		logger.Error(errString)
-		http.Error(w, errString, http.StatusInternalServerError)
-		return
+		errStr := fmt.Sprintf("failed to read protocols config: %v", err)
+		logger.Error(errStr)
+		return WithHttpStatus(errors.New(errStr), http.StatusInternalServerError)
 	}
 
 	var protocols []Protocol
 	err = json.Unmarshal(data, &protocols)
 	if err != nil {
-		errString := fmt.Sprintf("Failed to unmarshal protocols config: %v", err)
-		logger.Error(errString)
-		http.Error(w, errString, http.StatusInternalServerError)
-		return
+		errStr := fmt.Sprintf("failed to unmarshal protocols config: %v", err)
+		logger.Error(errStr)
+		return WithHttpStatus(errors.New(errStr), http.StatusInternalServerError)
 	}
 
 	response := GetProtocolsResponse{
@@ -60,13 +59,9 @@ func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) 
 
 	err = json.NewEncoder(w).Encode(response)
 	if err != nil {
-		errString := fmt.Sprintf("Failed to encode protocols to JSON response: %v", err)
-		logger.Error(errString)
-		http.Error(w, errString, http.StatusInternalServerError)
-		return
+		errStr := fmt.Sprintf("failed to encode protocols to JSON response: %v", err)
+		logger.Error(errStr)
+		return WithHttpStatus(errors.New(errStr), http.StatusInternalServerError)
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.WriteHeader(http.StatusOK)
+	return nil
 }

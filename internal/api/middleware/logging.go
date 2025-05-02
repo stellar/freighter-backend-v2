@@ -35,11 +35,19 @@ func Logging() Middleware {
 			}
 			next.ServeHTTP(rw, r)
 			duration := time.Since(startTime)
-			logger.InfoWithContext(r.Context(), "Request completed",
-				"status", rw.status,
-				"method", r.Method,
-				"url", r.URL.String(),
-				"duration", duration)
+			if rw.status >= 400 {
+				logger.ErrorWithContext(r.Context(), "Request completed",
+					"status", rw.status,
+					"method", r.Method,
+					"url", r.URL.String(),
+					"duration", duration)
+			} else {
+				logger.InfoWithContext(r.Context(), "Request completed",
+					"status", rw.status,
+					"method", r.Method,
+					"url", r.URL.String(),
+					"duration", duration)
+			}
 		})
 	}
 }
