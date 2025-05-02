@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -14,7 +15,7 @@ func HealthCheckHandler(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		errStr := fmt.Sprintf("writing health check response: %v", err)
 		logger.ErrorWithContext(ctx, errStr)
-		return WithHttpStatus(err, http.StatusInternalServerError)
+		return WithHttpStatus(errors.New(errStr), http.StatusInternalServerError)
 	}
 	return nil
 }
