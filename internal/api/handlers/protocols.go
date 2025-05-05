@@ -1,12 +1,12 @@
 package handlers
 
 import (
-	"errors"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 
+	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 )
 
@@ -44,7 +44,7 @@ func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		errStr := fmt.Sprintf("failed to read protocols config: %v", err)
 		logger.ErrorWithContext(ctx, errStr)
-		return WithHttpStatus(errors.New(errStr), http.StatusInternalServerError)
+		return httperror.NewHttpError(errStr, err, http.StatusInternalServerError, nil)
 	}
 
 	var protocols []Protocol
@@ -52,7 +52,7 @@ func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		errStr := fmt.Sprintf("failed to unmarshal protocols config: %v", err)
 		logger.ErrorWithContext(ctx, errStr)
-		return WithHttpStatus(errors.New(errStr), http.StatusInternalServerError)
+		return httperror.NewHttpError(errStr, err, http.StatusInternalServerError, nil)
 	}
 
 	response := GetProtocolsResponse{
@@ -63,7 +63,7 @@ func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		errStr := fmt.Sprintf("failed to encode protocols to JSON response: %v", err)
 		logger.ErrorWithContext(ctx, errStr)
-		return WithHttpStatus(errors.New(errStr), http.StatusInternalServerError)
+		return httperror.NewHttpError(errStr, err, http.StatusInternalServerError, nil)
 	}
 	return nil
 }
