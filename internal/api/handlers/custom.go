@@ -3,6 +3,8 @@ package handlers
 import (
 	"errors"
 	"net/http"
+
+	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 )
 
 type HandlerFunc func(w http.ResponseWriter, r *http.Request) error
@@ -12,12 +14,11 @@ func CustomHandler(f HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		err := f(w, r)
 		if err != nil {
-			status := http.StatusInternalServerError
-			var apiError *Error
-			if errors.As(err, &apiError) {
-				status = apiError.HttpStatus()
+			var apiError *httperror.HttpError
+			if !errors.As(err, &apiError) {
+				apiError = httperror.NewHttpError(err.Error(), err, http.StatusInternalServerError, nil)
 			}
-			http.Error(w, err.Error(), status)
+			apiError.Render(w)
 		}
 	}
 }
