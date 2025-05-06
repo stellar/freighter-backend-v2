@@ -15,6 +15,7 @@ type AppConfig struct {
 	FreighterBackendPort int
 	Mode                 string
 	SentryKey            string
+	ProtocolsConfigPath  string
 }
 
 type RPCConfig struct {
