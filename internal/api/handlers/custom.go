@@ -9,6 +9,10 @@ import (
 
 type HandlerFunc func(w http.ResponseWriter, r *http.Request) error
 
+type HttpResponse struct {
+	Data any `json:"data"`
+}
+
 // CustomHandler is a wrapper that allows us to process and return errors from different handlers.
 func CustomHandler(f HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
