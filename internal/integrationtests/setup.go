@@ -10,6 +10,7 @@ import (
 type TestConfig struct {
 	TestName      string
 	RunInParallel bool
+	envVars       map[string]string
 }
 
 type integrationTestSuite struct {
@@ -29,13 +30,7 @@ func (s *integrationTestSuite) SetupTest() {
 	}
 	s.stack = stack
 
-	err = s.stack.WithEnv(map[string]string{
-		"FREIGHTER_BACKEND_HOST": "0.0.0.0",
-		"FREIGHTER_BACKEND_PORT": "3002",
-		"REDIS_HOST":             "redis",
-		"REDIS_PORT":             "6379",
-		"MODE":                   "development",
-	}).Up(context.Background(), compose.Wait(true))
+	err = s.stack.WithEnv(s.cfg.envVars).Up(context.Background(), compose.Wait(true))
 	if err != nil {
 		s.t.Fatalf("failed to start docker compose stack: %v", err)
 	}
@@ -48,18 +43,6 @@ func (s *integrationTestSuite) TearDownTest() {
 			s.t.Logf("failed to tear down docker compose stack: %v", err)
 		}
 	}
-}
-
-func (s *integrationTestSuite) GetAPIContainerIP() string {
-	container, err := s.stack.ServiceContainer(context.Background(), "api")
-	if err != nil {
-		s.t.Fatalf("failed to get service container: %v", err)
-	}
-	ip, err := container.ContainerIP(context.Background())
-	if err != nil {
-		s.t.Fatalf("failed to get host: %v", err)
-	}
-	return ip
 }
 
 func NewIntegrationTestSuite(t *testing.T, cfg *TestConfig) *integrationTestSuite {
