@@ -1,0 +1,26 @@
+[
+    {
+      "name": "Blend",
+      "tags": ["Lending", "Borrowing"],
+      "website_url": "https://mainnet.blend.capital/",
+      "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/blend.svg",
+      "description": "Blend is a DeFi protocol that allows any entity to create or utilize an immutable lending market that fits its needs.",
+      "is_blacklisted": false
+    },
+    {
+      "name": "Phoenix",
+      "tags": ["DEX", "AMM"],
+      "website_url": "https://app.phoenix-hub.io/",
+      "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/phoenix.png",
+      "description": "Empowered by Soroban's technology, Phoenix is pioneering the ultimate DeFi Hub within Stellar's vibrant ecosystem. We're forging synergistic protocols, starting with a cutting-edge DEX, to deliver the tastiest DeFi experience imaginable.",
+      "is_blacklisted": false
+    },
+    {
+      "name": "Allbridge Core",
+      "tags": ["Bridge", "Cross-chain"],
+      "website_url": "https://allbridge.io/core",
+      "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/allbridge-core.png",
+      "description": "Allbridge Core offers a native stablecoin bridging experience, enabling seamless cross-chain swaps between EVM and non-EVM blockchains.",
+      "is_blacklisted": false
+    }
+]
