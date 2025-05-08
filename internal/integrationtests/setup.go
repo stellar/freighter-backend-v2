@@ -2,8 +2,10 @@ package integrationtests
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
+	"github.com/docker/go-connections/nat"
 	"github.com/testcontainers/testcontainers-go/modules/compose"
 )
 
@@ -43,6 +45,22 @@ func (s *integrationTestSuite) TearDownTest() {
 			s.t.Logf("failed to tear down docker compose stack: %v", err)
 		}
 	}
+}
+
+func (s *integrationTestSuite) GetBaseURL() string {
+	container, err := s.stack.ServiceContainer(context.Background(), "api")
+	if err != nil {
+		s.t.Fatalf("failed to get service container: %v", err)
+	}
+	host, err := container.Host(context.Background())
+	if err != nil {
+		s.t.Fatalf("failed to get service container host: %v", err)
+	}
+	port, err := container.MappedPort(context.Background(), nat.Port("3002"))
+	if err != nil {
+		s.t.Fatalf("failed to get service container port: %v", err)
+	}
+	return fmt.Sprintf("http://%s:%s", host, port.Port())
 }
 
 func NewIntegrationTestSuite(t *testing.T, cfg *TestConfig) *integrationTestSuite {

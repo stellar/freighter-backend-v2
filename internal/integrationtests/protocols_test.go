@@ -2,6 +2,7 @@ package integrationtests
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -16,7 +17,7 @@ type testHTTPError struct {
 	Message       string                 `json:"message"`
 	OriginalError json.RawMessage        `json:"originalError,omitempty"`
 	StatusCode    int                    `json:"statusCode"`
-	Extras        map[string]interface{} `json:"extras,omitempty"`
+	Extras        map[string]any `json:"extras,omitempty"`
 }
 
 func TestGetProtocols(t *testing.T) {
@@ -31,7 +32,8 @@ func TestGetProtocols(t *testing.T) {
 		testSuite.SetupTest()
 		defer testSuite.TearDownTest()
 
-		resp, err := http.Get("http://localhost:3002/api/v1/protocols")
+		baseURL := testSuite.GetBaseURL()
+		resp, err := http.Get(fmt.Sprintf("%s/api/v1/protocols", baseURL))
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -70,7 +72,8 @@ func TestGetProtocols(t *testing.T) {
 		testSuite.SetupTest()
 		defer testSuite.TearDownTest()
 
-		resp, err := http.Get("http://localhost:3002/api/v1/protocols")
+		baseURL := testSuite.GetBaseURL()
+		resp, err := http.Get(fmt.Sprintf("%s/api/v1/protocols", baseURL))
 		require.NoError(t, err)
 		require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 

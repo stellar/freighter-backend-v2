@@ -4,7 +4,7 @@ services:
       context: ../
       dockerfile: deployments/Dockerfile
     ports:
-      - "3002:3002"
+      - "3002"
     volumes:
       - ../internal/integrationtests/infrastructure/testdata:/app/config
     command: ["./freighter-backend", "serve"]
