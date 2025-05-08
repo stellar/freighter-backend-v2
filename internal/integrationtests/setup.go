@@ -3,6 +3,7 @@ package integrationtests
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/docker/go-connections/nat"
@@ -64,6 +65,9 @@ func (s *integrationTestSuite) GetBaseURL() string {
 }
 
 func NewIntegrationTestSuite(t *testing.T, cfg *TestConfig) *integrationTestSuite {
+	if os.Getenv("ENABLE_INTEGRATION_TESTS") != "true" {
+		t.Skip("Skipping integration tests...")
+	}
 	testSuite := &integrationTestSuite{
 		t:   t,
 		cfg: cfg,
