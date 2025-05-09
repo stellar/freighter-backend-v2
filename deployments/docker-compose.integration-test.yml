@@ -1,5 +1,6 @@
 services:
   api:
+    image: freighter-backend-integration:latest
     build:
       context: ../
       dockerfile: deployments/Dockerfile
