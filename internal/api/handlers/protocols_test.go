@@ -45,20 +45,24 @@ func TestGetProtocols(t *testing.T) {
 		err := handler.GetProtocols(rr, req)
 		require.NoError(t, err)
 
-		var response GetProtocolsResponse
+		type expectedResponse struct {
+			Data GetProtocolsPayload `json:"data"`
+		}
+		var response expectedResponse
 		err = json.Unmarshal(rr.Body.Bytes(), &response)
 		require.NoError(t, err)
+		protocols := response.Data.Protocols
 
 		assert.Equal(t, http.StatusOK, rr.Code)
-		assert.Equal(t, 3, len(response.Data))
-		assert.Equal(t, "Blend", response.Data[0].Name)
-		assert.Equal(t, []string{"Lending", "Borrowing"}, response.Data[0].Tags)
-		assert.Equal(t, "https://mainnet.blend.capital/", response.Data[0].URL)
-		assert.Equal(t, "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/blend.svg", response.Data[0].IconURL)
-		assert.Equal(t, "Blend is a DeFi protocol that allows any entity to create or utilize an immutable lending market that fits its needs.", response.Data[0].Description)
-		assert.Equal(t, false, response.Data[0].IsBlacklisted)
-		assert.Equal(t, "Phoenix", response.Data[1].Name)
-		assert.Equal(t, "Allbridge Core", response.Data[2].Name)
+		assert.Equal(t, 3, len(protocols))
+		assert.Equal(t, "Blend", protocols[0].Name)
+		assert.Equal(t, []string{"Lending", "Borrowing"}, protocols[0].Tags)
+		assert.Equal(t, "https://mainnet.blend.capital/", protocols[0].URL)
+		assert.Equal(t, "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/blend.svg", protocols[0].IconURL)
+		assert.Equal(t, "Blend is a DeFi protocol that allows any entity to create or utilize an immutable lending market that fits its needs.", protocols[0].Description)
+		assert.Equal(t, false, protocols[0].IsBlacklisted)
+		assert.Equal(t, "Phoenix", protocols[1].Name)
+		assert.Equal(t, "Allbridge Core", protocols[2].Name)
 	})
 	t.Run("should return error if protocols file is not found", func(t *testing.T) {
 		t.Parallel()
@@ -67,7 +71,7 @@ func TestGetProtocols(t *testing.T) {
 		rr := httptest.NewRecorder()
 		err := handler.GetProtocols(rr, req)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to read protocols config")
+		assert.Equal(t, ErrFailedToReadProtocolsConfig.ClientMessage, err.Error())
 	})
 	t.Run("should return error if protocols file is invalid", func(t *testing.T) {
 		t.Parallel()
@@ -76,7 +80,7 @@ func TestGetProtocols(t *testing.T) {
 		rr := httptest.NewRecorder()
 		err := handler.GetProtocols(rr, req)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to unmarshal protocols config")
+		assert.Equal(t, ErrFailedToUnmarshalProtocolsConfig.ClientMessage, err.Error())
 	})
 	t.Run("should return error on encoding failure", func(t *testing.T) {
 		t.Parallel()
@@ -85,6 +89,6 @@ func TestGetProtocols(t *testing.T) {
 		w := newErrorResponseWriter() // Use the erroring writer
 		err := handler.GetProtocols(w, req)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to encode protocols to JSON response")
+		assert.Equal(t, ErrFailedToEncodeProtocolsToJSONResponse.ClientMessage, err.Error())
 	})
 }

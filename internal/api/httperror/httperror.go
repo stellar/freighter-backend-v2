@@ -6,6 +6,11 @@ import (
 	"github.com/stellar/go/support/render/httpjson"
 )
 
+type ErrorMessage struct {
+	LogMessage string `json:"logMessage"`
+	ClientMessage string `json:"clientMessage"`
+}
+
 type HttpError struct {
 	Message    string                 `json:"message"`
 	Err        error                  `json:"originalError,omitempty"`
