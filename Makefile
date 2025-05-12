@@ -50,7 +50,46 @@ generate: ## Run go generate
 	@echo "==> Running go generate..."
 	go generate ./...
 
-check: fmt vet lint generate ## Run all checks (format, vet, lint, generate)
+shadow: ## Run shadow analysis to find shadowed variables
+	@echo "==> Running shadow analyzer..."
+	@command -v shadow >/dev/null 2>&1 || { go install golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow@v0.31.0; }
+	shadow ./...
+
+exhaustive: ## Check exhaustiveness of switch statements
+	@echo "==> Running exhaustive..."
+	@command -v exhaustive >/dev/null 2>&1 || { go install github.com/nishanths/exhaustive/cmd/exhaustive@v0.12.0; }
+	exhaustive -default-signifies-exhaustive ./...
+
+deadcode: ## Find unused code
+	@echo "==> Checking for deadcode..."
+	@command -v deadcode >/dev/null 2>&1 || { go install golang.org/x/tools/cmd/deadcode@v0.31.0; }
+	@output=$$(deadcode -test ./...); \
+	if [ -n "$$output" ]; then \
+		echo "🚨 Deadcode found:"; \
+		echo "$$output"; \
+		exit 1; \
+	else \
+		echo "✅ No deadcode found"; \
+	fi
+
+goimports: ## Check import formatting and organization
+	@echo "==> Checking imports..."
+	@command -v goimports >/dev/null 2>&1 || { go install golang.org/x/tools/cmd/goimports@v0.31.0; }
+	@non_compliant_files=$$(find . -type f -name "*.go" ! -path "*mock*" | xargs goimports -local "github.com/stellar/stellar-disbursement-platform-backend" -l); \
+	if [ -n "$$non_compliant_files" ]; then \
+		echo "🚨 The following files are not compliant with goimports:"; \
+		echo "$$non_compliant_files"; \
+		exit 1; \
+	else \
+		echo "✅ All files are compliant with goimports."; \
+	fi
+
+govulncheck: ## Check for known vulnerabilities
+	@echo "==> Running vulnerability check..."
+	@command -v govulncheck >/dev/null 2>&1 || { go install golang.org/x/vuln/cmd/govulncheck@latest; }
+	govulncheck ./...
+
+check: fmt vet lint generate shadow exhaustive deadcode goimports govulncheck ## Run all checks
 	@echo "✅ All checks completed successfully"
 
 # ==================================================================================== #
