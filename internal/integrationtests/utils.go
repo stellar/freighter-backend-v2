@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/log"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
@@ -28,19 +29,14 @@ func (c *freighterBackendContainer) GetConnectionString(ctx context.Context) (st
 	return fmt.Sprintf("http://%s:%s", host, port.Port()), nil
 }
 
-func NewFreighterBackendContainer(t *testing.T) *freighterBackendContainer {
+func NewFreighterBackendContainer(t *testing.T, name string, tag string) *freighterBackendContainer {
 	containerRequest := testcontainers.ContainerRequest{
-		Name: "freighter-backend-integration-test",
+		Name: name,
 		FromDockerfile: testcontainers.FromDockerfile{
 			Context:    "../../",
 			Dockerfile: "deployments/Dockerfile",
 			KeepImage:  true,
-		},
-		Files: []testcontainers.ContainerFile{
-			{
-				HostFilePath:      "../../internal/integrationtests/infrastructure/testdata/protocols.json",
-				ContainerFilePath: "/app/config/protocols.json",
-			},
+			Tag:        tag,
 		},
 		Cmd:          []string{"./freighter-backend", "serve"},
 		ExposedPorts: []string{"3002/tcp"},
@@ -56,8 +52,9 @@ func NewFreighterBackendContainer(t *testing.T) *freighterBackendContainer {
 
 	container, err := testcontainers.GenericContainer(context.Background(), testcontainers.GenericContainerRequest{
 		ContainerRequest: containerRequest,
-		Reuse:            true,
+		Reuse:            false,
 		Started:          true,
+		Logger:           log.TestLogger(t),
 	})
 	if err != nil {
 		t.Fatalf("failed to create freighter backend container: %v", err)
