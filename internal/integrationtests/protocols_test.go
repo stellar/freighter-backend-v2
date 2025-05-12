@@ -34,7 +34,7 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 	container := NewFreighterBackendContainer(t, "protocols-test-200-status-code", "protocols-integration-test")
 	err := container.CopyFileToContainer(
 		ctx,
-		"../../internal/integrationtests/infrastructure/testdata/protocols.json",
+		"../../internal/integrationtests/testdata/protocols.json",
 		"/app/config/protocols.json",
 		0644,
 	)
@@ -84,7 +84,7 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns500StatusCodeForInvalidProto
 	container := NewFreighterBackendContainer(t, "protocols-test-500-status-code", "protocols-integration-test")
 	err := container.CopyFileToContainer(
 		ctx,
-		"../../internal/integrationtests/infrastructure/testdata/invalid_protocols.json",
+		"../../internal/integrationtests/testdata/invalid_protocols.json",
 		"/app/config/protocols.json",
 		0644,
 	)
