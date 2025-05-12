@@ -7,10 +7,12 @@ import (
 	"net/http"
 
 	"context"
-	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 )
 
 // testHTTPError is a local struct for unmarshaling HTTP error responses in tests.
@@ -39,7 +41,7 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 	require.NoError(t, err)
 
 	defer func() {
-		err := container.Terminate(ctx)
+		err = container.Terminate(ctx)
 		require.NoError(t, err)
 	}()
 
@@ -88,7 +90,7 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns500StatusCodeForInvalidProto
 	)
 	require.NoError(t, err)
 	defer func() {
-		err := container.Terminate(ctx)
+		err = container.Terminate(ctx)
 		require.NoError(t, err)
 	}()
 

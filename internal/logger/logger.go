@@ -91,14 +91,6 @@ func InfoWithContext(ctx context.Context, msg string, args ...any) {
 	Global().InfoContext(ctx, msg, args...)
 }
 
-func DebugWithContext(ctx context.Context, msg string, args ...any) {
-	Global().DebugContext(ctx, msg, args...)
-}
-
-func WarnWithContext(ctx context.Context, msg string, args ...any) {
-	Global().WarnContext(ctx, msg, args...)
-}
-
 func ErrorWithContext(ctx context.Context, msg string, args ...any) {
 	Global().ErrorContext(ctx, msg, args...)
 }
