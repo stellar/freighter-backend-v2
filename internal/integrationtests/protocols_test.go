@@ -39,7 +39,7 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 	require.NoError(t, err)
 
 	defer func() {
-		err := container.Terminate(ctx)
+		err = container.Terminate(ctx)
 		require.NoError(t, err)
 	}()
 
@@ -88,7 +88,7 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns500StatusCodeForInvalidProto
 	)
 	require.NoError(t, err)
 	defer func() {
-		err := container.Terminate(ctx)
+		err = container.Terminate(ctx)
 		require.NoError(t, err)
 	}()
 

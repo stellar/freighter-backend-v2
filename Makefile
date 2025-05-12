@@ -52,13 +52,16 @@ generate: ## Run go generate
 
 shadow: ## Run shadow analysis to find shadowed variables
 	@echo "==> Running shadow analyzer..."
-	@command -v shadow >/dev/null 2>&1 || { go install golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow@v0.31.0; }
-	shadow ./...
+	@if ! command -v shadow >/dev/null 2>&1; then \
+		echo "Installing shadow..."; \
+		go install golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow@v0.31.0; \
+	fi
+	$(shell go env GOPATH)/bin/shadow ./...
 
 exhaustive: ## Check exhaustiveness of switch statements
 	@echo "==> Running exhaustive..."
 	@command -v exhaustive >/dev/null 2>&1 || { go install github.com/nishanths/exhaustive/cmd/exhaustive@v0.12.0; }
-	exhaustive -default-signifies-exhaustive ./...
+	$(shell go env GOPATH)/bin/exhaustive -default-signifies-exhaustive ./...
 
 deadcode: ## Find unused code
 	@echo "==> Checking for deadcode..."
@@ -87,7 +90,7 @@ goimports: ## Check import formatting and organization
 govulncheck: ## Check for known vulnerabilities
 	@echo "==> Running vulnerability check..."
 	@command -v govulncheck >/dev/null 2>&1 || { go install golang.org/x/vuln/cmd/govulncheck@latest; }
-	govulncheck ./...
+	$(shell go env GOPATH)/bin/govulncheck ./...
 
 check: fmt vet lint generate shadow exhaustive deadcode goimports govulncheck ## Run all checks
 	@echo "✅ All checks completed successfully"
