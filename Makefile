@@ -65,8 +65,11 @@ exhaustive: ## Check exhaustiveness of switch statements
 
 deadcode: ## Find unused code
 	@echo "==> Checking for deadcode..."
-	@command -v deadcode >/dev/null 2>&1 || { go install golang.org/x/tools/cmd/deadcode@v0.31.0; }
-	@output=$$(deadcode -test ./...); \
+	@if ! command -v deadcode >/dev/null 2>&1; then \
+		echo "Installing deadcode..."; \
+		go install golang.org/x/tools/cmd/deadcode@v0.31.0; \
+	fi
+	@output=$$($(shell go env GOPATH)/bin/deadcode -test ./...); \
 	if [ -n "$$output" ]; then \
 		echo "🚨 Deadcode found:"; \
 		echo "$$output"; \
@@ -78,7 +81,7 @@ deadcode: ## Find unused code
 goimports: ## Check import formatting and organization
 	@echo "==> Checking imports..."
 	@command -v goimports >/dev/null 2>&1 || { go install golang.org/x/tools/cmd/goimports@v0.31.0; }
-	@non_compliant_files=$$(find . -type f -name "*.go" ! -path "*mock*" | xargs goimports -local "github.com/stellar/stellar-disbursement-platform-backend" -l); \
+	@non_compliant_files=$$(find . -type f -name "*.go" ! -path "*mock*" | xargs goimports -local "github.com/stellar/freighter-backend-v2" -l); \
 	if [ -n "$$non_compliant_files" ]; then \
 		echo "🚨 The following files are not compliant with goimports:"; \
 		echo "$$non_compliant_files"; \
