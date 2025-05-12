@@ -26,6 +26,42 @@ jobs:
 
       - name: Run govulncheck
         uses: golang/govulncheck-action@v1
+      
+      - name: Run `shadow@v0.31.0`
+        run: |
+            go install golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow@v0.31.0
+            shadow ./...
+
+      - name: Run `exhaustive@v0.12.0`
+        run: |
+          go install github.com/nishanths/exhaustive/cmd/exhaustive@v0.12.0
+          exhaustive -default-signifies-exhaustive ./...
+
+      - name: Run `deadcode@v0.31.0`
+        run: |
+          go install golang.org/x/tools/cmd/deadcode@v0.31.0
+          output=$(deadcode -test ./...)
+          if [[ -n "$output" ]]; then
+            echo "🚨 Deadcode found:"
+            echo "$output"
+            exit 1
+          else
+            echo "✅ No deadcode found"
+          fi
+
+      - name: Run `goimports@v0.31.0`
+        run: |
+          go install golang.org/x/tools/cmd/goimports@v0.31.0
+          # Find all .go files excluding paths containing 'mock' and run goimports
+          non_compliant_files=$(find . -type f -name "*.go" ! -path "*mock*" | xargs goimports -local "github.com/stellar/freighter-backend-v2" -l)
+
+          if [ -n "$non_compliant_files" ]; then
+            echo "🚨 The following files are not compliant with goimports:"
+            echo "$non_compliant_files"
+            exit 1
+          else
+            echo "✅ All files are compliant with goimports."
+          fi
 
   build:
     runs-on: ubuntu-latest
@@ -42,9 +78,9 @@ jobs:
       - name: Build Project
         run: go build ./...
 
-  test:
+  unit-test:
     runs-on: ubuntu-latest
-    
+    needs: build
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,5 +91,25 @@ jobs:
           go-version: "1.24"
           cache: true
 
-      - name: Run Tests
+      - name: Run Unit Tests
+        env:
+          ENABLE_INTEGRATION_TESTS: "false"
         run: go test -v -race -cover ./...
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Run Integration Tests
+        env:
+          ENABLE_INTEGRATION_TESTS: "true"
+        run: go test -v -race -cover ./internal/integrationtests/...

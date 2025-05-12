@@ -7,9 +7,10 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
-	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/stellar/freighter-backend-v2/internal/config"
 )
 
 func TestServeCmd_Command(t *testing.T) {
