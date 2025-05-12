@@ -84,7 +84,7 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns500StatusCodeForInvalidProto
 	container := NewFreighterBackendContainer(t, "protocols-test-500-status-code", "protocols-integration-test")
 	err := container.CopyFileToContainer(
 		ctx,
-		"../../internal/integrationtests/infrastructure/testdata/invalid-protocols.json",
+		"../../internal/integrationtests/infrastructure/testdata/invalid_protocols.json",
 		"/app/config/protocols.json",
 		0644,
 	)
@@ -110,5 +110,5 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns500StatusCodeForInvalidProto
 	err = json.Unmarshal(body, &errorResponse)
 	require.NoError(t, err)
 	require.NotNil(t, errorResponse)
-	assert.Equal(t, "An error occurred while fetching protocol configurations.", errorResponse.Message)
+	assert.Equal(t, "An error occurred while processing protocol configurations.", errorResponse.Message)
 }
