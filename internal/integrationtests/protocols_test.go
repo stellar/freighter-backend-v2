@@ -27,7 +27,6 @@ type ProtocolsTestSuite struct {
 
 func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtocols() {
 	t := s.T()
-	t.Parallel()
 	ctx := context.Background()
 
 	container := NewFreighterBackendContainer(t, "protocols-test-200-status-code", "protocols-integration-test")
@@ -79,7 +78,6 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 
 func (s *ProtocolsTestSuite) TestGetProtocolsReturns500StatusCodeForInvalidProtocols() {
 	t := s.T()
-	t.Parallel()
 	ctx := context.Background()
 	container := NewFreighterBackendContainer(t, "protocols-test-500-status-code", "protocols-integration-test")
 	err := container.CopyFileToContainer(
