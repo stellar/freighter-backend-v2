@@ -7,10 +7,12 @@ import (
 	"net/http"
 
 	"context"
-	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 )
 
 // testHTTPError is a local struct for unmarshaling HTTP error responses in tests.
