@@ -33,7 +33,13 @@ func Recover() Middleware {
 					"method", r.Method,
 					"url", r.URL.String())
 				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintln(w, err)
+				_, err = fmt.Fprintln(w, err)
+				if err != nil {
+					logger.ErrorWithContext(r.Context(), "Failed to write error to response",
+						"error", err,
+						"method", r.Method,
+						"url", r.URL.String())
+				}
 			}()
 
 			next.ServeHTTP(w, r)
