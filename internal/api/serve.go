@@ -24,8 +24,8 @@ const (
 )
 
 type ApiServer struct {
-	cfg             *config.Config
-	redis           *store.RedisStore
+	cfg   *config.Config
+	redis *store.RedisStore
 }
 
 func NewApiServer(cfg *config.Config) *ApiServer {

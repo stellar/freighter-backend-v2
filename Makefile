@@ -56,9 +56,16 @@ check: fmt vet lint generate ## Run all checks (format, vet, lint, generate)
 # ==================================================================================== #
 # TESTING
 # ==================================================================================== #
-test: ## Run tests
-	@echo "==> Running tests..."
-	go test -v ./...
+unit-test: ## Run unit tests
+	@echo "==> Running unit tests..."
+	ENABLE_INTEGRATION_TESTS=false go test -v ./...
+
+integration-test: ## Run integration tests
+	@echo "==> Running integration tests..."
+	ENABLE_INTEGRATION_TESTS=true go test -v ./internal/integrationtests/...
+
+test-all: unit-test integration-test ## Run all tests
+	@echo "✅ All tests completed successfully"
 
 # ==================================================================================== #
 # BUILD & RUN

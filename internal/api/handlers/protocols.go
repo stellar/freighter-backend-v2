@@ -12,15 +12,15 @@ import (
 
 var (
 	ErrFailedToReadProtocolsConfig = httperror.ErrorMessage{
-		LogMessage: "failed to read protocols config from %s: %v",
+		LogMessage:    "failed to read protocols config from %s: %v",
 		ClientMessage: "An error occurred while fetching protocol configurations.",
 	}
 	ErrFailedToUnmarshalProtocolsConfig = httperror.ErrorMessage{
-		LogMessage: "failed to unmarshal protocols config: %v. Data (first %d bytes): %s",
+		LogMessage:    "failed to unmarshal protocols config: %v. Data (first %d bytes): %s",
 		ClientMessage: "An error occurred while processing protocol configurations.",
 	}
 	ErrFailedToEncodeProtocolsToJSONResponse = httperror.ErrorMessage{
-		LogMessage: "failed to encode protocols to JSON response: %v",
+		LogMessage:    "failed to encode protocols to JSON response: %v",
 		ClientMessage: "An error occurred while formatting the response.",
 	}
 )
@@ -80,7 +80,7 @@ func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) 
 			Protocols: protocols,
 		},
 	}
-	
+
 	err = json.NewEncoder(w).Encode(response)
 	if err != nil {
 		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrFailedToEncodeProtocolsToJSONResponse.LogMessage, err))
