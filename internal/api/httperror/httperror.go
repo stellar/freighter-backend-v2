@@ -7,7 +7,7 @@ import (
 )
 
 type ErrorMessage struct {
-	LogMessage string `json:"logMessage"`
+	LogMessage    string `json:"logMessage"`
 	ClientMessage string `json:"clientMessage"`
 }
 

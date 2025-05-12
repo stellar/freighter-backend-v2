@@ -6,19 +6,19 @@ import (
 	"io"
 	"net/http"
 
+	"context"
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"context"
 	"github.com/stretchr/testify/suite"
 )
 
 // testHTTPError is a local struct for unmarshaling HTTP error responses in tests.
 type testHTTPError struct {
-	Message       string                 `json:"message"`
-	OriginalError json.RawMessage        `json:"originalError,omitempty"`
-	StatusCode    int                    `json:"statusCode"`
-	Extras        map[string]any `json:"extras,omitempty"`
+	Message       string          `json:"message"`
+	OriginalError json.RawMessage `json:"originalError,omitempty"`
+	StatusCode    int             `json:"statusCode"`
+	Extras        map[string]any  `json:"extras,omitempty"`
 }
 
 type ProtocolsTestSuite struct {
@@ -31,13 +31,18 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 	ctx := context.Background()
 
 	container := NewFreighterBackendContainer(t, "protocols-test-200-status-code", "protocols-integration-test")
-	container.CopyFileToContainer(
+	err := container.CopyFileToContainer(
 		ctx,
 		"../../internal/integrationtests/infrastructure/testdata/protocols.json",
 		"/app/config/protocols.json",
 		0644,
 	)
-	defer container.Terminate(ctx)
+	require.NoError(t, err)
+
+	defer func() {
+		err := container.Terminate(ctx)
+		require.NoError(t, err)
+	}()
 
 	connectionString, err := container.GetConnectionString(ctx)
 	require.NoError(t, err)
@@ -77,13 +82,17 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns500StatusCodeForInvalidProto
 	t.Parallel()
 	ctx := context.Background()
 	container := NewFreighterBackendContainer(t, "protocols-test-500-status-code", "protocols-integration-test")
-	container.CopyFileToContainer(
+	err := container.CopyFileToContainer(
 		ctx,
 		"../../internal/integrationtests/infrastructure/testdata/invalid-protocols.json",
 		"/app/config/protocols.json",
 		0644,
 	)
-	defer container.Terminate(ctx)
+	require.NoError(t, err)
+	defer func() {
+		err := container.Terminate(ctx)
+		require.NoError(t, err)
+	}()
 
 	connectionString, err := container.GetConnectionString(ctx)
 	require.NoError(t, err)
