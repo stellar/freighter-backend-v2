@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/stellar/freighter-backend-v2/internal/utils" // Import shared test utils
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 func TestGetProtocols(t *testing.T) {
