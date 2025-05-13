@@ -100,6 +100,7 @@ jobs:
         env:
           TESTCOVERAGE_THRESHOLD: 80 # percentage
         run: |
+          chmod +x ./scripts/exclude_from_coverage.sh # Add execute permissions
           echo "Quality Gate:   Checking if test coverage is above threshold..."
           echo "Threshold:      $TESTCOVERAGE_THRESHOLD%"
           totalCoverage=`./scripts/exclude_from_coverage.sh && go tool cover -func=c.out  | grep total: | grep -Eo '[0-9]+\.[0-9]+'`
