@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 )
 
@@ -32,6 +33,7 @@ func TestApiServer_initHandlers(t *testing.T) {
 	handler, pattern := mux.Handler(&http.Request{Method: "GET", URL: mustParseURL("/api/v1/ping")})
 	assert.NotNil(t, handler)
 	assert.Contains(t, pattern, "/api/v1/ping")
+	assert.IsType(t, handlers.CustomHandler(handlers.HealthCheckHandler), handler, "returned handler should be the health check handler")
 }
 
 func TestApiServer_initMiddleware(t *testing.T) {
