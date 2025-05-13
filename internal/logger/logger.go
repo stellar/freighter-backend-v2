@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sync"
 )
 
 // Log levels
@@ -57,13 +58,18 @@ func New(cfg loggerConfig) *Logger {
 }
 
 // Global logger instance
-var global *Logger
+var (
+	global *Logger
+	once   sync.Once
+)
 
-// Global returns the global logger instance
+// Global returns the global logger instance, initializing it safely if needed
 func Global() *Logger {
-	if global == nil {
-		global = New(DefaultConfig())
-	}
+	once.Do(func() {
+		if global == nil {
+			global = New(DefaultConfig())
+		}
+	})
 	return global
 }
 

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 func TestMiddleware_Chain(t *testing.T) {
@@ -43,7 +46,13 @@ func TestMiddleware_Chain(t *testing.T) {
 	chain.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	// The last middleware should have set the header value.
+	// Middleware are applied in reverse order of listing in Chain, so m2 runs "before" m1 wraps it.
+	// But the actual execution flow when a request comes in is m1, then m2, then handler.
+	// The test as originally written implies middleware2 should set the final header, which means
+	// it's the "outer" middleware in terms of its effect being seen last if it acts before calling next.
+	// Let's clarify: Chain(handler, m1, m2) -> m1(m2(handler)).
+	// Request hits m1, m1 sets header, calls m2(handler).
+	// Request hits m2, m2 sets header (overwrites m1), calls handler.
 	assert.Equal(t, "middleware2-value", rec.Header().Get("X-Test-Header"))
 }
 
@@ -106,16 +115,92 @@ func TestMiddleware_ResponseHeader(t *testing.T) {
 func TestMiddleware_Recover(t *testing.T) {
 	t.Parallel()
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		panic("test panic")
+	t.Run("handler panics with a string", func(t *testing.T) {
+		t.Parallel()
+		mockHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			panic("test panic with string")
+		})
+		recoverMiddleware := Recover()
+		chainedHandler := recoverMiddleware(mockHandler)
+
+		req := httptest.NewRequest("GET", "/", nil)
+		rec := httptest.NewRecorder()
+		chainedHandler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "panic: test panic with string")
 	})
-	recoverMiddleware := Recover()
-	chain := recoverMiddleware(handler)
 
-	req := httptest.NewRequest("GET", "/", nil)
-	rec := httptest.NewRecorder()
-	chain.ServeHTTP(rec, req)
+	t.Run("handler panics with an actual error", func(t *testing.T) {
+		t.Parallel()
+		expectedErr := errors.New("panic with actual error")
+		mockHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			panic(expectedErr)
+		})
+		recoverMiddleware := Recover()
+		chainedHandler := recoverMiddleware(mockHandler)
 
-	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Contains(t, rec.Body.String(), "panic: test panic")
+		req := httptest.NewRequest("GET", "/", nil)
+		rec := httptest.NewRecorder()
+		chainedHandler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), expectedErr.Error())
+	})
+
+	t.Run("handler panics with ErrAbortHandler", func(t *testing.T) {
+		t.Parallel()
+		mockHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			panic(http.ErrAbortHandler)
+		})
+		recoverMiddleware := Recover()
+		chainedHandler := recoverMiddleware(mockHandler)
+
+		req := httptest.NewRequest("GET", "/", nil)
+		rec := httptest.NewRecorder()
+
+		// Expect http.ErrAbortHandler to be re-panicked by the Recover middleware
+		assert.PanicsWithValue(t, http.ErrAbortHandler, func() {
+			chainedHandler.ServeHTTP(rec, req)
+		}, "Expected panic with http.ErrAbortHandler to be re-panicked")
+	})
+
+	t.Run("handler panics and response writing fails", func(t *testing.T) {
+		t.Parallel()
+		mockHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			panic("test panic where response write also fails")
+		})
+		recoverMiddleware := Recover()
+		chainedHandler := recoverMiddleware(mockHandler)
+
+		req := httptest.NewRequest("GET", "/", nil)
+		errorRec := utils.NewErrorResponseWriter(true) // Use shared ErrorResponseWriter
+
+		// We expect that the original panic about "response write also fails"
+		// is written to the response, even if the Write to errorRec fails.
+		// The http.Server will handle the low-level write error.
+		// The Recover middleware should still attempt to write the panic.
+		chainedHandler.ServeHTTP(errorRec, req)
+
+		// The code would have been set to 500 by the Recover middleware before attempting to Write.
+		assert.Equal(t, http.StatusInternalServerError, errorRec.ResponseRecorder.Code)
+	})
+
+	t.Run("handler does not panic", func(t *testing.T) {
+		t.Parallel()
+		mockHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("ok"))
+			require.NoError(t, err)
+		})
+		recoverMiddleware := Recover()
+		chainedHandler := recoverMiddleware(mockHandler)
+
+		req := httptest.NewRequest("GET", "/", nil)
+		rec := httptest.NewRecorder()
+		chainedHandler.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, "ok", rec.Body.String())
+	})
 }

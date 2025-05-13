@@ -2,39 +2,15 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/stellar/freighter-backend-v2/internal/utils" // Import shared test utils
 )
-
-// errorResponseWriter is a custom ResponseWriter that errors on Write.
-type errorResponseWriter struct {
-	header http.Header
-	code   int
-}
-
-func newErrorResponseWriter() *errorResponseWriter {
-	return &errorResponseWriter{
-		header: make(http.Header),
-	}
-}
-
-func (w *errorResponseWriter) Header() http.Header {
-	return w.header
-}
-
-func (w *errorResponseWriter) WriteHeader(statusCode int) {
-	w.code = statusCode
-}
-
-// Write implements the io.Writer interface and always returns an error.
-func (w *errorResponseWriter) Write([]byte) (int, error) {
-	return 0, errors.New("simulated writer error")
-}
 
 func TestGetProtocols(t *testing.T) {
 	t.Run("should return protocols", func(t *testing.T) {
@@ -86,7 +62,7 @@ func TestGetProtocols(t *testing.T) {
 		t.Parallel()
 		handler := NewProtocolsHandler("testdata/protocols.json") // Use valid data file
 		req, _ := http.NewRequest("GET", "/api/v1/protocols", nil)
-		w := newErrorResponseWriter() // Use the erroring writer
+		w := utils.NewErrorResponseWriter(true) // Use shared ErrorResponseWriter configured to fail write
 		err := handler.GetProtocols(w, req)
 		require.Error(t, err)
 		assert.Equal(t, ErrFailedToEncodeProtocolsToJSONResponse.ClientMessage, err.Error())
