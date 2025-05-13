@@ -103,13 +103,17 @@ check: fmt vet lint generate shadow exhaustive deadcode goimports govulncheck ##
 # ==================================================================================== #
 unit-test: ## Run unit tests
 	@echo "==> Running unit tests..."
-	ENABLE_INTEGRATION_TESTS=false go test -v ./...
+	ENABLE_INTEGRATION_TESTS=false go test -v -race ./...
+
+unit-test-coverage: ## Run unit tests with coverage
+	@echo "==> Running unit tests with coverage..."
+	ENABLE_INTEGRATION_TESTS=false go test -v -race -cover -coverprofile=c.out ./...
 
 integration-test: ## Run integration tests
 	@echo "==> Running integration tests..."
 	ENABLE_INTEGRATION_TESTS=true go test -v ./internal/integrationtests/...
 
-test-all: unit-test integration-test ## Run all tests
+test-all: unit-test-coverage integration-test ## Run all tests
 	@echo "✅ All tests completed successfully"
 
 # ==================================================================================== #
