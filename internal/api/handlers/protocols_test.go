@@ -62,7 +62,7 @@ func TestGetProtocols(t *testing.T) {
 		t.Parallel()
 		handler := NewProtocolsHandler("testdata/protocols.json") // Use valid data file
 		req, _ := http.NewRequest("GET", "/api/v1/protocols", nil)
-		w := utils.NewErrorResponseWriter(true) // Use shared ErrorResponseWriter configured to fail write
+		w := utils.NewErrorResponseWriter(true)
 		err := handler.GetProtocols(w, req)
 		require.Error(t, err)
 		assert.Equal(t, ErrFailedToEncodeProtocolsToJSONResponse.ClientMessage, err.Error())
