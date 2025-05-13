@@ -174,7 +174,7 @@ func TestMiddleware_Recover(t *testing.T) {
 		chainedHandler := recoverMiddleware(mockHandler)
 
 		req := httptest.NewRequest("GET", "/", nil)
-		errorRec := utils.NewErrorResponseWriter(true) // Use shared ErrorResponseWriter
+		errorRec := utils.NewErrorResponseWriter(true)
 
 		// We expect that the original panic about "response write also fails"
 		// is written to the response, even if the Write to errorRec fails.
@@ -183,7 +183,7 @@ func TestMiddleware_Recover(t *testing.T) {
 		chainedHandler.ServeHTTP(errorRec, req)
 
 		// The code would have been set to 500 by the Recover middleware before attempting to Write.
-		assert.Equal(t, http.StatusInternalServerError, errorRec.ResponseRecorder.Code)
+		assert.Equal(t, http.StatusInternalServerError, errorRec.Code)
 	})
 
 	t.Run("handler does not panic", func(t *testing.T) {

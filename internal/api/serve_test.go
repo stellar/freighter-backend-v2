@@ -11,8 +11,6 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/config"
 )
 
-type fakeRedisStore struct{}
-
 func TestNewApiServer(t *testing.T) {
 	cfg := &config.Config{}
 	s := NewApiServer(cfg)
