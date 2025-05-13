@@ -22,9 +22,8 @@ func TestNewApiServer(t *testing.T) {
 
 func TestApiServer_initServices_Error(t *testing.T) {
 	s := &ApiServer{cfg: &config.Config{RedisConfig: config.RedisConfig{Host: "", Port: 0}}}
-	// Intentionally pass invalid config to cause error
 	err := s.initServices()
-	assert.NoError(t, err) // NewRedisStore does not error on empty host/port in current impl
+	assert.NoError(t, err)
 }
 
 func TestApiServer_initHandlers(t *testing.T) {
