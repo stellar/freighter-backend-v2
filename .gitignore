@@ -5,3 +5,5 @@
 *.toml
 *debug*
 *.out
+CLAUDE.md
+.DS_Store
