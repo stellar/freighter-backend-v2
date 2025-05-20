@@ -23,6 +23,10 @@ const (
 	ServerShutdownTimeout = 10 * time.Second
 )
 
+type RPCService interface {
+	GetHealth(ctx context.Context) (string, error)
+}
+
 type ApiServer struct {
 	cfg   *config.Config
 	redis *store.RedisStore
