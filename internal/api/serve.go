@@ -12,7 +12,9 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
 	"github.com/stellar/freighter-backend-v2/internal/config"
+	"github.com/stellar/freighter-backend-v2/internal/interfaces"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
+	"github.com/stellar/freighter-backend-v2/internal/services"
 	"github.com/stellar/freighter-backend-v2/internal/store"
 )
 
@@ -23,13 +25,10 @@ const (
 	ServerShutdownTimeout = 10 * time.Second
 )
 
-type RPCService interface {
-	GetHealth(ctx context.Context) (string, error)
-}
-
 type ApiServer struct {
-	cfg   *config.Config
-	redis *store.RedisStore
+	cfg        *config.Config
+	redis      *store.RedisStore
+	rpcService interfaces.RPCService
 }
 
 func NewApiServer(cfg *config.Config) *ApiServer {
@@ -55,6 +54,9 @@ func (s *ApiServer) initServices() error {
 		return err
 	}
 	s.redis = redisConn
+
+	rpcService := services.NewRPCService(s.cfg.RpcConfig.RpcUrl)
+	s.rpcService = rpcService
 	return nil
 }
 
