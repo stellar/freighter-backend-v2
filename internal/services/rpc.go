@@ -2,18 +2,38 @@ package services
 
 import (
 	"context"
+	"net/http"
 
-	"github.com/stellar/freighter-backend-v2/internal/interfaces"
+	"github.com/stellar/stellar-rpc/client"
+
+	"github.com/stellar/freighter-backend-v2/internal/types"
+)
+
+const (
+	serviceName = "rpc"
 )
 
 type rpcService struct {
-	rpcURL string
+	client *client.Client
 }
 
-func NewRPCService(rpcURL string) interfaces.RPCService {
-	return &rpcService{rpcURL: rpcURL}
+func NewRPCService(rpcURL string) types.Service {
+	return &rpcService{
+		client: client.NewClient(rpcURL, &http.Client{}),
+	}
 }
 
-func (s *rpcService) GetHealth(ctx context.Context) (string, error) {
-	return "OK", nil
+func (r *rpcService) Name() string {
+	return serviceName
+}
+
+func (r *rpcService) GetHealth(ctx context.Context) (types.GetHealthResponse, error) {
+	response, err := r.client.GetHealth(ctx)
+	if err != nil {
+		return types.GetHealthResponse{Status: types.StatusError}, err
+	}
+
+	return types.GetHealthResponse{
+		Status: response.Status,
+	}, nil
 }

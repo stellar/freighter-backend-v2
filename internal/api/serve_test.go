@@ -33,7 +33,8 @@ func TestApiServer_initHandlers(t *testing.T) {
 	handler, pattern := mux.Handler(&http.Request{Method: "GET", URL: mustParseURL("/api/v1/ping")})
 	assert.NotNil(t, handler)
 	assert.Contains(t, pattern, "/api/v1/ping")
-	assert.IsType(t, handlers.CustomHandler(handlers.HealthCheckHandler), handler, "returned handler should be the health check handler")
+	healthHandler := handlers.NewHealthHandler(s.rpcService)
+	assert.IsType(t, handlers.CustomHandler(healthHandler.CheckHealth), handler, "returned handler should be the health check handler")
 }
 
 func TestApiServer_initMiddleware(t *testing.T) {
