@@ -1,10 +1,12 @@
 package middleware
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 
+	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 )
 
@@ -32,10 +34,20 @@ func Recover() Middleware {
 					"error", err,
 					"method", r.Method,
 					"url", r.URL.String())
-				w.WriteHeader(http.StatusInternalServerError)
-				_, err = fmt.Fprintln(w, err)
-				if err != nil {
-					logger.ErrorWithContext(r.Context(), "Failed to write error to response",
+
+				// Check if we're using a buffered response writer
+				if bw, ok := w.(*BufferedResponseWriter); ok {
+					// Reset the buffer to clear any partial response
+					bw.Reset()
+				}
+
+				// Create a proper error response
+				httpErr := httperror.InternalServerError("An unexpected error occurred", err)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(httpErr.StatusCode)
+
+				if err := json.NewEncoder(w).Encode(httpErr); err != nil {
+					logger.ErrorWithContext(r.Context(), "Failed to write error response",
 						"error", err,
 						"method", r.Method,
 						"url", r.URL.String())

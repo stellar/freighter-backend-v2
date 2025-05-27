@@ -2,12 +2,12 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
+	"github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
@@ -33,10 +33,13 @@ func NewHealthHandler(services ...types.Service) *HealthHandler {
 }
 
 // CheckHealth handles health check requests, including RPC service health.
+// When used with buffered response middleware, this allows safe error handling
+// even after writing the response body.
 func (h *HealthHandler) CheckHealth(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := context.WithTimeout(r.Context(), HealthCheckContextTimeout)
 	defer cancel()
 
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	serviceStatus := make(map[string]string)
 	overallHealthy := true
 
@@ -55,20 +58,18 @@ func (h *HealthHandler) CheckHealth(w http.ResponseWriter, r *http.Request) erro
 		serviceStatus[serviceName] = response.Status
 	}
 
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-
 	resp := HealthResponse{
 		ServiceStatus: serviceStatus,
 	}
 
+	// Determine status code based on health
+	statusCode := http.StatusOK
 	if !overallHealthy {
-		w.WriteHeader(http.StatusServiceUnavailable)
+		statusCode = http.StatusServiceUnavailable
 	}
 
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		errStr := fmt.Sprintf("error writing health check response body: %v", err)
-		logger.ErrorWithContext(ctx, errStr)
-		return httperror.NewHttpError(errStr, err, http.StatusInternalServerError, nil)
+	if err := response.JSON(w, statusCode, resp); err != nil {
+		return httperror.InternalServerError("error writing health check response", err)
 	}
 	return nil
 }
