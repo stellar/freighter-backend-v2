@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
-	"github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
+	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 )
 

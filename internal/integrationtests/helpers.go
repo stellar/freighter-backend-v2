@@ -7,6 +7,8 @@ import (
 
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/log"
+	"github.com/testcontainers/testcontainers-go/modules/redis"
+	"github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
@@ -29,7 +31,38 @@ func (c *freighterBackendContainer) GetConnectionString(ctx context.Context) (st
 	return fmt.Sprintf("http://%s:%s", host, port.Port()), nil
 }
 
+// startRedisContainer starts a Redis container for testing
+func startRedisContainer(ctx context.Context, testNetwork *testcontainers.DockerNetwork) (*redis.RedisContainer, error) {
+	return redis.Run(ctx,
+		"redis:7-alpine",
+		network.WithNetwork([]string{"redis"}, testNetwork),
+	)
+}
+
 func NewFreighterBackendContainer(t *testing.T, name string, tag string) *freighterBackendContainer {
+	ctx := context.Background()
+
+	// Create a network for containers to communicate
+	testNetwork, err := network.New(ctx)
+	if err != nil {
+		t.Fatalf("failed to create network: %v", err)
+	}
+	t.Cleanup(func() {
+		if removeErr := testNetwork.Remove(ctx); removeErr != nil {
+			t.Logf("failed to remove network: %v", removeErr)
+		}
+	})
+
+	// Start Redis container
+	redisContainer, err := startRedisContainer(ctx, testNetwork)
+	if err != nil {
+		t.Fatalf("failed to start Redis container: %v", err)
+	}
+	t.Cleanup(func() {
+		if terminateErr := redisContainer.Terminate(ctx); terminateErr != nil {
+			t.Logf("failed to terminate Redis container: %v", terminateErr)
+		}
+	})
 	containerRequest := testcontainers.ContainerRequest{
 		Name: name,
 		FromDockerfile: testcontainers.FromDockerfile{
@@ -46,11 +79,13 @@ func NewFreighterBackendContainer(t *testing.T, name string, tag string) *freigh
 			"REDIS_HOST":             "redis",
 			"REDIS_PORT":             "6379",
 			"MODE":                   "development",
+			"RPC_URL":                "https://soroban-testnet.stellar.org", // Provide a valid RPC URL for health check
 		},
+		Networks:   []string{testNetwork.Name},
 		WaitingFor: wait.ForHTTP("/api/v1/ping"),
 	}
 
-	container, err := testcontainers.GenericContainer(context.Background(), testcontainers.GenericContainerRequest{
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: containerRequest,
 		Reuse:            false,
 		Started:          true,
