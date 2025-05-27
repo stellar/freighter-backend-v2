@@ -1,3 +1,6 @@
+// ABOUTME: Provides container management utilities for integration tests.
+// ABOUTME: Includes both shared suite-level containers and helper functions.
+
 package integrationtests
 
 import (
@@ -5,6 +8,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/log"
 	"github.com/testcontainers/testcontainers-go/modules/redis"
@@ -12,11 +16,13 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+// freighterBackendContainer wraps a testcontainer with connection string helper
 type freighterBackendContainer struct {
 	testcontainers.Container
 	ConnectionString string
 }
 
+// GetConnectionString returns the HTTP connection string for the container
 func (c *freighterBackendContainer) GetConnectionString(ctx context.Context) (string, error) {
 	host, err := c.Host(ctx)
 	if err != nil {
@@ -39,30 +45,51 @@ func startRedisContainer(ctx context.Context, testNetwork *testcontainers.Docker
 	)
 }
 
-func NewFreighterBackendContainer(t *testing.T, name string, tag string) *freighterBackendContainer {
+// BaseTestSuite provides shared container management for integration tests
+type BaseTestSuite struct {
+	suite.Suite
+	testNetwork        *testcontainers.DockerNetwork
+	redisContainer     *redis.RedisContainer
+	freighterContainer *freighterBackendContainer
+}
+
+// SetupSuite starts shared containers once for all tests in the suite
+func (s *BaseTestSuite) SetupSuite() {
+	ctx := context.Background()
+	t := s.T()
+
+	// Create network
+	var err error
+	s.testNetwork, err = network.New(ctx)
+	s.Require().NoError(err)
+
+	// Start Redis
+	s.redisContainer, err = startRedisContainer(ctx, s.testNetwork)
+	s.Require().NoError(err)
+
+	// Start Freighter backend
+	s.freighterContainer = s.createFreighterContainer(t, "shared-integration-test", "integration-test")
+}
+
+// TearDownSuite cleans up shared containers after all tests complete
+func (s *BaseTestSuite) TearDownSuite() {
 	ctx := context.Background()
 
-	// Create a network for containers to communicate
-	testNetwork, err := network.New(ctx)
-	if err != nil {
-		t.Fatalf("failed to create network: %v", err)
+	if s.freighterContainer != nil {
+		_ = s.freighterContainer.Terminate(ctx)
 	}
-	t.Cleanup(func() {
-		if removeErr := testNetwork.Remove(ctx); removeErr != nil {
-			t.Logf("failed to remove network: %v", removeErr)
-		}
-	})
+	if s.redisContainer != nil {
+		_ = s.redisContainer.Terminate(ctx)
+	}
+	if s.testNetwork != nil {
+		_ = s.testNetwork.Remove(ctx)
+	}
+}
 
-	// Start Redis container
-	redisContainer, err := startRedisContainer(ctx, testNetwork)
-	if err != nil {
-		t.Fatalf("failed to start Redis container: %v", err)
-	}
-	t.Cleanup(func() {
-		if terminateErr := redisContainer.Terminate(ctx); terminateErr != nil {
-			t.Logf("failed to terminate Redis container: %v", terminateErr)
-		}
-	})
+// createFreighterContainer creates a new Freighter container using the shared network
+func (s *BaseTestSuite) createFreighterContainer(t *testing.T, name string, tag string) *freighterBackendContainer {
+	ctx := context.Background()
+
 	containerRequest := testcontainers.ContainerRequest{
 		Name: name,
 		FromDockerfile: testcontainers.FromDockerfile{
@@ -79,9 +106,9 @@ func NewFreighterBackendContainer(t *testing.T, name string, tag string) *freigh
 			"REDIS_HOST":             "redis",
 			"REDIS_PORT":             "6379",
 			"MODE":                   "development",
-			"RPC_URL":                "https://soroban-testnet.stellar.org", // Provide a valid RPC URL for health check
+			"RPC_URL":                "https://soroban-testnet.stellar.org",
 		},
-		Networks:   []string{testNetwork.Name},
+		Networks:   []string{s.testNetwork.Name},
 		WaitingFor: wait.ForHTTP("/api/v1/ping"),
 	}
 
@@ -91,9 +118,7 @@ func NewFreighterBackendContainer(t *testing.T, name string, tag string) *freigh
 		Started:          true,
 		Logger:           log.TestLogger(t),
 	})
-	if err != nil {
-		t.Fatalf("failed to create freighter backend container: %v", err)
-	}
+	s.Require().NoError(err)
 
 	return &freighterBackendContainer{
 		Container: container,
