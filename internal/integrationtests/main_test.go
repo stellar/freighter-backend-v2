@@ -15,4 +15,7 @@ func TestIntegrationTests(t *testing.T) {
 	t.Run("ProtocolsTestSuite", func(t *testing.T) {
 		suite.Run(t, new(ProtocolsTestSuite))
 	})
+	t.Run("HealthTestSuite", func(t *testing.T) {
+		suite.Run(t, new(HealthTestSuite))
+	})
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
+	"github.com/stellar/freighter-backend-v2/internal/integrationtests/infrastructure"
 )
 
 // testHTTPError is a local struct for unmarshaling HTTP error responses in tests.
@@ -23,7 +24,7 @@ type testHTTPError struct {
 }
 
 type ProtocolsTestSuite struct {
-	BaseTestSuite
+	infrastructure.BaseTestSuite
 	connectionString string
 }
 
@@ -35,7 +36,7 @@ func (s *ProtocolsTestSuite) SetupSuite() {
 	// Get connection string once for all tests
 	ctx := context.Background()
 	var err error
-	s.connectionString, err = s.freighterContainer.GetConnectionString(ctx)
+	s.connectionString, err = s.FreighterContainer.GetConnectionString(ctx)
 	s.Require().NoError(err)
 	s.Require().NotEmpty(s.connectionString)
 }
@@ -44,9 +45,9 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 	t := s.T()
 	ctx := context.Background()
 
-	err := s.freighterContainer.CopyFileToContainer(
+	err := s.FreighterContainer.CopyFileToContainer(
 		ctx,
-		"../../internal/integrationtests/testdata/protocols.json",
+		"../../internal/integrationtests/infrastructure/testdata/protocols.json",
 		"/app/config/protocols.json",
 		0644,
 	)
@@ -84,9 +85,9 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 func (s *ProtocolsTestSuite) TestGetProtocolsReturns500StatusCodeForInvalidProtocols() {
 	t := s.T()
 	ctx := context.Background()
-	err := s.freighterContainer.CopyFileToContainer(
+	err := s.FreighterContainer.CopyFileToContainer(
 		ctx,
-		"../../internal/integrationtests/testdata/invalid_protocols.json",
+		"../../internal/integrationtests/infrastructure/testdata/invalid_protocols.json",
 		"/app/config/protocols.json",
 		0644,
 	)
