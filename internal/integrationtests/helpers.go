@@ -16,6 +16,17 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+const (
+	RedisContainerName = "redis"
+	RedisContainerPort = "6379"
+	RedisContainerImage = "redis:7-alpine"
+	FreighterContainerName = "freighter"
+	FreighterContainerPort = "3002"
+	FreighterContainerTag = "integration-test"
+	FreighterDockerfilePath = "deployments/Dockerfile"
+	FreighterDockerfileContext = "../../"
+)
+
 // freighterBackendContainer wraps a testcontainer with connection string helper
 type freighterBackendContainer struct {
 	testcontainers.Container
@@ -29,20 +40,12 @@ func (c *freighterBackendContainer) GetConnectionString(ctx context.Context) (st
 		return "", err
 	}
 
-	port, err := c.MappedPort(ctx, "3002")
+	port, err := c.MappedPort(ctx, FreighterContainerPort)
 	if err != nil {
 		return "", err
-	}
+	}	
 
 	return fmt.Sprintf("http://%s:%s", host, port.Port()), nil
-}
-
-// startRedisContainer starts a Redis container for testing
-func startRedisContainer(ctx context.Context, testNetwork *testcontainers.DockerNetwork) (*redis.RedisContainer, error) {
-	return redis.Run(ctx,
-		"redis:7-alpine",
-		network.WithNetwork([]string{"redis"}, testNetwork),
-	)
 }
 
 // BaseTestSuite provides shared container management for integration tests
@@ -64,11 +67,11 @@ func (s *BaseTestSuite) SetupSuite() {
 	s.Require().NoError(err)
 
 	// Start Redis
-	s.redisContainer, err = startRedisContainer(ctx, s.testNetwork)
+	s.redisContainer, err = s.createRedisContainer(ctx, s.testNetwork)
 	s.Require().NoError(err)
 
 	// Start Freighter backend
-	s.freighterContainer = s.createFreighterContainer(t, "shared-integration-test", "integration-test")
+	s.freighterContainer = s.createFreighterContainer(t, FreighterContainerName, FreighterContainerTag)
 }
 
 // TearDownSuite cleans up shared containers after all tests complete
@@ -86,6 +89,14 @@ func (s *BaseTestSuite) TearDownSuite() {
 	}
 }
 
+// startRedisContainer starts a Redis container for testing
+func (s *BaseTestSuite) createRedisContainer(ctx context.Context, testNetwork *testcontainers.DockerNetwork) (*redis.RedisContainer, error) {
+	return redis.Run(ctx,
+		RedisContainerImage,
+		network.WithNetwork([]string{RedisContainerName}, testNetwork),
+	)
+}
+
 // createFreighterContainer creates a new Freighter container using the shared network
 func (s *BaseTestSuite) createFreighterContainer(t *testing.T, name string, tag string) *freighterBackendContainer {
 	ctx := context.Background()
@@ -93,18 +104,18 @@ func (s *BaseTestSuite) createFreighterContainer(t *testing.T, name string, tag 
 	containerRequest := testcontainers.ContainerRequest{
 		Name: name,
 		FromDockerfile: testcontainers.FromDockerfile{
-			Context:    "../../",
-			Dockerfile: "deployments/Dockerfile",
+			Context:    FreighterDockerfileContext,
+			Dockerfile: FreighterDockerfilePath,
 			KeepImage:  true,
 			Tag:        tag,
 		},
 		Cmd:          []string{"./freighter-backend", "serve"},
-		ExposedPorts: []string{"3002/tcp"},
+		ExposedPorts: []string{fmt.Sprintf("%s/tcp", FreighterContainerPort)},
 		Env: map[string]string{
 			"FREIGHTER_BACKEND_HOST": "0.0.0.0",
-			"FREIGHTER_BACKEND_PORT": "3002",
-			"REDIS_HOST":             "redis",
-			"REDIS_PORT":             "6379",
+			"FREIGHTER_BACKEND_PORT": FreighterContainerPort,
+			"REDIS_HOST":             RedisContainerName,
+			"REDIS_PORT":             RedisContainerPort,
 			"MODE":                   "development",
 			"RPC_URL":                "https://soroban-testnet.stellar.org",
 		},
