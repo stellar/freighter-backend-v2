@@ -5,24 +5,22 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/stretchr/testify/suite"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/freighter-backend-v2/internal/integrationtests/infrastructure"
 )
 
 type HealthTestSuite struct {
-	infrastructure.BaseTestSuite
+	suite.Suite
+	freighterContainer *infrastructure.FreighterBackendContainer
 	connectionString string
 }
 
 func (s *HealthTestSuite) SetupSuite() {
-	// Call parent setup to start/reuse containers
-	s.BaseTestSuite.SetupSuite()
-
-	// Get connection string
 	ctx := context.Background()
 	var err error
-	s.connectionString, err = s.FreighterContainer.GetConnectionString(ctx)
+	s.connectionString, err = s.freighterContainer.GetConnectionString(ctx)
 	s.Require().NoError(err)
 	s.Require().NotEmpty(s.connectionString)
 }

@@ -8,6 +8,7 @@ import (
 
 	"context"
 
+	"github.com/stretchr/testify/suite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -24,19 +25,23 @@ type testHTTPError struct {
 }
 
 type ProtocolsTestSuite struct {
-	infrastructure.BaseTestSuite
+	suite.Suite
+	freighterContainer *infrastructure.FreighterBackendContainer
 	connectionString string
+}
+
+func NewProtocolsTestSuite(freighterContainer *infrastructure.FreighterBackendContainer) *ProtocolsTestSuite {
+	return &ProtocolsTestSuite{
+		freighterContainer: freighterContainer,
+	}
 }
 
 // SetupSuite extends the base setup to get the connection string
 func (s *ProtocolsTestSuite) SetupSuite() {
-	// Call parent setup to start containers
-	s.BaseTestSuite.SetupSuite()
-
 	// Get connection string once for all tests
 	ctx := context.Background()
 	var err error
-	s.connectionString, err = s.FreighterContainer.GetConnectionString(ctx)
+	s.connectionString, err = s.freighterContainer.GetConnectionString(ctx)
 	s.Require().NoError(err)
 	s.Require().NotEmpty(s.connectionString)
 }
@@ -45,7 +50,7 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 	t := s.T()
 	ctx := context.Background()
 
-	err := s.FreighterContainer.CopyFileToContainer(
+	err := s.freighterContainer.CopyFileToContainer(
 		ctx,
 		"../../internal/integrationtests/infrastructure/testdata/protocols.json",
 		"/app/config/protocols.json",
@@ -85,7 +90,7 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 func (s *ProtocolsTestSuite) TestGetProtocolsReturns500StatusCodeForInvalidProtocols() {
 	t := s.T()
 	ctx := context.Background()
-	err := s.FreighterContainer.CopyFileToContainer(
+	err := s.freighterContainer.CopyFileToContainer(
 		ctx,
 		"../../internal/integrationtests/infrastructure/testdata/invalid_protocols.json",
 		"/app/config/protocols.json",
