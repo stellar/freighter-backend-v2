@@ -1,6 +1,3 @@
-// ABOUTME: Provides a buffered response writer that delays status code writing.
-// ABOUTME: Allows handlers to return errors even after writing response body.
-
 package middleware
 
 import (

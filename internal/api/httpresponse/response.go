@@ -1,6 +1,3 @@
-// ABOUTME: Provides standardized HTTP response utilities for successful responses.
-// ABOUTME: Centralizes status code setting and JSON encoding for consistency.
-
 package response
 
 import (

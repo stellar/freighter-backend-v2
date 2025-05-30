@@ -1,6 +1,3 @@
-// ABOUTME: Contains unit tests for the Redis store implementation.
-// ABOUTME: Tests store creation, naming, and health check functionality.
-
 package store
 
 import (
@@ -100,4 +97,3 @@ func TestRedisStore_GetHealth(t *testing.T) {
 		assert.Equal(t, types.StatusError, response.Status)
 	})
 }
-

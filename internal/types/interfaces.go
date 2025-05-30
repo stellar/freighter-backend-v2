@@ -1,6 +1,3 @@
-// ABOUTME: Contains shared interfaces used throughout the application.
-// ABOUTME: Defines interfaces to prevent import cycles between packages.
-
 package types
 
 import (

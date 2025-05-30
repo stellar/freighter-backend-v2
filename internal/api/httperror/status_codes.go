@@ -1,6 +1,3 @@
-// ABOUTME: Defines common HTTP error constructors for consistent status code usage.
-// ABOUTME: Provides helper functions to create errors with appropriate HTTP status codes.
-
 package httperror
 
 import (

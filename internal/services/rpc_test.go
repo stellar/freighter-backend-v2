@@ -1,6 +1,3 @@
-// ABOUTME: Contains unit tests for the RPC service implementation.
-// ABOUTME: Tests service creation, naming, and health check functionality.
-
 package services
 
 import (
@@ -84,4 +81,3 @@ func TestRPCService_GetHealth(t *testing.T) {
 		assert.Equal(t, types.StatusError, response.Status)
 	})
 }
-

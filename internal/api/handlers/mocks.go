@@ -1,6 +1,3 @@
-// ABOUTME: Contains mock implementations for testing.
-// ABOUTME: Defines mock services that implement interfaces for unit testing.
-
 package handlers
 
 import (

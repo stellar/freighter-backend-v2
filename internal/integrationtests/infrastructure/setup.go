@@ -1,6 +1,3 @@
-// ABOUTME: Provides container management utilities for integration tests.
-// ABOUTME: Includes both shared suite-level containers and helper functions.
-
 package infrastructure
 
 import (

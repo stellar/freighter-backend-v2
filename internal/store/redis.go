@@ -1,6 +1,3 @@
-// ABOUTME: Provides Redis store implementation for caching and data persistence.
-// ABOUTME: Implements the Service interface for health checking capabilities.
-
 package store
 
 import (
