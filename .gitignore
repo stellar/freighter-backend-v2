@@ -2,7 +2,7 @@
 .vscode
 .idea
 *.env
-/config/*.toml
+*configs/*.toml
 *debug*
 *.out
 CLAUDE.md
