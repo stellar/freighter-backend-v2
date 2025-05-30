@@ -5,8 +5,7 @@ MODE = "not-set"
 SENTRY_KEY = "not-set"
 
 # RPC
-RPC_PUBNET_URL = "not-set"
-RPC_TESTNET_URL = "not-set"
+RPC_URL = "not-set"
 
 # Horizon
 HORIZON_PUBNET_URL = "not-set"

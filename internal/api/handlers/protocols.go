@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
+	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 )
 
@@ -60,31 +61,32 @@ func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) 
 	data, err := os.ReadFile(h.protocolsConfigPath)
 	if err != nil {
 		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrFailedToReadProtocolsConfig.LogMessage, h.protocolsConfigPath, err))
-		return httperror.NewHttpError(ErrFailedToReadProtocolsConfig.ClientMessage, err, http.StatusInternalServerError, nil)
+		if os.IsNotExist(err) {
+			return httperror.NotFound(ErrFailedToReadProtocolsConfig.ClientMessage, err)
+		}
+		return httperror.InternalServerError(ErrFailedToReadProtocolsConfig.ClientMessage, err)
 	}
 
 	var protocols []Protocol
 	err = json.Unmarshal(data, &protocols)
 	if err != nil {
-		// Helper function to safely get a snippet of data for logging
 		snippetLength := 100
 		if len(data) < snippetLength {
 			snippetLength = len(data)
 		}
 		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrFailedToUnmarshalProtocolsConfig.LogMessage, err, snippetLength, string(data[:snippetLength])))
-		return httperror.NewHttpError(ErrFailedToUnmarshalProtocolsConfig.ClientMessage, err, http.StatusInternalServerError, nil)
+		return httperror.InternalServerError(ErrFailedToUnmarshalProtocolsConfig.ClientMessage, err)
 	}
 
-	response := HttpResponse{
+	responseData := HttpResponse{
 		Data: GetProtocolsPayload{
 			Protocols: protocols,
 		},
 	}
 
-	err = json.NewEncoder(w).Encode(response)
-	if err != nil {
+	if err := response.OK(w, responseData); err != nil {
 		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrFailedToEncodeProtocolsToJSONResponse.LogMessage, err))
-		return httperror.NewHttpError(ErrFailedToEncodeProtocolsToJSONResponse.ClientMessage, err, http.StatusInternalServerError, nil)
+		return httperror.InternalServerError(ErrFailedToEncodeProtocolsToJSONResponse.ClientMessage, err)
 	}
 	return nil
 }

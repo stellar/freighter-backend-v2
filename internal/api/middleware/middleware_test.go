@@ -128,7 +128,8 @@ func TestMiddleware_Recover(t *testing.T) {
 		chainedHandler.ServeHTTP(rec, req)
 
 		assert.Equal(t, http.StatusInternalServerError, rec.Code)
-		assert.Contains(t, rec.Body.String(), "panic: test panic with string")
+		assert.Contains(t, rec.Body.String(), "An unexpected error occurred")
+		assert.Contains(t, rec.Body.String(), "\"statusCode\":500")
 	})
 
 	t.Run("handler panics with an actual error", func(t *testing.T) {
@@ -145,7 +146,8 @@ func TestMiddleware_Recover(t *testing.T) {
 		chainedHandler.ServeHTTP(rec, req)
 
 		assert.Equal(t, http.StatusInternalServerError, rec.Code)
-		assert.Contains(t, rec.Body.String(), expectedErr.Error())
+		assert.Contains(t, rec.Body.String(), "An unexpected error occurred")
+		assert.Contains(t, rec.Body.String(), "\"statusCode\":500")
 	})
 
 	t.Run("handler panics with ErrAbortHandler", func(t *testing.T) {

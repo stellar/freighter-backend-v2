@@ -13,7 +13,9 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
+	"github.com/stellar/freighter-backend-v2/internal/services"
 	"github.com/stellar/freighter-backend-v2/internal/store"
+	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
 const (
@@ -24,8 +26,9 @@ const (
 )
 
 type ApiServer struct {
-	cfg   *config.Config
-	redis *store.RedisStore
+	cfg        *config.Config
+	redis      *store.RedisStore
+	rpcService types.Service
 }
 
 func NewApiServer(cfg *config.Config) *ApiServer {
@@ -45,18 +48,17 @@ func (s *ApiServer) Start() error {
 }
 
 func (s *ApiServer) initServices() error {
-	redisConn, err := store.NewRedisStore(s.cfg.RedisConfig.Host, s.cfg.RedisConfig.Port, s.cfg.RedisConfig.Password)
-	if err != nil {
-		logger.Error("Failed to initialize Redis store", "error", err)
-		return err
-	}
-	s.redis = redisConn
+	s.redis = store.NewRedisStore(s.cfg.RedisConfig.Host, s.cfg.RedisConfig.Port, s.cfg.RedisConfig.Password)
+	s.rpcService = services.NewRPCService(s.cfg.RpcConfig.RpcUrl)
 	return nil
 }
 
 func (s *ApiServer) initHandlers() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/v1/ping", handlers.CustomHandler(handlers.HealthCheckHandler))
+
+	// Initialize health check handler with RPC service and Redis store
+	healthHandler := handlers.NewHealthHandler(s.rpcService, s.redis)
+	mux.HandleFunc("GET /api/v1/ping", handlers.CustomHandler(healthHandler.CheckHealth))
 
 	protocolsHandler := handlers.NewProtocolsHandler(s.cfg.AppConfig.ProtocolsConfigPath)
 	mux.HandleFunc("GET /api/v1/protocols", handlers.CustomHandler(protocolsHandler.GetProtocols))
