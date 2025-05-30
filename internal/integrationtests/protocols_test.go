@@ -8,9 +8,9 @@ import (
 
 	"context"
 
-	"github.com/stretchr/testify/suite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/integrationtests/infrastructure"
@@ -27,18 +27,10 @@ type testHTTPError struct {
 type ProtocolsTestSuite struct {
 	suite.Suite
 	freighterContainer *infrastructure.FreighterBackendContainer
-	connectionString string
+	connectionString   string
 }
 
-func NewProtocolsTestSuite(freighterContainer *infrastructure.FreighterBackendContainer) *ProtocolsTestSuite {
-	return &ProtocolsTestSuite{
-		freighterContainer: freighterContainer,
-	}
-}
-
-// SetupSuite extends the base setup to get the connection string
 func (s *ProtocolsTestSuite) SetupSuite() {
-	// Get connection string once for all tests
 	ctx := context.Background()
 	var err error
 	s.connectionString, err = s.freighterContainer.GetConnectionString(ctx)

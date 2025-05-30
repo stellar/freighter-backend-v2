@@ -138,12 +138,12 @@ func createRPCContainer(ctx context.Context, testNetwork *testcontainers.DockerN
 		},
 		Files: []testcontainers.ContainerFile{
 			{
-				HostFilePath:      filepath.Join(dir, "docker", "captive-core.cfg"),
+				HostFilePath:      filepath.Join(dir, "config", "captive-core.cfg"),
 				ContainerFilePath: "/config/captive-core.cfg",
 				FileMode:          0644,
 			},
 			{
-				HostFilePath:      filepath.Join(dir, "docker", "stellar_rpc_config.toml"),
+				HostFilePath:      filepath.Join(dir, "config", "stellar_rpc_config.toml"),
 				ContainerFilePath: "/config/stellar_rpc_config.toml",
 				FileMode:          0644,
 			},
@@ -214,12 +214,12 @@ func createStellarCoreContainer(ctx context.Context, testNetwork *testcontainers
 		},
 		Files: []testcontainers.ContainerFile{
 			{
-				HostFilePath:      filepath.Join(dir, "docker", "standalone-core.cfg"),
+				HostFilePath:      filepath.Join(dir, "config", "standalone-core.cfg"),
 				ContainerFilePath: "/stellar-core.cfg",
 				FileMode:          0644,
 			},
 			{
-				HostFilePath:      filepath.Join(dir, "docker", "core-start.sh"),
+				HostFilePath:      filepath.Join(dir, "config", "core-start.sh"),
 				ContainerFilePath: "/start",
 				FileMode:          0755,
 			},

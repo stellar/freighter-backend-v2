@@ -5,8 +5,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/stellar/freighter-backend-v2/internal/integrationtests/infrastructure"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/stellar/freighter-backend-v2/internal/integrationtests/infrastructure"
 )
 
 func TestIntegrationTests(t *testing.T) {

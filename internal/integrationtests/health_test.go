@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/stretchr/testify/suite"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/stellar/freighter-backend-v2/internal/integrationtests/infrastructure"
 )
@@ -14,7 +14,7 @@ import (
 type HealthTestSuite struct {
 	suite.Suite
 	freighterContainer *infrastructure.FreighterBackendContainer
-	connectionString string
+	connectionString   string
 }
 
 func (s *HealthTestSuite) SetupSuite() {

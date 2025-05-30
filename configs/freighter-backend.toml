@@ -1,0 +1,12 @@
+# App
+MODE = "development"
+SENTRY_KEY = "https://332b63432348425882d1dbb0f01c9d49@o14203.ingest.us.sentry.io/5599259"
+
+# RPC
+RPC_URL = "https://soroban-testnet.stellar.org"
+
+# Blockaid
+BLOCKAID_API_KEY = "W9T7KIYQ8dS-AotMg9vkS63PaDuUeOdH"
+
+# Token Prices
+TOKEN_PRICES_HORIZON_URL = "http://freigher-horizon-ingest.wallet-eng-dev.svc.cluster.local"
