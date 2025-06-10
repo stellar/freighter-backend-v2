@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
+	"github.com/stellar/freighter-backend-v2/internal/integrationtests/infrastructure"
 )
 
 // testHTTPError is a local struct for unmarshaling HTTP error responses in tests.
@@ -25,31 +26,31 @@ type testHTTPError struct {
 
 type ProtocolsTestSuite struct {
 	suite.Suite
+	freighterContainer *infrastructure.FreighterBackendContainer
+	connectionString   string
+}
+
+func (s *ProtocolsTestSuite) SetupSuite() {
+	ctx := context.Background()
+	var err error
+	s.connectionString, err = s.freighterContainer.GetConnectionString(ctx)
+	s.Require().NoError(err)
+	s.Require().NotEmpty(s.connectionString)
 }
 
 func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtocols() {
 	t := s.T()
 	ctx := context.Background()
 
-	container := NewFreighterBackendContainer(t, "protocols-test-200-status-code", "protocols-integration-test")
-	err := container.CopyFileToContainer(
+	err := s.freighterContainer.CopyFileToContainer(
 		ctx,
-		"../../internal/integrationtests/testdata/protocols.json",
+		"../../internal/integrationtests/infrastructure/testdata/protocols.json",
 		"/app/config/protocols.json",
 		0644,
 	)
 	require.NoError(t, err)
 
-	defer func() {
-		err = container.Terminate(ctx)
-		require.NoError(t, err)
-	}()
-
-	connectionString, err := container.GetConnectionString(ctx)
-	require.NoError(t, err)
-	require.NotNil(t, connectionString)
-
-	resp, err := http.Get(fmt.Sprintf("%s/api/v1/protocols", connectionString))
+	resp, err := http.Get(fmt.Sprintf("%s/api/v1/protocols", s.connectionString))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
@@ -81,24 +82,15 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 func (s *ProtocolsTestSuite) TestGetProtocolsReturns500StatusCodeForInvalidProtocols() {
 	t := s.T()
 	ctx := context.Background()
-	container := NewFreighterBackendContainer(t, "protocols-test-500-status-code", "protocols-integration-test")
-	err := container.CopyFileToContainer(
+	err := s.freighterContainer.CopyFileToContainer(
 		ctx,
-		"../../internal/integrationtests/testdata/invalid_protocols.json",
+		"../../internal/integrationtests/infrastructure/testdata/invalid_protocols.json",
 		"/app/config/protocols.json",
 		0644,
 	)
 	require.NoError(t, err)
-	defer func() {
-		err = container.Terminate(ctx)
-		require.NoError(t, err)
-	}()
 
-	connectionString, err := container.GetConnectionString(ctx)
-	require.NoError(t, err)
-	require.NotNil(t, connectionString)
-
-	resp, err := http.Get(fmt.Sprintf("%s/api/v1/protocols", connectionString))
+	resp, err := http.Get(fmt.Sprintf("%s/api/v1/protocols", s.connectionString))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 

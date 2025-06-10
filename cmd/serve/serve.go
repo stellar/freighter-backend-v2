@@ -43,8 +43,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.ProtocolsConfigPath, "protocols-config-path", "/app/config/protocols.json", "The path to the protocols config file while lists all supported protocols in Freighter")
 
 	// RPC Config
-	cmd.Flags().StringVar(&s.Cfg.RpcConfig.RpcPubnetURL, "rpc-pubnet-url", "", "The URL of the pubnet RPC")
-	cmd.Flags().StringVar(&s.Cfg.RpcConfig.RpcTestnetURL, "rpc-testnet-url", "https://soroban-testnet.stellar.org/", "The URL of the testnet RPC")
+	cmd.Flags().StringVar(&s.Cfg.RpcConfig.RpcUrl, "rpc-url", "", "The URL of the RPC instance")
 
 	// Horizon Config
 	cmd.Flags().StringVar(&s.Cfg.HorizonConfig.HorizonPubnetURL, "horizon-pubnet-url", "https://horizon.stellar.org/", "The URL of the pubnet Horizon")
