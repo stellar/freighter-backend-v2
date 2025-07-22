@@ -27,12 +27,13 @@ var (
 )
 
 type Protocol struct {
-	Name          string   `json:"name"`
-	Tags          []string `json:"tags"`
-	URL           string   `json:"website_url"`
-	IconURL       string   `json:"icon_url"`
-	Description   string   `json:"description"`
-	IsBlacklisted bool     `json:"is_blacklisted"`
+	Name                        string   `json:"name"`
+	Tags                        []string `json:"tags"`
+	URL                         string   `json:"website_url"`
+	IconURL                     string   `json:"icon_url"`
+	Description                 string   `json:"description"`
+	IsBlacklisted               bool     `json:"is_blacklisted"`
+	IsWalletConnectNotSupported bool     `json:"is_wc_not_supported"`
 }
 
 // ProtocolsPayload encapsulates the list of protocols under a specific key.
