@@ -192,3 +192,58 @@ func TestRPCService_SimulateTx(t *testing.T) {
 		assert.Equal(t, (*xdr.ScVal)(nil), scVal)
 	})
 }
+
+func TestRPCService_InvokeContract(t *testing.T) {
+	account := keypair.MustRandom()
+	sourceAccount := &txnbuild.SimpleAccount{
+		AccountID: account.Address(),
+		Sequence:  1,
+	}
+	var contractHash xdr.Hash
+	copy(contractHash[:], []byte("12345678901234567890123456789012"))
+
+	contractId := xdr.ScAddress{
+		Type:       xdr.ScAddressTypeScAddressTypeContract,
+		ContractId: &contractHash,
+	}
+	timeout := txnbuild.NewTimeout(300)
+
+	t.Run("successfully invokes contract", func(t *testing.T) {
+		val := xdr.Int64(100)
+		validXDR := xdr.ScVal{
+			Type: xdr.ScValTypeScvI64,
+			I64:  &val,
+		}
+		b64, err := xdr.MarshalBase64(validXDR)
+		if err != nil {
+			t.Fatalf("failed to marshal ScVal: %v", err)
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/", r.URL.Path)
+			assert.Equal(t, "POST", r.Method)
+
+			response := fmt.Sprintf(`{
+				"jsonrpc":"2.0",
+				"id":1,
+				"result":{
+					"error":"",
+					"results":[{
+						"xdr":"%s"
+					}]
+				}
+			}`, b64)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, response)
+		}))
+		defer server.Close()
+
+		service := NewRPCService(server.URL)
+		resp, err := service.InvokeContract(context.Background(), contractId, sourceAccount, nil, timeout)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Equal(t, xdr.ScValTypeScvI64, resp.Type)
+		assert.Equal(t, val, *resp.I64)
+	})
+}
