@@ -7,7 +7,7 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/pflag v1.0.6
 	github.com/spf13/viper v1.20.1
-	github.com/stellar/go v0.0.0-20250424183418-116aa946fb47
+	github.com/stellar/go v0.0.0-20250807132708-9fbef121aa8d
 	github.com/stellar/stellar-rpc v0.9.6-0.20250514203247-fea2f943eee5
 	github.com/stretchr/testify v1.10.0
 	github.com/testcontainers/testcontainers-go v0.37.0
@@ -84,6 +84,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.35.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.37.0 // indirect
+	golang.org/x/exp v0.0.0-20231006140011-7918f672742d // indirect
 	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
 	golang.org/x/text v0.24.0 // indirect

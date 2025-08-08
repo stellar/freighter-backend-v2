@@ -151,6 +151,8 @@ github.com/spf13/viper v1.20.1 h1:ZMi+z/lvLyPSCoNtFCpqjy0S4kPbirhpTMwl8BkW9X4=
 github.com/spf13/viper v1.20.1/go.mod h1:P9Mdzt1zoHIG8m2eZQinpiBjo6kCmZSKBClNNqjJvu4=
 github.com/stellar/go v0.0.0-20250424183418-116aa946fb47 h1:s6ur5AFcdAx3UBOjp1YVh3EIgYs8Ms0qK0E2qtLWW+s=
 github.com/stellar/go v0.0.0-20250424183418-116aa946fb47/go.mod h1:wE/ZDmjys55VprPR5qx5Ojx0cUi3f7MJ+dc5gzM+03k=
+github.com/stellar/go v0.0.0-20250807132708-9fbef121aa8d h1:TJdsvRW4sy/0gFoR5XgRpBtMTylkTbZUkL+76ApWPv8=
+github.com/stellar/go v0.0.0-20250807132708-9fbef121aa8d/go.mod h1:ac8hwpljbFXC3Sf9nGfqBXXEvAEdnNRqQHGqP7QN8oY=
 github.com/stellar/go-xdr v0.0.0-20231122183749-b53fb00bcac2 h1:OzCVd0SV5qE3ZcDeSFCmOWLZfEWZ3Oe8KtmSOYKEVWE=
 github.com/stellar/go-xdr v0.0.0-20231122183749-b53fb00bcac2/go.mod h1:yoxyU/M8nl9LKeWIoBrbDPQ7Cy+4jxRcWcOayZ4BMps=
 github.com/stellar/stellar-rpc v0.9.6-0.20250514203247-fea2f943eee5 h1:2tCmmfjH8ZzVnxd1IJalaWI7IMZxsC5W1g56gJTQhmk=
@@ -202,6 +204,8 @@ golang.org/x/crypto v0.0.0-20191011191535-87dc89f01550/go.mod h1:yigFU9vqHzYiE8U
 golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9/go.mod h1:LzIPMQfyMNhhGPhUkYOs5KpL4U8rLKemX1yGLhDgUto=
 golang.org/x/crypto v0.37.0 h1:kJNSjF/Xp7kU0iB2Z+9viTPMW4EqqsrywMXLJOOsXSE=
 golang.org/x/crypto v0.37.0/go.mod h1:vg+k43peMZ0pUMhYmVAWysMK35e6ioLh3wB8ZCAfbVc=
+golang.org/x/exp v0.0.0-20231006140011-7918f672742d h1:jtJma62tbqLibJ5sFQz8bKtEM8rJBtfilJ2qTU199MI=
+golang.org/x/exp v0.0.0-20231006140011-7918f672742d/go.mod h1:ldy0pHrwJyGW56pPQzzkH36rKxoZW1tw7ZJpeKx+hdo=
 golang.org/x/mod v0.2.0/go.mod h1:s0Qsj1ACt9ePp/hMypM3fl4fZqREWJwdYDEqhRiZZUA=
 golang.org/x/mod v0.3.0/go.mod h1:s0Qsj1ACt9ePp/hMypM3fl4fZqREWJwdYDEqhRiZZUA=
 golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3/go.mod h1:t9HGtf8HONx5eT2rtn7q6eTqICYqUVnKs3thJo3Qplg=
