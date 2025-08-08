@@ -240,7 +240,7 @@ func TestRPCService_InvokeContract(t *testing.T) {
 		defer server.Close()
 
 		service := NewRPCService(server.URL)
-		resp, err := service.InvokeContract(context.Background(), contractId, sourceAccount, nil, timeout)
+		resp, err := service.InvokeContract(context.Background(), contractId, sourceAccount, "get_metadata", []xdr.ScVal{}, timeout)
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 		assert.Equal(t, xdr.ScValTypeScvI64, resp.Type)
