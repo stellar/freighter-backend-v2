@@ -64,7 +64,7 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/protocols", handlers.CustomHandler(protocolsHandler.GetProtocols))
 
 	collectiblesHandler := handlers.NewCollectiblesHandler(s.rpcService)
-	mux.HandleFunc("/api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles))
+	mux.HandleFunc("POST /api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles))
 	return mux
 }
 
