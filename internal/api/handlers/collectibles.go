@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -16,7 +15,6 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/txnbuild"
-	"github.com/stellar/go/xdr"
 )
 
 var (
@@ -48,14 +46,7 @@ type CollectibleRequest struct {
 	Contracts []ContractDetails `json:"contracts"`
 }
 
-type Collectible struct {
-	Owner    string `json:"owner"`
-	TokenUri string `json:"token_uri"`
-	Name     string `json:"name"`
-	Symbol   string `json:"symbol"`
-}
-
-type CollectibleResponse map[string]map[string]Collectible
+type CollectibleResponse map[string]map[string]utils.Collectible
 
 type GetCollectiblesPayload struct {
 	Collectibles CollectibleResponse `json:"collectibles"`
@@ -109,50 +100,6 @@ func DecodeCollectibleRequest(r *http.Request) (*CollectibleRequest, error) {
 	return &req, nil
 }
 
-func (h *CollectiblesHandler) fetchCollectible(
-	ctx context.Context, accountId *txnbuild.SimpleAccount, contractID string, tokenId string,
-) (*Collectible, error) {
-
-	id, err := utils.ScAddressFromString(contractID)
-	if err != nil {
-		return nil, errors.New(ErrInvalidBody.ClientMessage)
-	}
-
-	tokenUint, err := strconv.ParseUint(tokenId, 10, 32)
-	if err != nil {
-		return nil, errors.New(ErrInvalidBody.ClientMessage)
-	}
-	tokenVal := xdr.Uint32(tokenUint)
-	scToken := xdr.ScVal{
-		Type: xdr.ScValTypeScvU32,
-		U32:  &tokenVal,
-	}
-
-	owner, err := h.RpcService.InvokeContract(ctx, *id, accountId, "owner_of", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300))
-	if err != nil {
-		return nil, errors.New(ErrFailedSimulation.ClientMessage)
-	}
-	name, err := h.RpcService.InvokeContract(ctx, *id, accountId, "name", []xdr.ScVal{}, txnbuild.NewTimeout(300))
-	if err != nil {
-		return nil, errors.New(ErrFailedSimulation.ClientMessage)
-	}
-	symbol, err := h.RpcService.InvokeContract(ctx, *id, accountId, "symbol", []xdr.ScVal{}, txnbuild.NewTimeout(300))
-	if err != nil {
-		return nil, errors.New(ErrFailedSimulation.ClientMessage)
-	}
-	tokenURI, err := h.RpcService.InvokeContract(ctx, *id, accountId, "token_uri", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300))
-	if err != nil {
-		return nil, errors.New(ErrFailedSimulation.ClientMessage)
-	}
-
-	return &Collectible{
-		Owner:    owner.String(),
-		Name:     name.String(),
-		Symbol:   symbol.String(),
-		TokenUri: tokenURI.String(),
-	}, nil
-}
-
 func NewCollectiblesHandler(rpc types.RPCService) *CollectiblesHandler {
 	return &CollectiblesHandler{
 		RpcService: rpc,
@@ -193,14 +140,14 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 
 		// Initialize inner map for this contract if nil
 		if results[contract.ID] == nil {
-			results[contract.ID] = make(map[string]Collectible)
+			results[contract.ID] = make(map[string]utils.Collectible)
 		}
 
 		for _, tokenId := range contract.TokenIDs {
 			wg.Add(1)
 			go func(contractID, tokenID string) {
 				defer wg.Done()
-				collectible, err := h.fetchCollectible(ctx, accountId, contractID, tokenID)
+				collectible, err := utils.FetchCollectible(h.RpcService, ctx, accountId, contractID, tokenID)
 				if err != nil {
 					select {
 					case errCh <- err:
