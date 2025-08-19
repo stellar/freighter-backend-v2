@@ -65,7 +65,7 @@ type CollectiblesHandler struct {
 	RpcService types.RPCService
 }
 
-func decodeCollectibleRequest(r *http.Request) (*CollectibleRequest, error) {
+func DecodeCollectibleRequest(r *http.Request) (*CollectibleRequest, error) {
 	var req CollectibleRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -163,7 +163,7 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 	ctx, cancel := context.WithTimeout(r.Context(), HealthCheckContextTimeout)
 	defer cancel()
 
-	req, err := decodeCollectibleRequest(r)
+	req, err := DecodeCollectibleRequest(r)
 	if err != nil {
 		logger.Error("GetCollectibles: invalid request", "err", err)
 		return httperror.BadRequest(ErrInvalidBody.ClientMessage+err.Error(), err)
