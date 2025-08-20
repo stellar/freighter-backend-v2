@@ -64,3 +64,15 @@ func NewMockHTTPClient(payload any) *http.Client {
 		}),
 	}
 }
+
+var MockTokenData = struct {
+	Name        string
+	Description string
+	URL         string
+	Issuer      string
+}{
+	Name:        "MockNFT",
+	Description: "A mock NFT",
+	URL:         "https://example.com/image.png",
+	Issuer:      "G123",
+}

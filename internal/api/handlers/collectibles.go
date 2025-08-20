@@ -11,6 +11,7 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
+	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/txnbuild"
@@ -25,13 +26,9 @@ var (
 		LogMessage:    "invalid contract id %s: %v",
 		ClientMessage: "An error occurred while fetching collectibles.",
 	}
-	ErrFailedSimulation = httperror.ErrorMessage{
-		LogMessage:    "simulation failure %s: %v",
+	ErrInternal = httperror.ErrorMessage{
+		LogMessage:    "internal failure %s: %v",
 		ClientMessage: "An error occurred while fetching collectibles.",
-	}
-	ErrFailedToEncodeCollectiblesToJSONResponse = httperror.ErrorMessage{
-		LogMessage:    "failed to encode collectibles to JSON response: %v",
-		ClientMessage: "An error occurred while formatting the response.",
 	}
 )
 
@@ -46,9 +43,10 @@ type CollectibleRequest struct {
 }
 
 type Collection struct {
-	Name         string              `json:"name"`
-	Symbol       string              `json:"symbol"`
-	Collectibles []utils.Collectible `json:"collectibles"`
+	CollectionAddress string              `json:"address"`
+	Name              string              `json:"name"`
+	Symbol            string              `json:"symbol"`
+	Collectibles      []utils.Collectible `json:"collectibles"`
 }
 
 type CollectibleResponse []Collection
@@ -117,11 +115,13 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 
 	req, err := DecodeCollectibleRequest(r)
 	if err != nil {
+		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInvalidBody.LogMessage, err))
 		return httperror.BadRequest(ErrInvalidBody.ClientMessage+err.Error(), err)
 	}
 
 	owner := strings.TrimSpace(req.Owner)
 	if !utils.IsValidStellarPublicKey(owner) {
+		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrBadContractId.LogMessage, err))
 		return httperror.InternalServerError(ErrBadContractId.ClientMessage, errors.New("invalid owner"))
 	}
 
@@ -132,18 +132,21 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 
 	for _, contract := range req.Contracts {
 		if !utils.IsValidContractID(strings.TrimSpace(contract.ID)) {
+			logger.ErrorWithContext(ctx, fmt.Sprintf(ErrBadContractId.LogMessage, errors.New("invalid contract ID")))
 			return httperror.InternalServerError(ErrBadContractId.ClientMessage, errors.New("invalid contract ID"))
 		}
 
 		collectionDetails, err := utils.FetchCollection(h.RpcService, ctx, accountId, contract.ID)
 		if err != nil {
-			return httperror.InternalServerError(ErrBadContractId.ClientMessage, err)
+			logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInternal.LogMessage, err))
+			return httperror.InternalServerError(ErrInternal.ClientMessage, err)
 		}
 
 		collection := Collection{
-			Name:         collectionDetails.Name,
-			Symbol:       collectionDetails.Symbol,
-			Collectibles: make([]utils.Collectible, 0, len(contract.TokenIDs)),
+			CollectionAddress: contract.ID,
+			Name:              collectionDetails.Name,
+			Symbol:            collectionDetails.Symbol,
+			Collectibles:      make([]utils.Collectible, 0, len(contract.TokenIDs)),
 		}
 
 		var wg sync.WaitGroup
@@ -175,6 +178,7 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 
 	select {
 	case err := <-errCh:
+		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInternal.LogMessage, err))
 		return httperror.InternalServerError("Failed to fetch collectibles", err)
 	default:
 	}

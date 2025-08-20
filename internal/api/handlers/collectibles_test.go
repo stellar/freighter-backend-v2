@@ -22,15 +22,8 @@ func (f *failingWriter) WriteHeader(statusCode int) {}
 func TestGetCollectibles(t *testing.T) {
 	t.Run("should return collectibles", func(t *testing.T) {
 		t.Parallel()
-
-		meta := utils.TokenMetadata{
-			Name:        "MockNFT",
-			Description: "A mock NFT",
-			URL:         "https://example.com/image.png",
-			Issuer:      "GB7RQNG6ROYGLFKR3IDAABKI2Y2UAQKEO6BSJVR5IYS7UYQ743O7TOXE",
-		}
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			json.NewEncoder(w).Encode(meta)
+			json.NewEncoder(w).Encode(utils.MockTokenData)
 		}))
 		defer server.Close()
 
@@ -72,9 +65,9 @@ func TestGetCollectibles(t *testing.T) {
 		require.Len(t, collection.Collectibles, 3)
 
 		for _, c := range collection.Collectibles {
-			assert.Equal(t, meta.Name, c.Name)
-			assert.Equal(t, meta.Description, c.Description)
-			assert.Equal(t, meta.URL, c.ImageURL)
+			assert.Equal(t, utils.MockTokenData.Name, c.Name)
+			assert.Equal(t, utils.MockTokenData.Description, c.Description)
+			assert.Equal(t, utils.MockTokenData.URL, c.ImageURL)
 			assert.Equal(t, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", c.Owner)
 			assert.Equal(t, server.URL, c.TokenUri)
 		}

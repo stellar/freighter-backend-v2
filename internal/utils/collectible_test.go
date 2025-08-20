@@ -44,16 +44,9 @@ func TestFetchCollection_InvokeContractError(t *testing.T) {
 }
 
 func TestFetchCollectible_Success(t *testing.T) {
-	meta := utils.TokenMetadata{
-		Name:        "MockNFT",
-		Description: "A mock NFT",
-		URL:         "https://example.com/image.png",
-		Issuer:      "G123",
-	}
-
-	mockClient := utils.NewMockHTTPClient(meta)
+	mockClient := utils.NewMockHTTPClient(utils.MockTokenData)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(meta)
+		json.NewEncoder(w).Encode(utils.MockTokenData)
 	}))
 	defer server.Close()
 
@@ -75,14 +68,7 @@ func TestFetchCollectible_Success(t *testing.T) {
 }
 
 func TestFetchCollectible_InvalidTokenID(t *testing.T) {
-	meta := utils.TokenMetadata{
-		Name:        "MockNFT",
-		Description: "A mock NFT",
-		URL:         "https://example.com/image.png",
-		Issuer:      "G123",
-	}
-
-	mockClient := utils.NewMockHTTPClient(meta)
+	mockClient := utils.NewMockHTTPClient(utils.MockTokenData)
 	mockRPC := &utils.MockRPCService{}
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
 
@@ -91,14 +77,7 @@ func TestFetchCollectible_InvalidTokenID(t *testing.T) {
 }
 
 func TestFetchCollectible_InvokeContractError(t *testing.T) {
-	meta := utils.TokenMetadata{
-		Name:        "MockNFT",
-		Description: "A mock NFT",
-		URL:         "https://example.com/image.png",
-		Issuer:      "G123",
-	}
-
-	mockClient := utils.NewMockHTTPClient(meta)
+	mockClient := utils.NewMockHTTPClient(utils.MockTokenData)
 	mockRPC := &utils.MockRPCService{
 		SimulateError: errors.New("rpc failure"),
 	}
