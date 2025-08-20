@@ -43,18 +43,45 @@ func FetchCollection(
 		return nil, err
 	}
 
-	name, err := rpc.SimulateInvocation(ctx, *id, accountId, "name", []xdr.ScVal{}, txnbuild.NewTimeout(300))
-	if err != nil {
-		return nil, err
+	type result struct {
+		value string
+		err   error
 	}
-	symbol, err := rpc.SimulateInvocation(ctx, *id, accountId, "symbol", []xdr.ScVal{}, txnbuild.NewTimeout(300))
-	if err != nil {
-		return nil, err
+
+	nameCh := make(chan result, 1)
+	symbolCh := make(chan result, 1)
+
+	go func() {
+		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "name", []xdr.ScVal{}, txnbuild.NewTimeout(300))
+		if err != nil {
+			nameCh <- result{"", err}
+			return
+		}
+		nameCh <- result{res.String(), nil}
+	}()
+
+	go func() {
+		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "symbol", []xdr.ScVal{}, txnbuild.NewTimeout(300))
+		if err != nil {
+			symbolCh <- result{"", err}
+			return
+		}
+		symbolCh <- result{res.String(), nil}
+	}()
+
+	nameRes := <-nameCh
+	symbolRes := <-symbolCh
+
+	if nameRes.err != nil {
+		return nil, nameRes.err
+	}
+	if symbolRes.err != nil {
+		return nil, symbolRes.err
 	}
 
 	return &Collection{
-		Name:   name.String(),
-		Symbol: symbol.String(),
+		Name:   nameRes.value,
+		Symbol: symbolRes.value,
 	}, nil
 }
 
