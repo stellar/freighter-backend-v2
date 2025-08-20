@@ -109,15 +109,42 @@ func FetchCollectible(
 		U32:  &tokenVal,
 	}
 
-	owner, err := rpc.SimulateInvocation(ctx, *id, accountId, "owner_of", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300))
-	if err != nil {
-		return nil, err
+	type result struct {
+		val xdr.ScVal
+		err error
 	}
-	tokenURI, err := rpc.SimulateInvocation(ctx, *id, accountId, "token_uri", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300))
-	if err != nil {
-		return nil, err
+	ownerCh := make(chan result, 1)
+	tokenURICh := make(chan result, 1)
+
+	go func() {
+		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "owner_of", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300))
+		if err != nil {
+			ownerCh <- result{xdr.ScVal{}, err}
+			return
+		}
+		ownerCh <- result{*res, nil}
+	}()
+
+	go func() {
+		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "token_uri", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300))
+		if err != nil {
+			tokenURICh <- result{xdr.ScVal{}, err}
+			return
+		}
+		tokenURICh <- result{*res, nil}
+	}()
+
+	ownerRes := <-ownerCh
+	tokenURIRes := <-tokenURICh
+
+	if ownerRes.err != nil {
+		return nil, ownerRes.err
 	}
-	resp, err := client.Get(tokenURI.String())
+	if tokenURIRes.err != nil {
+		return nil, tokenURIRes.err
+	}
+
+	resp, err := client.Get(tokenURIRes.val.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch token metadata: %w", err)
 	}
@@ -133,9 +160,9 @@ func FetchCollectible(
 	}
 
 	return &Collectible{
-		Owner:       owner.String(),
+		Owner:       ownerRes.val.String(),
 		Name:        meta.Name,
-		TokenUri:    tokenURI.String(),
+		TokenUri:    tokenURIRes.val.String(),
 		ImageURL:    meta.URL,
 		Description: meta.Description,
 	}, nil
