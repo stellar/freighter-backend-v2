@@ -116,7 +116,10 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 	req, err := DecodeCollectibleRequest(r)
 	if err != nil {
 		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInvalidBody.LogMessage, err))
-		return httperror.BadRequest(ErrInvalidBody.ClientMessage+err.Error(), err)
+		return httperror.BadRequest(
+			fmt.Sprintf("%s: %s", ErrInvalidBody.ClientMessage, err.Error()),
+			err,
+		)
 	}
 
 	owner := strings.TrimSpace(req.Owner)
