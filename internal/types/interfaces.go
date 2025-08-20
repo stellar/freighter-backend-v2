@@ -21,7 +21,7 @@ type Service interface {
 type RPCService interface {
 	Service
 	SimulateTx(ctx context.Context, tx *txnbuild.Transaction) (SimulateTransactionResponse, error)
-	InvokeContract(
+	SimulateInvocation(
 		ctx context.Context,
 		contractId xdr.ScAddress,
 		sourceAccount *txnbuild.SimpleAccount,

@@ -43,11 +43,11 @@ func FetchCollection(
 		return nil, err
 	}
 
-	name, err := rpc.InvokeContract(ctx, *id, accountId, "name", []xdr.ScVal{}, txnbuild.NewTimeout(300))
+	name, err := rpc.SimulateInvocation(ctx, *id, accountId, "name", []xdr.ScVal{}, txnbuild.NewTimeout(300))
 	if err != nil {
 		return nil, err
 	}
-	symbol, err := rpc.InvokeContract(ctx, *id, accountId, "symbol", []xdr.ScVal{}, txnbuild.NewTimeout(300))
+	symbol, err := rpc.SimulateInvocation(ctx, *id, accountId, "symbol", []xdr.ScVal{}, txnbuild.NewTimeout(300))
 	if err != nil {
 		return nil, err
 	}
@@ -82,11 +82,11 @@ func FetchCollectible(
 		U32:  &tokenVal,
 	}
 
-	owner, err := rpc.InvokeContract(ctx, *id, accountId, "owner_of", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300))
+	owner, err := rpc.SimulateInvocation(ctx, *id, accountId, "owner_of", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300))
 	if err != nil {
 		return nil, err
 	}
-	tokenURI, err := rpc.InvokeContract(ctx, *id, accountId, "token_uri", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300))
+	tokenURI, err := rpc.SimulateInvocation(ctx, *id, accountId, "token_uri", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300))
 	if err != nil {
 		return nil, err
 	}

@@ -193,7 +193,7 @@ func TestRPCService_SimulateTx(t *testing.T) {
 	})
 }
 
-func TestRPCService_InvokeContract(t *testing.T) {
+func TestRPCService_SimulateInvocation(t *testing.T) {
 	account := keypair.MustRandom()
 	sourceAccount := &txnbuild.SimpleAccount{
 		AccountID: account.Address(),
@@ -208,7 +208,7 @@ func TestRPCService_InvokeContract(t *testing.T) {
 	}
 	timeout := txnbuild.NewTimeout(300)
 
-	t.Run("successfully invokes contract", func(t *testing.T) {
+	t.Run("successfully simulates contract invocation", func(t *testing.T) {
 		val := xdr.Int64(100)
 		validXDR := xdr.ScVal{
 			Type: xdr.ScValTypeScvI64,
@@ -240,7 +240,7 @@ func TestRPCService_InvokeContract(t *testing.T) {
 		defer server.Close()
 
 		service := NewRPCService(server.URL)
-		resp, err := service.InvokeContract(context.Background(), contractId, sourceAccount, "get_metadata", []xdr.ScVal{}, timeout)
+		resp, err := service.SimulateInvocation(context.Background(), contractId, sourceAccount, "get_metadata", []xdr.ScVal{}, timeout)
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 		assert.Equal(t, xdr.ScValTypeScvI64, resp.Type)

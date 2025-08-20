@@ -33,7 +33,7 @@ func TestFetchCollection_InvalidContractID(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestFetchCollection_InvokeContractError(t *testing.T) {
+func TestFetchCollection_SimulateInvocationError(t *testing.T) {
 	mockRPC := &utils.MockRPCService{
 		SimulateError: errors.New("rpc failure"),
 	}
@@ -76,7 +76,7 @@ func TestFetchCollectible_InvalidTokenID(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestFetchCollectible_InvokeContractError(t *testing.T) {
+func TestFetchCollectible_SimulateInvocationError(t *testing.T) {
 	mockClient := utils.NewMockHTTPClient(utils.MockTokenData)
 	mockRPC := &utils.MockRPCService{
 		SimulateError: errors.New("rpc failure"),

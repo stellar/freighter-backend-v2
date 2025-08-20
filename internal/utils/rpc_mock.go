@@ -25,7 +25,7 @@ func (m *MockRPCService) SimulateTx(ctx context.Context, tx *txnbuild.Transactio
 	return nil, nil
 }
 
-func (m *MockRPCService) InvokeContract(
+func (m *MockRPCService) SimulateInvocation(
 	ctx context.Context,
 	contractId xdr.ScAddress,
 	sourceAccount *txnbuild.SimpleAccount,

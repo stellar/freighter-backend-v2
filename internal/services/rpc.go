@@ -77,7 +77,7 @@ func (r *rpcService) SimulateTx(
 	return &retval, nil
 }
 
-func (r *rpcService) InvokeContract(
+func (r *rpcService) SimulateInvocation(
 	ctx context.Context,
 	contractId xdr.ScAddress,
 	sourceAccount *txnbuild.SimpleAccount,
