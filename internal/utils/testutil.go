@@ -1,7 +1,10 @@
 package utils
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 )
@@ -40,4 +43,24 @@ func (w *ErrorResponseWriter) WriteHeader(statusCode int) {
 // This is necessary to fulfill the http.ResponseWriter interface.
 func (w *ErrorResponseWriter) Header() http.Header {
 	return w.ResponseRecorder.Header()
+}
+
+type RoundTripperFunc func(req *http.Request) (*http.Response, error)
+
+func (f RoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+// NewMockHTTPClient returns a client that responds with the given JSON payload
+func NewMockHTTPClient(payload any) *http.Client {
+	b, _ := json.Marshal(payload)
+	return &http.Client{
+		Transport: RoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewReader(b)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
 }

@@ -9,7 +9,8 @@ import (
 )
 
 type MockRPCService struct {
-	SimulateError error
+	SimulateError    error
+	TokenURIOverride string
 }
 
 func (m *MockRPCService) Name() string {
@@ -24,20 +25,19 @@ func (m *MockRPCService) SimulateTx(ctx context.Context, tx *txnbuild.Transactio
 	return nil, nil
 }
 
-// Correct signature to implement types.RPCService
 func (m *MockRPCService) InvokeContract(
 	ctx context.Context,
 	contractId xdr.ScAddress,
 	sourceAccount *txnbuild.SimpleAccount,
-	functionName xdr.ScSymbol, // <- matches interface
+	functionName xdr.ScSymbol,
 	params []xdr.ScVal,
 	timeout txnbuild.TimeBounds,
-) (types.SimulateTransactionResponse, error) { // <- matches interface
+) (types.SimulateTransactionResponse, error) {
 	if m.SimulateError != nil {
 		return nil, m.SimulateError
 	}
 
-	fn := string(functionName) // convert ScSymbol to string for convenience
+	fn := string(functionName)
 
 	var result xdr.ScVal
 	switch fn {
@@ -51,12 +51,16 @@ func (m *MockRPCService) InvokeContract(
 		symbol := xdr.ScSymbol("MNFT")
 		result = xdr.ScVal{Type: xdr.ScValTypeScvSymbol, Sym: &symbol}
 	case "token_uri":
-		uri := xdr.ScSymbol("https://example.com/token.json")
+		uriStr := "https://example.com/token.json"
+		if m.TokenURIOverride != "" {
+			uriStr = m.TokenURIOverride
+		}
+		uri := xdr.ScSymbol(uriStr)
 		result = xdr.ScVal{Type: xdr.ScValTypeScvSymbol, Sym: &uri}
 	default:
 		dummy := xdr.ScSymbol("dummy")
 		result = xdr.ScVal{Type: xdr.ScValTypeScvSymbol, Sym: &dummy}
 	}
 
-	return &result, nil // return xdr.ScVal wrapped in types.SimulateTransactionResponse
+	return &result, nil
 }

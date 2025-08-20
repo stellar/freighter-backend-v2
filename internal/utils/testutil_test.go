@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"encoding/json"
+	"io/ioutil"
 	"net/http"
 	"testing"
 
@@ -40,4 +42,22 @@ func TestErrorResponseWriter_Header(t *testing.T) {
 	require.NotNil(t, h)
 	h.Set("X-Test", "value")
 	assert.Equal(t, "value", w.Header().Get("X-Test"))
+}
+
+func TestMockHTTPClient(t *testing.T) {
+	expected := map[string]string{"foo": "bar"}
+	client := NewMockHTTPClient(expected)
+
+	resp, err := client.Get("http://example.com")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	var actual map[string]string
+	err = json.Unmarshal(body, &actual)
+	require.NoError(t, err)
+
+	require.Equal(t, expected, actual)
 }

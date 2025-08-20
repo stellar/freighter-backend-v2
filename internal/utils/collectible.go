@@ -2,6 +2,9 @@ package utils
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"strconv"
 
 	"github.com/stellar/freighter-backend-v2/internal/types"
@@ -9,15 +12,59 @@ import (
 	"github.com/stellar/go/xdr"
 )
 
+type Collection struct {
+	Name   string `json:"name"`
+	Symbol string `json:"symbol"`
+}
+
 type Collectible struct {
-	Owner    string `json:"owner"`
-	TokenUri string `json:"token_uri"`
-	Name     string `json:"name"`
-	Symbol   string `json:"symbol"`
+	Owner       string `json:"owner"`
+	Name        string `json:"name"`
+	ImageURL    string `json:"url"`
+	Description string `json:"description"`
+	TokenUri    string `json:"token_uri"`
+}
+
+type TokenMetadata struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	URL         string `json:"url"`
+	Issuer      string `json:"issuer"`
+}
+
+func FetchCollection(
+	rpc types.RPCService,
+	ctx context.Context,
+	accountId *txnbuild.SimpleAccount,
+	contractID string,
+) (*Collection, error) {
+	id, err := ScAddressFromString(contractID)
+	if err != nil {
+		return nil, err
+	}
+
+	name, err := rpc.InvokeContract(ctx, *id, accountId, "name", []xdr.ScVal{}, txnbuild.NewTimeout(300))
+	if err != nil {
+		return nil, err
+	}
+	symbol, err := rpc.InvokeContract(ctx, *id, accountId, "symbol", []xdr.ScVal{}, txnbuild.NewTimeout(300))
+	if err != nil {
+		return nil, err
+	}
+
+	return &Collection{
+		Name:   name.String(),
+		Symbol: symbol.String(),
+	}, nil
 }
 
 func FetchCollectible(
-	rpc types.RPCService, ctx context.Context, accountId *txnbuild.SimpleAccount, contractID string, tokenId string,
+	rpc types.RPCService,
+	ctx context.Context,
+	accountId *txnbuild.SimpleAccount,
+	contractID string,
+	tokenId string,
+	client *http.Client,
 ) (*Collectible, error) {
 
 	id, err := ScAddressFromString(contractID)
@@ -39,23 +86,30 @@ func FetchCollectible(
 	if err != nil {
 		return nil, err
 	}
-	name, err := rpc.InvokeContract(ctx, *id, accountId, "name", []xdr.ScVal{}, txnbuild.NewTimeout(300))
-	if err != nil {
-		return nil, err
-	}
-	symbol, err := rpc.InvokeContract(ctx, *id, accountId, "symbol", []xdr.ScVal{}, txnbuild.NewTimeout(300))
-	if err != nil {
-		return nil, err
-	}
 	tokenURI, err := rpc.InvokeContract(ctx, *id, accountId, "token_uri", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300))
 	if err != nil {
 		return nil, err
 	}
+	resp, err := client.Get(tokenURI.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch token metadata: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("token metadata request returned status %d", resp.StatusCode)
+	}
+
+	var meta TokenMetadata
+	if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
+		return nil, fmt.Errorf("failed to decode token metadata: %w", err)
+	}
 
 	return &Collectible{
-		Owner:    owner.String(),
-		Name:     name.String(),
-		Symbol:   symbol.String(),
-		TokenUri: tokenURI.String(),
+		Owner:       owner.String(),
+		Name:        meta.Name,
+		TokenUri:    tokenURI.String(),
+		ImageURL:    meta.URL,
+		Description: meta.Description,
 	}, nil
 }
