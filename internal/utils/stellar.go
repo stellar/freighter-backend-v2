@@ -18,6 +18,10 @@ func IsValidStellarPublicKey(s string) bool {
 	return err == nil && len(decoded) == 32
 }
 
+func IsValidAccount(s string) bool {
+	return IsValidStellarPublicKey(s) || IsValidContractID(s)
+}
+
 func ScAddressFromAccountString(address string) (*xdr.ScAddress, error) {
 	raw, err := strkey.Decode(strkey.VersionByteAccountID, address)
 	if err != nil {

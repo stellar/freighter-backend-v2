@@ -71,6 +71,43 @@ func TestIsValidStellarPublicKey(t *testing.T) {
 	})
 }
 
+func TestIsValidAccount(t *testing.T) {
+	// Create valid account ID
+	validAccountRaw := make([]byte, 32)
+	for i := range validAccountRaw {
+		validAccountRaw[i] = byte(i)
+	}
+	validAccountID, err := strkey.Encode(strkey.VersionByteAccountID, validAccountRaw)
+	assert.NoError(t, err)
+
+	// Create valid contract ID
+	validContractRaw := make([]byte, 32)
+	for i := range validContractRaw {
+		validContractRaw[i] = byte(255 - i)
+	}
+	validContractID, err := strkey.Encode(strkey.VersionByteContract, validContractRaw)
+	assert.NoError(t, err)
+
+	t.Run("valid account ID returns true", func(t *testing.T) {
+		assert.True(t, IsValidAccount(validAccountID))
+	})
+
+	t.Run("valid contract ID returns true", func(t *testing.T) {
+		assert.True(t, IsValidAccount(validContractID))
+	})
+
+	t.Run("malformed string returns false", func(t *testing.T) {
+		assert.False(t, IsValidAccount("not-a-valid-id"))
+	})
+
+	t.Run("wrong length returns false", func(t *testing.T) {
+		shortRaw := make([]byte, 16)
+		shortID, err := strkey.Encode(strkey.VersionByteAccountID, shortRaw)
+		assert.NoError(t, err)
+		assert.False(t, IsValidAccount(shortID))
+	})
+}
+
 func TestScAddressFromAccountString(t *testing.T) {
 	// Create a valid account ID string
 	validRaw := make([]byte, 32)

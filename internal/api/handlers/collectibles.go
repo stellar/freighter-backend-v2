@@ -120,7 +120,7 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 	}
 
 	owner := strings.TrimSpace(req.Owner)
-	if !utils.IsValidStellarPublicKey(owner) {
+	if !utils.IsValidAccount(owner) {
 		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInvalidBody.LogMessage, err))
 		return httperror.BadRequest(ErrInvalidBody.ClientMessage, errors.New("invalid owner"))
 	}
