@@ -56,7 +56,7 @@ func TestGetCollectibles(t *testing.T) {
 		err = json.Unmarshal(rr.Body.Bytes(), &response)
 		require.NoError(t, err)
 
-		collectibles := response.Data.Collectibles
+		collectibles := response.Data.Collections
 		require.Len(t, collectibles, 1)
 
 		collection := collectibles[0]

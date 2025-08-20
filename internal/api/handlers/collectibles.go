@@ -52,7 +52,7 @@ type Collection struct {
 type CollectibleResponse []Collection
 
 type GetCollectiblesPayload struct {
-	Collectibles CollectibleResponse `json:"collectibles"`
+	Collections CollectibleResponse `json:"collections"`
 }
 
 type CollectiblesHandler struct {
@@ -203,7 +203,7 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 	}
 
 	responseData := HttpResponse{
-		Data: GetCollectiblesPayload{Collectibles: results},
+		Data: GetCollectiblesPayload{Collections: results},
 	}
 
 	return response.OK(w, responseData)
