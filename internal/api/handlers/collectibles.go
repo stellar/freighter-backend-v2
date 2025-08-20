@@ -131,53 +131,69 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 	accountId := &txnbuild.SimpleAccount{AccountID: owner}
 	results := make([]Collection, 0, len(req.Contracts))
 	var mu sync.Mutex
+
 	errCh := make(chan error, 1)
+	var wg sync.WaitGroup
 
 	for _, contract := range req.Contracts {
-		if !utils.IsValidContractID(strings.TrimSpace(contract.ID)) {
-			logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInvalidBody.LogMessage, errors.New("invalid contract ID")))
-			return httperror.BadRequest(ErrInvalidBody.ClientMessage, errors.New("invalid contract ID"))
-		}
+		wg.Add(1)
+		go func(contract ContractDetails) {
+			defer wg.Done()
 
-		collectionDetails, err := utils.FetchCollection(h.RpcService, ctx, accountId, contract.ID)
-		if err != nil {
-			logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInternal.LogMessage, err))
-			return httperror.InternalServerError(ErrInternal.ClientMessage, err)
-		}
-
-		collection := Collection{
-			CollectionAddress: contract.ID,
-			Name:              collectionDetails.Name,
-			Symbol:            collectionDetails.Symbol,
-			Collectibles:      make([]utils.Collectible, 0, len(contract.TokenIDs)),
-		}
-
-		var wg sync.WaitGroup
-
-		for _, tokenID := range contract.TokenIDs {
-			wg.Add(1)
-			go func(contractID, tokenID string) {
-				defer wg.Done()
-				collectible, err := utils.FetchCollectible(h.RpcService, ctx, accountId, contractID, tokenID, http.DefaultClient)
-				if err != nil {
-					select {
-					case errCh <- err:
-					default:
-					}
-					return
+			if !utils.IsValidContractID(strings.TrimSpace(contract.ID)) {
+				select {
+				case errCh <- errors.New("invalid contract ID"):
+				default:
 				}
-				mu.Lock()
-				collection.Collectibles = append(collection.Collectibles, *collectible)
-				mu.Unlock()
-			}(contract.ID, tokenID)
-		}
+				return
+			}
 
-		wg.Wait()
+			collectionDetails, err := utils.FetchCollection(h.RpcService, ctx, accountId, contract.ID)
+			if err != nil {
+				select {
+				case errCh <- err:
+				default:
+				}
+				return
+			}
 
-		mu.Lock()
-		results = append(results, collection)
-		mu.Unlock()
+			collection := Collection{
+				CollectionAddress: contract.ID,
+				Name:              collectionDetails.Name,
+				Symbol:            collectionDetails.Symbol,
+				Collectibles:      make([]utils.Collectible, 0, len(contract.TokenIDs)),
+			}
+
+			var innerWg sync.WaitGroup
+			var innerMu sync.Mutex
+
+			for _, tokenID := range contract.TokenIDs {
+				innerWg.Add(1)
+				go func(id string) {
+					defer innerWg.Done()
+					collectible, err := utils.FetchCollectible(h.RpcService, ctx, accountId, contract.ID, id, http.DefaultClient)
+					if err != nil {
+						select {
+						case errCh <- err:
+						default:
+						}
+						return
+					}
+					innerMu.Lock()
+					collection.Collectibles = append(collection.Collectibles, *collectible)
+					innerMu.Unlock()
+				}(tokenID)
+			}
+
+			innerWg.Wait()
+
+			mu.Lock()
+			results = append(results, collection)
+			mu.Unlock()
+		}(contract)
 	}
+
+	wg.Wait()
 
 	select {
 	case err := <-errCh:
