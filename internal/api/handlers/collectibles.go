@@ -121,8 +121,8 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 
 	owner := strings.TrimSpace(req.Owner)
 	if !utils.IsValidStellarPublicKey(owner) {
-		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrBadContractId.LogMessage, err))
-		return httperror.InternalServerError(ErrBadContractId.ClientMessage, errors.New("invalid owner"))
+		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInvalidBody.LogMessage, err))
+		return httperror.BadRequest(ErrInvalidBody.ClientMessage, errors.New("invalid owner"))
 	}
 
 	accountId := &txnbuild.SimpleAccount{AccountID: owner}
@@ -132,8 +132,8 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 
 	for _, contract := range req.Contracts {
 		if !utils.IsValidContractID(strings.TrimSpace(contract.ID)) {
-			logger.ErrorWithContext(ctx, fmt.Sprintf(ErrBadContractId.LogMessage, errors.New("invalid contract ID")))
-			return httperror.InternalServerError(ErrBadContractId.ClientMessage, errors.New("invalid contract ID"))
+			logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInvalidBody.LogMessage, errors.New("invalid contract ID")))
+			return httperror.BadRequest(ErrInvalidBody.ClientMessage, errors.New("invalid contract ID"))
 		}
 
 		collectionDetails, err := utils.FetchCollection(h.RpcService, ctx, accountId, contract.ID)
