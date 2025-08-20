@@ -20,9 +20,10 @@ type Collection struct {
 type Collectible struct {
 	Owner       string `json:"owner"`
 	Name        string `json:"name"`
-	ImageURL    string `json:"url"`
+	ImageURL    string `json:"image"`
 	Description string `json:"description"`
 	TokenUri    string `json:"token_uri"`
+	TokenId     string `json:"token_id"`
 }
 
 type TokenMetadata struct {
@@ -165,5 +166,6 @@ func FetchCollectible(
 		TokenUri:    tokenURIRes.val.String(),
 		ImageURL:    meta.URL,
 		Description: meta.Description,
+		TokenId:     tokenId,
 	}, nil
 }
