@@ -2,9 +2,6 @@ package utils
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
 	"strconv"
 
 	"github.com/stellar/freighter-backend-v2/internal/types"
@@ -18,12 +15,9 @@ type Collection struct {
 }
 
 type Collectible struct {
-	Owner       string `json:"owner"`
-	Name        string `json:"name"`
-	ImageURL    string `json:"image"`
-	Description string `json:"description"`
-	TokenUri    string `json:"token_uri"`
-	TokenId     string `json:"token_id"`
+	Owner    string `json:"owner"`
+	TokenUri string `json:"token_uri"`
+	TokenId  string `json:"token_id"`
 }
 
 type TokenMetadata struct {
@@ -92,7 +86,6 @@ func FetchCollectible(
 	accountId *txnbuild.SimpleAccount,
 	contractID string,
 	tokenId string,
-	client *http.Client,
 ) (*Collectible, error) {
 
 	id, err := ScAddressFromString(contractID)
@@ -145,27 +138,9 @@ func FetchCollectible(
 		return nil, tokenURIRes.err
 	}
 
-	resp, err := client.Get(tokenURIRes.val.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch token metadata: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token metadata request returned status %d", resp.StatusCode)
-	}
-
-	var meta TokenMetadata
-	if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
-		return nil, fmt.Errorf("failed to decode token metadata: %w", err)
-	}
-
 	return &Collectible{
-		Owner:       ownerRes.val.String(),
-		Name:        meta.Name,
-		TokenUri:    tokenURIRes.val.String(),
-		ImageURL:    meta.URL,
-		Description: meta.Description,
-		TokenId:     tokenId,
+		Owner:    ownerRes.val.String(),
+		TokenUri: tokenURIRes.val.String(),
+		TokenId:  tokenId,
 	}, nil
 }

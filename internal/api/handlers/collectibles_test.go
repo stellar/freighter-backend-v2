@@ -65,15 +65,11 @@ func TestGetCollectibles(t *testing.T) {
 		require.Len(t, collection.Collectibles, 3)
 
 		for _, c := range collection.Collectibles {
-			assert.Equal(t, utils.MockTokenData.Name, c.Name)
-			assert.Equal(t, utils.MockTokenData.Description, c.Description)
-			assert.Equal(t, utils.MockTokenData.URL, c.ImageURL)
 			assert.Equal(t, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", c.Owner)
 			assert.Equal(t, server.URL, c.TokenUri)
 		}
 	})
 
-	// Remaining tests mostly unchanged; they just verify errors
 	t.Run("invalid JSON body", func(t *testing.T) {
 		mockRPC := &utils.MockRPCService{}
 		handler := NewCollectiblesHandler(mockRPC)

@@ -44,7 +44,7 @@ func TestFetchCollection_SimulateInvocationError(t *testing.T) {
 }
 
 func TestFetchCollectible_Success(t *testing.T) {
-	mockClient := utils.NewMockHTTPClient(utils.MockTokenData)
+	tokenId := "1"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(utils.MockTokenData)
 	}))
@@ -55,34 +55,30 @@ func TestFetchCollectible_Success(t *testing.T) {
 	}
 
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
-	collectible, err := utils.FetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "1", mockClient)
+	collectible, err := utils.FetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", tokenId)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, collectible)
 
 	assert.Equal(t, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", collectible.Owner)
-	assert.Equal(t, "MockNFT", collectible.Name)
 	assert.Equal(t, server.URL, collectible.TokenUri)
-	assert.Equal(t, "https://example.com/image.png", collectible.ImageURL)
-	assert.Equal(t, "A mock NFT", collectible.Description)
+	assert.Equal(t, tokenId, collectible.TokenId)
 }
 
 func TestFetchCollectible_InvalidTokenID(t *testing.T) {
-	mockClient := utils.NewMockHTTPClient(utils.MockTokenData)
 	mockRPC := &utils.MockRPCService{}
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
 
-	_, err := utils.FetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "not-a-number", mockClient)
+	_, err := utils.FetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "not-a-number")
 	assert.Error(t, err)
 }
 
 func TestFetchCollectible_SimulateInvocationError(t *testing.T) {
-	mockClient := utils.NewMockHTTPClient(utils.MockTokenData)
 	mockRPC := &utils.MockRPCService{
 		SimulateError: errors.New("rpc failure"),
 	}
 
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
-	_, err := utils.FetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "1", mockClient)
+	_, err := utils.FetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "1")
 	assert.Error(t, err)
 }

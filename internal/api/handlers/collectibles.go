@@ -171,7 +171,7 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 				innerWg.Add(1)
 				go func(id string) {
 					defer innerWg.Done()
-					collectible, err := utils.FetchCollectible(h.RpcService, ctx, accountId, contract.ID, id, http.DefaultClient)
+					collectible, err := utils.FetchCollectible(h.RpcService, ctx, accountId, contract.ID, id)
 					if err != nil {
 						select {
 						case errCh <- err:
