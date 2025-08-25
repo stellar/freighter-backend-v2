@@ -9,7 +9,7 @@ import (
 	"github.com/stellar/go/xdr"
 )
 
-type Collection struct {
+type collection struct {
 	Name   string `json:"name"`
 	Symbol string `json:"symbol"`
 }
@@ -20,19 +20,12 @@ type Collectible struct {
 	TokenId  string `json:"token_id"`
 }
 
-type TokenMetadata struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	URL         string `json:"url"`
-	Issuer      string `json:"issuer"`
-}
-
 func FetchCollection(
 	rpc types.RPCService,
 	ctx context.Context,
 	accountId *txnbuild.SimpleAccount,
 	contractID string,
-) (*Collection, error) {
+) (*collection, error) {
 	id, err := ScAddressFromString(contractID)
 	if err != nil {
 		return nil, err
@@ -74,7 +67,7 @@ func FetchCollection(
 		return nil, symbolRes.err
 	}
 
-	return &Collection{
+	return &collection{
 		Name:   nameRes.value,
 		Symbol: symbolRes.value,
 	}, nil

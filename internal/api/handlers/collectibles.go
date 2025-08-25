@@ -32,14 +32,14 @@ var (
 	}
 )
 
-type ContractDetails struct {
+type contractDetails struct {
 	ID       string   `json:"id"`
 	TokenIDs []string `json:"token_ids"`
 }
 
-type CollectibleRequest struct {
+type collectibleRequest struct {
 	Owner     string
-	Contracts []ContractDetails `json:"contracts"`
+	Contracts []contractDetails `json:"contracts"`
 }
 
 type Collection struct {
@@ -59,8 +59,8 @@ type CollectiblesHandler struct {
 	RpcService types.RPCService
 }
 
-func DecodeCollectibleRequest(r *http.Request) (*CollectibleRequest, error) {
-	var req CollectibleRequest
+func validateRequest(r *http.Request) (*collectibleRequest, error) {
+	var req collectibleRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, fmt.Errorf("invalid JSON: %w", err)
@@ -72,7 +72,7 @@ func DecodeCollectibleRequest(r *http.Request) (*CollectibleRequest, error) {
 			if strings.TrimSpace(v) == "" {
 				return fmt.Errorf("missing or empty key: %s", name)
 			}
-		case []ContractDetails:
+		case []contractDetails:
 			if len(v) == 0 {
 				return fmt.Errorf("missing or empty key: %s", name)
 			}
@@ -103,6 +103,122 @@ func DecodeCollectibleRequest(r *http.Request) (*CollectibleRequest, error) {
 	return &req, nil
 }
 
+func (h *CollectiblesHandler) fetchCollections(
+	ctx context.Context,
+	account *txnbuild.SimpleAccount,
+	contracts []contractDetails,
+) ([]Collection, error) {
+
+	var (
+		results []Collection
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+		errCh   = make(chan error, 1)
+	)
+
+	for _, contract := range contracts {
+		wg.Add(1)
+		go func(c contractDetails) {
+			defer wg.Done()
+			collection, err := h.fetchCollection(ctx, account, c)
+			if err != nil {
+				select {
+				case errCh <- err:
+				default:
+				}
+				return
+			}
+
+			mu.Lock()
+			results = append(results, *collection)
+			mu.Unlock()
+		}(contract)
+	}
+
+	wg.Wait()
+
+	select {
+	case err := <-errCh:
+		return nil, err
+	default:
+		return results, nil
+	}
+}
+
+func (h *CollectiblesHandler) fetchCollection(
+	ctx context.Context,
+	account *txnbuild.SimpleAccount,
+	c contractDetails,
+) (*Collection, error) {
+
+	if !utils.IsValidContractID(strings.TrimSpace(c.ID)) {
+		return nil, errors.New("invalid contract ID")
+	}
+
+	details, err := utils.FetchCollection(h.RpcService, ctx, account, c.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	collection := &Collection{
+		CollectionAddress: c.ID,
+		Name:              details.Name,
+		Symbol:            details.Symbol,
+		Collectibles:      make([]utils.Collectible, 0, len(c.TokenIDs)),
+	}
+
+	collectibles, err := h.fetchCollectibles(ctx, account, c.ID, c.TokenIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	collection.Collectibles = collectibles
+	return collection, nil
+}
+
+func (h *CollectiblesHandler) fetchCollectibles(
+	ctx context.Context,
+	account *txnbuild.SimpleAccount,
+	contractID string,
+	tokenIDs []string,
+) ([]utils.Collectible, error) {
+
+	var (
+		results []utils.Collectible
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+		errCh   = make(chan error, 1)
+	)
+
+	for _, id := range tokenIDs {
+		wg.Add(1)
+		go func(tokenID string) {
+			defer wg.Done()
+			c, err := utils.FetchCollectible(h.RpcService, ctx, account, contractID, tokenID)
+			if err != nil {
+				select {
+				case errCh <- err:
+				default:
+				}
+				return
+			}
+
+			mu.Lock()
+			results = append(results, *c)
+			mu.Unlock()
+		}(id)
+	}
+
+	wg.Wait()
+
+	select {
+	case err := <-errCh:
+		return nil, err
+	default:
+		return results, nil
+	}
+}
+
 func NewCollectiblesHandler(rpc types.RPCService) *CollectiblesHandler {
 	return &CollectiblesHandler{
 		RpcService: rpc,
@@ -113,7 +229,7 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 	ctx, cancel := context.WithTimeout(r.Context(), HealthCheckContextTimeout)
 	defer cancel()
 
-	req, err := DecodeCollectibleRequest(r)
+	req, err := validateRequest(r)
 	if err != nil {
 		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInvalidBody.LogMessage, err))
 		return httperror.BadRequest(
@@ -128,78 +244,11 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 		return httperror.BadRequest(ErrInvalidBody.ClientMessage, errors.New("invalid owner"))
 	}
 
-	accountId := &txnbuild.SimpleAccount{AccountID: owner}
-	results := make([]Collection, 0, len(req.Contracts))
-	var mu sync.Mutex
-
-	errCh := make(chan error, 1)
-	var wg sync.WaitGroup
-
-	for _, contract := range req.Contracts {
-		wg.Add(1)
-		go func(contract ContractDetails) {
-			defer wg.Done()
-
-			if !utils.IsValidContractID(strings.TrimSpace(contract.ID)) {
-				select {
-				case errCh <- errors.New("invalid contract ID"):
-				default:
-				}
-				return
-			}
-
-			collectionDetails, err := utils.FetchCollection(h.RpcService, ctx, accountId, contract.ID)
-			if err != nil {
-				select {
-				case errCh <- err:
-				default:
-				}
-				return
-			}
-
-			collection := Collection{
-				CollectionAddress: contract.ID,
-				Name:              collectionDetails.Name,
-				Symbol:            collectionDetails.Symbol,
-				Collectibles:      make([]utils.Collectible, 0, len(contract.TokenIDs)),
-			}
-
-			var innerWg sync.WaitGroup
-			var innerMu sync.Mutex
-
-			for _, tokenID := range contract.TokenIDs {
-				innerWg.Add(1)
-				go func(id string) {
-					defer innerWg.Done()
-					collectible, err := utils.FetchCollectible(h.RpcService, ctx, accountId, contract.ID, id)
-					if err != nil {
-						select {
-						case errCh <- err:
-						default:
-						}
-						return
-					}
-					innerMu.Lock()
-					collection.Collectibles = append(collection.Collectibles, *collectible)
-					innerMu.Unlock()
-				}(tokenID)
-			}
-
-			innerWg.Wait()
-
-			mu.Lock()
-			results = append(results, collection)
-			mu.Unlock()
-		}(contract)
-	}
-
-	wg.Wait()
-
-	select {
-	case err := <-errCh:
+	account := &txnbuild.SimpleAccount{AccountID: owner}
+	results, err := h.fetchCollections(ctx, account, req.Contracts)
+	if err != nil {
 		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInternal.LogMessage, err))
 		return httperror.InternalServerError("Failed to fetch collectibles", err)
-	default:
 	}
 
 	responseData := HttpResponse{

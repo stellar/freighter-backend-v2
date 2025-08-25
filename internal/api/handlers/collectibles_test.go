@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/stellar/freighter-backend-v2/internal/utils"
+	"github.com/stellar/go/txnbuild"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -128,6 +130,99 @@ func TestGetCollectibles(t *testing.T) {
 		req, _ := http.NewRequest("POST", "/api/v1/collectibles", strings.NewReader(body))
 		rr := &failingWriter{}
 		err := handler.GetCollectibles(rr, req)
+		require.Error(t, err)
+	})
+}
+
+func TestFetchCollections(t *testing.T) {
+	t.Run("should fetch multiple collections", func(t *testing.T) {
+		mockRPC := &utils.MockRPCService{}
+		handler := NewCollectiblesHandler(mockRPC)
+
+		account := &txnbuild.SimpleAccount{AccountID: "GB7RQNG6ROYGLFKR3IDAABKI2Y2UAQKEO6BSJVR5IYS7UYQ743O7TOXE"}
+		contracts := []contractDetails{
+			{ID: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", TokenIDs: []string{"0"}},
+			{ID: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", TokenIDs: []string{"1"}},
+		}
+
+		ctx := context.Background()
+		results, err := handler.fetchCollections(ctx, account, contracts)
+		require.NoError(t, err)
+		require.Len(t, results, 2)
+	})
+
+	t.Run("invalid contract id returns error", func(t *testing.T) {
+		mockRPC := &utils.MockRPCService{}
+		handler := NewCollectiblesHandler(mockRPC)
+
+		account := &txnbuild.SimpleAccount{AccountID: "GB7RQNG6ROYGLFKR3IDAABKI2Y2UAQKEO6BSJVR5IYS7UYQ743O7TOXE"}
+		contracts := []contractDetails{
+			{ID: "not-a-valid-contract", TokenIDs: []string{"1"}},
+		}
+
+		ctx := context.Background()
+		_, err := handler.fetchCollections(ctx, account, contracts)
+		require.Error(t, err)
+	})
+}
+
+func TestFetchCollection(t *testing.T) {
+	t.Run("happy path returns collection", func(t *testing.T) {
+		mockRPC := &utils.MockRPCService{}
+		handler := NewCollectiblesHandler(mockRPC)
+
+		account := &txnbuild.SimpleAccount{AccountID: "GB7RQNG6ROYGLFKR3IDAABKI2Y2UAQKEO6BSJVR5IYS7UYQ743O7TOXE"}
+		contract := contractDetails{
+			ID:       "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+			TokenIDs: []string{"0", "1"},
+		}
+
+		ctx := context.Background()
+		collection, err := handler.fetchCollection(ctx, account, contract)
+		require.NoError(t, err)
+		require.Equal(t, contract.ID, collection.CollectionAddress)
+		require.Len(t, collection.Collectibles, 2)
+	})
+
+	t.Run("rpc failure returns error", func(t *testing.T) {
+		mockRPC := &utils.MockRPCService{SimulateError: errors.New("rpc failed")}
+		handler := NewCollectiblesHandler(mockRPC)
+
+		account := &txnbuild.SimpleAccount{AccountID: "GB7RQNG6ROYGLFKR3IDAABKI2Y2UAQKEO6BSJVR5IYS7UYQ743O7TOXE"}
+		contract := contractDetails{
+			ID:       "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+			TokenIDs: []string{"0"},
+		}
+
+		ctx := context.Background()
+		_, err := handler.fetchCollection(ctx, account, contract)
+		require.Error(t, err)
+	})
+}
+
+func TestFetchCollectibles(t *testing.T) {
+	t.Run("returns all collectibles", func(t *testing.T) {
+		mockRPC := &utils.MockRPCService{}
+		handler := NewCollectiblesHandler(mockRPC)
+
+		account := &txnbuild.SimpleAccount{AccountID: "GB7RQNG6ROYGLFKR3IDAABKI2Y2UAQKEO6BSJVR5IYS7UYQ743O7TOXE"}
+		tokenIDs := []string{"0", "1", "2"}
+
+		ctx := context.Background()
+		results, err := handler.fetchCollectibles(ctx, account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", tokenIDs)
+		require.NoError(t, err)
+		require.Len(t, results, 3)
+	})
+
+	t.Run("returns error if one collectible fetch fails", func(t *testing.T) {
+		mockRPC := &utils.MockRPCService{SimulateError: errors.New("fetch fail")}
+		handler := NewCollectiblesHandler(mockRPC)
+
+		account := &txnbuild.SimpleAccount{AccountID: "GB7RQNG6ROYGLFKR3IDAABKI2Y2UAQKEO6BSJVR5IYS7UYQ743O7TOXE"}
+		tokenIDs := []string{"0"}
+
+		ctx := context.Background()
+		_, err := handler.fetchCollectibles(ctx, account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", tokenIDs)
 		require.Error(t, err)
 	})
 }
