@@ -123,7 +123,7 @@ func (h *CollectiblesHandler) fetchCollections(
 			collection, err := h.fetchCollection(ctx, account, c)
 			if err != nil {
 				select {
-				case errCh <- err:
+				case errCh <- fmt.Errorf("fetching collection for contract %s: %w", c.ID, err):
 				default:
 				}
 				return
@@ -197,7 +197,7 @@ func (h *CollectiblesHandler) fetchCollectibles(
 			c, err := FetchCollectible(h.RpcService, ctx, account, contractID, tokenID)
 			if err != nil {
 				select {
-				case errCh <- err:
+				case errCh <- fmt.Errorf("fetching collectibles for contract: %s, token: %s: %w, err, contractID, tokenID", contractID, tokenID, err):
 				default:
 				}
 				return
