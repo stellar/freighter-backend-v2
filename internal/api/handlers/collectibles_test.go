@@ -79,6 +79,7 @@ func TestGetCollectibles(t *testing.T) {
 		rr := httptest.NewRecorder()
 		err := handler.GetCollectibles(rr, req)
 		require.Error(t, err)
+		require.Contains(t, err.Error(), ErrInvalidBody.ClientMessage)
 	})
 
 	t.Run("missing owner field", func(t *testing.T) {
