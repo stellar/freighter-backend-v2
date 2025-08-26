@@ -43,10 +43,10 @@ type collectibleRequest struct {
 }
 
 type Collection struct {
-	CollectionAddress string              `json:"address"`
-	Name              string              `json:"name"`
-	Symbol            string              `json:"symbol"`
-	Collectibles      []utils.Collectible `json:"collectibles"`
+	CollectionAddress string        `json:"address"`
+	Name              string        `json:"name"`
+	Symbol            string        `json:"symbol"`
+	Collectibles      []Collectible `json:"collectibles"`
 }
 
 type CollectibleResponse []Collection
@@ -155,7 +155,7 @@ func (h *CollectiblesHandler) fetchCollection(
 		return nil, errors.New("invalid contract ID")
 	}
 
-	details, err := utils.FetchCollection(h.RpcService, ctx, account, c.ID)
+	details, err := FetchCollection(h.RpcService, ctx, account, c.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +164,7 @@ func (h *CollectiblesHandler) fetchCollection(
 		CollectionAddress: c.ID,
 		Name:              details.Name,
 		Symbol:            details.Symbol,
-		Collectibles:      make([]utils.Collectible, 0, len(c.TokenIDs)),
+		Collectibles:      make([]Collectible, 0, len(c.TokenIDs)),
 	}
 
 	collectibles, err := h.fetchCollectibles(ctx, account, c.ID, c.TokenIDs)
@@ -181,10 +181,10 @@ func (h *CollectiblesHandler) fetchCollectibles(
 	account *txnbuild.SimpleAccount,
 	contractID string,
 	tokenIDs []string,
-) ([]utils.Collectible, error) {
+) ([]Collectible, error) {
 
 	var (
-		results []utils.Collectible
+		results []Collectible
 		mu      sync.Mutex
 		wg      sync.WaitGroup
 		errCh   = make(chan error, 1)
@@ -194,7 +194,7 @@ func (h *CollectiblesHandler) fetchCollectibles(
 		wg.Add(1)
 		go func(tokenID string) {
 			defer wg.Done()
-			c, err := utils.FetchCollectible(h.RpcService, ctx, account, contractID, tokenID)
+			c, err := FetchCollectible(h.RpcService, ctx, account, contractID, tokenID)
 			if err != nil {
 				select {
 				case errCh <- err:

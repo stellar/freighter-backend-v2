@@ -1,10 +1,11 @@
-package utils
+package handlers
 
 import (
 	"context"
 	"strconv"
 
 	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/txnbuild"
 	"github.com/stellar/go/xdr"
 )
@@ -26,7 +27,7 @@ func FetchCollection(
 	accountId *txnbuild.SimpleAccount,
 	contractID string,
 ) (*collection, error) {
-	id, err := ScAddressFromString(contractID)
+	id, err := utils.ScAddressFromString(contractID)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +82,7 @@ func FetchCollectible(
 	tokenId string,
 ) (*Collectible, error) {
 
-	id, err := ScAddressFromString(contractID)
+	id, err := utils.ScAddressFromString(contractID)
 	if err != nil {
 		return nil, err
 	}
