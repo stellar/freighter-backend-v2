@@ -46,7 +46,9 @@ func TestFetchCollection_SimulateInvocationError(t *testing.T) {
 func TestFetchCollectible_Success(t *testing.T) {
 	tokenId := "1"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(utils.MockTokenData)
+		if err := json.NewEncoder(w).Encode(utils.MockTokenData); err != nil {
+			t.Fatalf("failed to encode mock response: %v", err)
+		}
 	}))
 	defer server.Close()
 
