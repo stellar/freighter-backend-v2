@@ -19,11 +19,7 @@ import (
 
 var (
 	ErrInvalidBody = httperror.ErrorMessage{
-		LogMessage:    "invalid request body %s: %v",
-		ClientMessage: "An error occurred while fetching collectibles.",
-	}
-	ErrBadContractId = httperror.ErrorMessage{
-		LogMessage:    "invalid contract id %s: %v",
+		LogMessage:    "invalid request body: %v",
 		ClientMessage: "An error occurred while fetching collectibles.",
 	}
 	ErrInternal = httperror.ErrorMessage{
@@ -49,7 +45,12 @@ type Collection struct {
 	Collectibles      []Collectible `json:"collectibles"`
 }
 
-type CollectibleResponse []Collection
+type CollectionResult struct {
+	Collection *Collection `json:"collection,omitempty"`
+	Error      string      `json:"error,omitempty"`
+}
+
+type CollectibleResponse []CollectionResult
 
 type GetCollectiblesPayload struct {
 	Collections CollectibleResponse `json:"collections"`
@@ -59,90 +60,36 @@ type CollectiblesHandler struct {
 	RpcService types.RPCService
 }
 
+func NewCollectiblesHandler(rpc types.RPCService) *CollectiblesHandler {
+	return &CollectiblesHandler{RpcService: rpc}
+}
+
 func validateRequest(r *http.Request) (*collectibleRequest, error) {
 	var req collectibleRequest
-
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, fmt.Errorf("invalid JSON: %w", err)
 	}
 
-	check := func(value any, name string) error {
-		switch v := value.(type) {
-		case string:
-			if strings.TrimSpace(v) == "" {
-				return fmt.Errorf("missing or empty key: %s", name)
-			}
-		case []contractDetails:
-			if len(v) == 0 {
-				return fmt.Errorf("missing or empty key: %s", name)
-			}
-		case []string:
-			if len(v) == 0 {
-				return fmt.Errorf("missing or empty key: %s", name)
-			}
-		}
-		return nil
+	req.Owner = strings.TrimSpace(req.Owner)
+	if req.Owner == "" {
+		return nil, errors.New("missing or empty owner")
 	}
 
-	if err := check(req.Owner, "owner"); err != nil {
-		return nil, err
-	}
-	if err := check(req.Contracts, "contracts"); err != nil {
-		return nil, err
+	if len(req.Contracts) == 0 {
+		return nil, errors.New("missing or empty contracts")
 	}
 
 	for i, c := range req.Contracts {
-		if err := check(c.ID, fmt.Sprintf("contracts[%d].id", i)); err != nil {
-			return nil, err
+		c.ID = strings.TrimSpace(c.ID)
+		if c.ID == "" {
+			return nil, fmt.Errorf("contracts[%d].id is empty", i)
 		}
-		if err := check(c.TokenIDs, fmt.Sprintf("contracts[%d].token_ids", i)); err != nil {
-			return nil, err
+		if len(c.TokenIDs) == 0 {
+			return nil, fmt.Errorf("contracts[%d].token_ids is empty", i)
 		}
 	}
 
 	return &req, nil
-}
-
-func (h *CollectiblesHandler) fetchCollections(
-	ctx context.Context,
-	account *txnbuild.SimpleAccount,
-	contracts []contractDetails,
-) ([]Collection, error) {
-
-	var (
-		results []Collection
-		mu      sync.Mutex
-		wg      sync.WaitGroup
-		errCh   = make(chan error, 1)
-	)
-
-	for _, contract := range contracts {
-		wg.Add(1)
-		go func(c contractDetails) {
-			defer wg.Done()
-			collection, err := h.fetchCollection(ctx, account, c)
-			if err != nil {
-				select {
-				case errCh <- fmt.Errorf("fetching collection for contract %s: %w", c.ID, err):
-				default:
-				}
-				return
-			}
-
-			mu.Lock()
-			results = append(results, *collection)
-			mu.Unlock()
-		}(contract)
-	}
-
-	wg.Wait()
-
-	select {
-	case err := <-errCh:
-		return nil, err
-	default:
-		return results, nil
-	}
 }
 
 func (h *CollectiblesHandler) fetchCollection(
@@ -151,29 +98,31 @@ func (h *CollectiblesHandler) fetchCollection(
 	c contractDetails,
 ) (*Collection, error) {
 
-	if !utils.IsValidContractID(strings.TrimSpace(c.ID)) {
-		return nil, errors.New("invalid contract ID")
+	if !utils.IsValidContractID(c.ID) {
+		return nil, fmt.Errorf("invalid contract ID: %s", c.ID)
 	}
 
 	details, err := FetchCollection(h.RpcService, ctx, account, c.ID)
 	if err != nil {
-		return nil, err
-	}
-
-	collection := &Collection{
-		CollectionAddress: c.ID,
-		Name:              details.Name,
-		Symbol:            details.Symbol,
-		Collectibles:      make([]Collectible, 0, len(c.TokenIDs)),
+		return nil, fmt.Errorf("fetching collection %s: %w", c.ID, err)
 	}
 
 	collectibles, err := h.fetchCollectibles(ctx, account, c.ID, c.TokenIDs)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("fetching collectibles for %s: %w", c.ID, err)
 	}
 
-	collection.Collectibles = collectibles
-	return collection, nil
+	// If no collectibles found, treat as an error
+	if len(collectibles) == 0 {
+		return nil, fmt.Errorf("no collectibles found for contract %s", c.ID)
+	}
+
+	return &Collection{
+		CollectionAddress: c.ID,
+		Name:              details.Name,
+		Symbol:            details.Symbol,
+		Collectibles:      collectibles,
+	}, nil
 }
 
 func (h *CollectiblesHandler) fetchCollectibles(
@@ -187,42 +136,28 @@ func (h *CollectiblesHandler) fetchCollectibles(
 		results []Collectible
 		mu      sync.Mutex
 		wg      sync.WaitGroup
-		errCh   = make(chan error, 1)
+		errs    []error
 	)
 
-	for _, id := range tokenIDs {
+	for _, tokenID := range tokenIDs {
 		wg.Add(1)
 		go func(tokenID string) {
 			defer wg.Done()
 			c, err := FetchCollectible(h.RpcService, ctx, account, contractID, tokenID)
 			if err != nil {
-				select {
-				case errCh <- fmt.Errorf("fetching collectibles for contract: %s, token: %s: %w, err, contractID, tokenID", contractID, tokenID, err):
-				default:
-				}
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("fetching collectibles for contract: %s, token: %s: %w, err, contractID, tokenID", contractID, tokenID, err))
+				mu.Unlock()
 				return
 			}
-
 			mu.Lock()
 			results = append(results, *c)
 			mu.Unlock()
-		}(id)
+		}(tokenID)
 	}
 
 	wg.Wait()
-
-	select {
-	case err := <-errCh:
-		return nil, err
-	default:
-		return results, nil
-	}
-}
-
-func NewCollectiblesHandler(rpc types.RPCService) *CollectiblesHandler {
-	return &CollectiblesHandler{
-		RpcService: rpc,
-	}
+	return results, nil
 }
 
 func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Request) error {
@@ -244,16 +179,25 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 		return httperror.BadRequest(ErrInvalidBody.ClientMessage, errors.New("invalid owner"))
 	}
 
-	account := &txnbuild.SimpleAccount{AccountID: owner}
-	results, err := h.fetchCollections(ctx, account, req.Contracts)
-	if err != nil {
-		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInternal.LogMessage, err))
-		return httperror.InternalServerError("Failed to fetch collectibles", err)
-	}
+	account := &txnbuild.SimpleAccount{AccountID: req.Owner}
+	results := make([]CollectionResult, len(req.Contracts))
+	var wg sync.WaitGroup
 
-	responseData := HttpResponse{
-		Data: GetCollectiblesPayload{Collections: results},
+	for i, contract := range req.Contracts {
+		wg.Add(1)
+		go func(i int, c contractDetails) {
+			defer wg.Done()
+			collection, err := h.fetchCollection(ctx, account, c)
+			if err != nil {
+				logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInternal.LogMessage, err))
+				results[i] = CollectionResult{Error: err.Error()}
+			} else {
+				results[i] = CollectionResult{Collection: collection}
+			}
+		}(i, contract)
 	}
+	wg.Wait()
 
+	responseData := HttpResponse{Data: GetCollectiblesPayload{Collections: results}}
 	return response.OK(w, responseData)
 }
