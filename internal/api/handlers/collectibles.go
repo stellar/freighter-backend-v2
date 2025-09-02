@@ -45,9 +45,20 @@ type Collection struct {
 	Collectibles      []Collectible `json:"collectibles"`
 }
 
+type TokenError struct {
+	TokenID string `json:"token_id"`
+	Error   string `json:"error"`
+}
+
+type CollectionError struct {
+	Error             string       `json:"error"`
+	CollectionAddress string       `json:"collection_address,omitempty"`
+	Tokens            []TokenError `json:"tokens,omitempty"`
+}
+
 type CollectionResult struct {
-	Collection *Collection `json:"collection,omitempty"`
-	Error      string      `json:"error,omitempty"`
+	Collection *Collection      `json:"collection,omitempty"`
+	Error      *CollectionError `json:"error,omitempty"`
 }
 
 type CollectibleResponse []CollectionResult
@@ -96,25 +107,40 @@ func (h *CollectiblesHandler) fetchCollection(
 	ctx context.Context,
 	account *txnbuild.SimpleAccount,
 	c contractDetails,
-) (*Collection, error) {
+) (*Collection, *CollectionError) {
 
 	if !utils.IsValidContractID(c.ID) {
-		return nil, fmt.Errorf("invalid contract ID: %s", c.ID)
+		return nil, &CollectionError{
+			Error:             fmt.Sprintf("invalid contract ID: %s", c.ID),
+			CollectionAddress: c.ID,
+		}
 	}
 
 	details, err := FetchCollection(h.RpcService, ctx, account, c.ID)
 	if err != nil {
-		return nil, fmt.Errorf("fetching collection %s: %w", c.ID, err)
+		return nil, &CollectionError{
+			Error:             fmt.Sprintf("fetching collection: %v", err),
+			CollectionAddress: c.ID,
+		}
 	}
 
-	collectibles, err := h.fetchCollectibles(ctx, account, c.ID, c.TokenIDs)
-	if err != nil {
-		return nil, fmt.Errorf("fetching collectibles for %s: %w", c.ID, err)
+	collectibles, tokenErrs := h.fetchCollectibles(ctx, account, c.ID, c.TokenIDs)
+
+	if len(collectibles) == 0 && len(tokenErrs) > 0 {
+		// If no collectibles were successfully fetched, treat as collection-level failure
+		return nil, &CollectionError{
+			Error:             fmt.Sprintf("no collectibles fetched for contract %s", c.ID),
+			CollectionAddress: c.ID,
+			Tokens:            tokenErrs,
+		}
 	}
 
-	// If no collectibles found, treat as an error
-	if len(collectibles) == 0 {
-		return nil, fmt.Errorf("no collectibles found for contract %s", c.ID)
+	var colErr *CollectionError
+	if len(tokenErrs) > 0 {
+		colErr = &CollectionError{
+			CollectionAddress: c.ID,
+			Tokens:            tokenErrs,
+		}
 	}
 
 	return &Collection{
@@ -122,7 +148,7 @@ func (h *CollectiblesHandler) fetchCollection(
 		Name:              details.Name,
 		Symbol:            details.Symbol,
 		Collectibles:      collectibles,
-	}, nil
+	}, colErr
 }
 
 func (h *CollectiblesHandler) fetchCollectibles(
@@ -130,13 +156,13 @@ func (h *CollectiblesHandler) fetchCollectibles(
 	account *txnbuild.SimpleAccount,
 	contractID string,
 	tokenIDs []string,
-) ([]Collectible, error) {
+) ([]Collectible, []TokenError) {
 
 	var (
-		results []Collectible
-		mu      sync.Mutex
-		wg      sync.WaitGroup
-		errs    []error
+		results   []Collectible
+		tokenErrs []TokenError
+		mu        sync.Mutex
+		wg        sync.WaitGroup
 	)
 
 	for _, tokenID := range tokenIDs {
@@ -144,20 +170,21 @@ func (h *CollectiblesHandler) fetchCollectibles(
 		go func(tokenID string) {
 			defer wg.Done()
 			c, err := FetchCollectible(h.RpcService, ctx, account, contractID, tokenID)
+			mu.Lock()
+			defer mu.Unlock()
 			if err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("fetching collectibles for contract: %s, token: %s: %w, err, contractID, tokenID", contractID, tokenID, err))
-				mu.Unlock()
+				tokenErrs = append(tokenErrs, TokenError{
+					TokenID: tokenID,
+					Error:   err.Error(),
+				})
 				return
 			}
-			mu.Lock()
 			results = append(results, *c)
-			mu.Unlock()
 		}(tokenID)
 	}
 
 	wg.Wait()
-	return results, nil
+	return results, tokenErrs
 }
 
 func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Request) error {
@@ -187,12 +214,14 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 		wg.Add(1)
 		go func(i int, c contractDetails) {
 			defer wg.Done()
-			collection, err := h.fetchCollection(ctx, account, c)
-			if err != nil {
-				logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInternal.LogMessage, err))
-				results[i] = CollectionResult{Error: err.Error()}
-			} else {
-				results[i] = CollectionResult{Collection: collection}
+			collection, colErr := h.fetchCollection(ctx, account, c)
+			if colErr != nil && len(colErr.Tokens) == 0 && collection == nil {
+				results[i] = CollectionResult{Error: colErr}
+				return
+			}
+			results[i] = CollectionResult{
+				Collection: collection,
+				Error:      colErr,
 			}
 		}(i, contract)
 	}

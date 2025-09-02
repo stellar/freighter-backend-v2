@@ -78,7 +78,7 @@ func TestFetchCollection(t *testing.T) {
 
 		ctx := context.Background()
 		collection, err := handler.fetchCollection(ctx, account, contract)
-		require.NoError(t, err)
+		require.Nil(t, err)
 		require.NotNil(t, collection)
 		require.Len(t, collection.Collectibles, 2)
 	})
@@ -94,7 +94,7 @@ func TestFetchCollectibles(t *testing.T) {
 
 		ctx := context.Background()
 		results, err := handler.fetchCollectibles(ctx, account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", tokenIDs)
-		require.NoError(t, err)
+		require.Nil(t, err)
 		assert.Empty(t, results)
 	})
 }
