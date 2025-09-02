@@ -46,8 +46,8 @@ type Collection struct {
 }
 
 type TokenError struct {
-	TokenID string `json:"token_id"`
-	Error   string `json:"error"`
+	TokenID      string `json:"token_id"`
+	ErrorMessage string `json:"error_message"`
 }
 
 type CollectionError struct {
@@ -57,8 +57,8 @@ type CollectionError struct {
 }
 
 type CollectionResult struct {
-	Collection *Collection      `json:"collection,omitempty"`
-	Error      *CollectionError `json:"error,omitempty"`
+	Collection   *Collection      `json:"collection,omitempty"`
+	ErrorMessage *CollectionError `json:"error_message,omitempty"`
 }
 
 type CollectibleResponse []CollectionResult
@@ -174,8 +174,8 @@ func (h *CollectiblesHandler) fetchCollectibles(
 			defer mu.Unlock()
 			if err != nil {
 				tokenErrs = append(tokenErrs, TokenError{
-					TokenID: tokenID,
-					Error:   err.Error(),
+					TokenID:      tokenID,
+					ErrorMessage: err.Error(),
 				})
 				return
 			}
@@ -216,12 +216,12 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 			defer wg.Done()
 			collection, colErr := h.fetchCollection(ctx, account, c)
 			if colErr != nil && len(colErr.Tokens) == 0 && collection == nil {
-				results[i] = CollectionResult{Error: colErr}
+				results[i] = CollectionResult{ErrorMessage: colErr}
 				return
 			}
 			results[i] = CollectionResult{
-				Collection: collection,
-				Error:      colErr,
+				Collection:   collection,
+				ErrorMessage: colErr,
 			}
 		}(i, contract)
 	}
