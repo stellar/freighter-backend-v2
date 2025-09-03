@@ -51,14 +51,14 @@ type TokenError struct {
 }
 
 type CollectionError struct {
-	Error             string       `json:"error"`
+	ErrorMessage      string       `json:"error_message"`
 	CollectionAddress string       `json:"collection_address,omitempty"`
 	Tokens            []TokenError `json:"tokens,omitempty"`
 }
 
 type CollectionResult struct {
-	Collection   *Collection      `json:"collection,omitempty"`
-	ErrorMessage *CollectionError `json:"error_message,omitempty"`
+	Collection *Collection      `json:"collection,omitempty"`
+	Error      *CollectionError `json:"error,omitempty"`
 }
 
 type CollectibleResponse []CollectionResult
@@ -111,7 +111,7 @@ func (h *CollectiblesHandler) fetchCollection(
 
 	if !utils.IsValidContractID(c.ID) {
 		return nil, &CollectionError{
-			Error:             fmt.Sprintf("invalid contract ID: %s", c.ID),
+			ErrorMessage:      fmt.Sprintf("invalid contract ID: %s", c.ID),
 			CollectionAddress: c.ID,
 		}
 	}
@@ -119,7 +119,7 @@ func (h *CollectiblesHandler) fetchCollection(
 	details, err := FetchCollection(h.RpcService, ctx, account, c.ID)
 	if err != nil {
 		return nil, &CollectionError{
-			Error:             fmt.Sprintf("fetching collection: %v", err),
+			ErrorMessage:      fmt.Sprintf("fetching collection: %v", err),
 			CollectionAddress: c.ID,
 		}
 	}
@@ -129,7 +129,7 @@ func (h *CollectiblesHandler) fetchCollection(
 	if len(collectibles) == 0 && len(tokenErrs) > 0 {
 		// If no collectibles were successfully fetched, treat as collection-level failure
 		return nil, &CollectionError{
-			Error:             fmt.Sprintf("no collectibles fetched for contract %s", c.ID),
+			ErrorMessage:      fmt.Sprintf("no collectibles fetched for contract %s", c.ID),
 			CollectionAddress: c.ID,
 			Tokens:            tokenErrs,
 		}
@@ -216,12 +216,12 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 			defer wg.Done()
 			collection, colErr := h.fetchCollection(ctx, account, c)
 			if colErr != nil && len(colErr.Tokens) == 0 && collection == nil {
-				results[i] = CollectionResult{ErrorMessage: colErr}
+				results[i] = CollectionResult{Error: colErr}
 				return
 			}
 			results[i] = CollectionResult{
-				Collection:   collection,
-				ErrorMessage: colErr,
+				Collection: collection,
+				Error:      colErr,
 			}
 		}(i, contract)
 	}

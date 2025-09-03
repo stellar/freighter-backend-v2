@@ -59,7 +59,7 @@ func TestGetCollectibles(t *testing.T) {
 
 		c0 := collections[0]
 		require.NotNil(t, c0.Collection)
-		assert.Empty(t, c0.ErrorMessage)
+		assert.Empty(t, c0.Error)
 		assert.Equal(t, 3, len(c0.Collection.Collectibles))
 	})
 }
