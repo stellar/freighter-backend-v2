@@ -153,3 +153,35 @@ func TestGetCollectibles_WithMeridianPayAddresses(t *testing.T) {
 		assert.Empty(t, col.Error)
 	}
 }
+
+func TestGetCollectibles_Empty(t *testing.T) {
+	mockRPC := &utils.MockRPCService{}
+	handler := NewCollectiblesHandler(mockRPC, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "CDSN4MICK7U5XOP4DE6OIZQCRMYO3UTQ5VYZV7ZA7H63OICZPBLXYRGJ")
+
+	body := `{
+		"owner": "GB7RQNG6ROYGLFKR3IDAABKI2Y2UAQKEO6BSJVR5IYS7UYQ743O7TOXE",
+		"contracts": []
+	}`
+
+	req, _ := http.NewRequest("POST", "/api/v1/collectibles", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	err := handler.GetCollectibles(rr, req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	type expectedResponse struct {
+		Data GetCollectiblesPayload `json:"data"`
+	}
+	var response expectedResponse
+	err = json.Unmarshal(rr.Body.Bytes(), &response)
+	require.NoError(t, err)
+
+	collections := response.Data.Collections
+	require.Len(t, collections, 2)
+
+	for _, col := range collections {
+		require.NotNil(t, col.Collection)
+		assert.Empty(t, col.Error)
+	}
+}
