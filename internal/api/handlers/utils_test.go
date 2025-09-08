@@ -84,3 +84,45 @@ func TestFetchCollectible_SimulateInvocationError(t *testing.T) {
 	_, err := FetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "1")
 	assert.Error(t, err)
 }
+
+func TestFetchOwnerTokens_Success(t *testing.T) {
+	mockRPC := &utils.MockRPCService{}
+
+	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
+	owner := "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
+	contractID := "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
+
+	tokens, err := FetchOwnerTokens(mockRPC, context.Background(), account, contractID, owner)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{}, tokens)
+}
+
+func TestFetchOwnerTokens_InvalidContractID(t *testing.T) {
+	mockRPC := &utils.MockRPCService{}
+	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
+	owner := "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
+
+	_, err := FetchOwnerTokens(mockRPC, context.Background(), account, "INVALID", owner)
+	assert.Error(t, err)
+}
+
+func TestFetchOwnerTokens_InvalidOwnerAddress(t *testing.T) {
+	mockRPC := &utils.MockRPCService{}
+	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
+	contractID := "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
+
+	_, err := FetchOwnerTokens(mockRPC, context.Background(), account, contractID, "INVALID")
+	assert.Error(t, err)
+}
+
+func TestFetchOwnerTokens_SimulateInvocationError(t *testing.T) {
+	mockRPC := &utils.MockRPCService{
+		SimulateError: errors.New("rpc failure"),
+	}
+	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
+	owner := "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
+	contractID := "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
+
+	_, err := FetchOwnerTokens(mockRPC, context.Background(), account, contractID, owner)
+	assert.Error(t, err)
+}

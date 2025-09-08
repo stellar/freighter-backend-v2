@@ -11,11 +11,13 @@ type Config struct {
 }
 
 type AppConfig struct {
-	FreighterBackendHost string
-	FreighterBackendPort int
-	Mode                 string
-	SentryKey            string
-	ProtocolsConfigPath  string
+	FreighterBackendHost           string
+	FreighterBackendPort           int
+	Mode                           string
+	SentryKey                      string
+	ProtocolsConfigPath            string
+	MeridianPayTreasureHuntAddress string
+	MeridianPayTreasurePoapAddress string
 }
 
 type RPCConfig struct {

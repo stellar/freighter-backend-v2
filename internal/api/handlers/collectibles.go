@@ -68,11 +68,13 @@ type GetCollectiblesPayload struct {
 }
 
 type CollectiblesHandler struct {
-	RpcService types.RPCService
+	RpcService                     types.RPCService
+	MeridianPayTreasureHuntAddress string
+	MeridianPayTreasurePoapAddress string
 }
 
-func NewCollectiblesHandler(rpc types.RPCService) *CollectiblesHandler {
-	return &CollectiblesHandler{RpcService: rpc}
+func NewCollectiblesHandler(rpc types.RPCService, meridianPayTreasureHuntAddress string, meridianPayTreasurePoapAddress string) *CollectiblesHandler {
+	return &CollectiblesHandler{RpcService: rpc, MeridianPayTreasureHuntAddress: meridianPayTreasureHuntAddress, MeridianPayTreasurePoapAddress: meridianPayTreasurePoapAddress}
 }
 
 func validateRequest(r *http.Request) (*collectibleRequest, error) {
@@ -84,10 +86,6 @@ func validateRequest(r *http.Request) (*collectibleRequest, error) {
 	req.Owner = strings.TrimSpace(req.Owner)
 	if req.Owner == "" {
 		return nil, errors.New("missing or empty owner")
-	}
-
-	if len(req.Contracts) == 0 {
-		return nil, errors.New("missing or empty contracts")
 	}
 
 	for i, c := range req.Contracts {
@@ -187,6 +185,59 @@ func (h *CollectiblesHandler) fetchCollectibles(
 	return results, tokenErrs
 }
 
+func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
+	ctx context.Context,
+	account *txnbuild.SimpleAccount,
+	owner string,
+) ([]CollectionResult, error) {
+	contracts := []string{}
+	if h.MeridianPayTreasureHuntAddress != "" {
+		contracts = append(contracts, h.MeridianPayTreasureHuntAddress)
+	}
+	if h.MeridianPayTreasurePoapAddress != "" {
+		contracts = append(contracts, h.MeridianPayTreasurePoapAddress)
+	}
+
+	if len(contracts) == 0 {
+		return []CollectionResult{}, nil
+	}
+
+	results := make([]CollectionResult, len(contracts))
+	var wg sync.WaitGroup
+
+	for i, contract := range contracts {
+		wg.Add(1)
+		go func(i int, contract string) {
+			defer wg.Done()
+
+			tokenIds, err := FetchOwnerTokens(h.RpcService, ctx, account, contract, owner)
+			if err != nil {
+				results[i] = CollectionResult{
+					Error: &CollectionError{
+						ErrorMessage:      fmt.Sprintf("fetching owner tokens: %v", err),
+						CollectionAddress: contract,
+					},
+				}
+				return
+			}
+
+			contractDetails := contractDetails{
+				ID:       contract,
+				TokenIDs: tokenIds,
+			}
+
+			collection, colErr := h.fetchCollection(ctx, account, contractDetails)
+			results[i] = CollectionResult{
+				Collection: collection,
+				Error:      colErr,
+			}
+		}(i, contract)
+	}
+
+	wg.Wait()
+	return results, nil
+}
+
 func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := context.WithTimeout(r.Context(), HealthCheckContextTimeout)
 	defer cancel()
@@ -227,6 +278,16 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 	}
 	wg.Wait()
 
-	responseData := HttpResponse{Data: GetCollectiblesPayload{Collections: results}}
+	meridianResults, err := h.fetchMeridianPayCollectibles(ctx, account, owner)
+	if err != nil {
+		logger.ErrorWithContext(ctx, fmt.Sprintf("failed to fetch meridian pay collectibles: %v", err))
+	}
+	allResults := append(results, meridianResults...)
+
+	responseData := HttpResponse{
+		Data: GetCollectiblesPayload{
+			Collections: allResults,
+		},
+	}
 	return response.OK(w, responseData)
 }
