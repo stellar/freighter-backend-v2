@@ -280,7 +280,7 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 
 	meridianResults, err := h.fetchMeridianPayCollectibles(ctx, account, owner)
 	if err != nil {
-		logger.ErrorWithContext(ctx, fmt.Sprintf("failed to fetch meridian pay collectibles: %v", err))
+		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInternal.LogMessage, err))
 	}
 	allResults := append(results, meridianResults...)
 
