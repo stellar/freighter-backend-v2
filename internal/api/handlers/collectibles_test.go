@@ -144,17 +144,11 @@ func TestGetCollectibles_WithMeridianPayAddresses(t *testing.T) {
 	err = json.Unmarshal(rr.Body.Bytes(), &response)
 	require.NoError(t, err)
 
+	// Should dedupe and only have 2 collections
 	collections := response.Data.Collections
-	require.Len(t, collections, 3)
+	require.Len(t, collections, 2)
 
-	c0 := collections[0]
-	require.NotNil(t, c0.Collection)
-	assert.Empty(t, c0.Error)
-	assert.Equal(t, 3, len(c0.Collection.Collectibles))
-
-	c1 := collections[1]
-	c2 := collections[2]
-	for _, col := range []CollectionResult{c1, c2} {
+	for _, col := range collections {
 		require.NotNil(t, col.Collection)
 		assert.Empty(t, col.Error)
 	}

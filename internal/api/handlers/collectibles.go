@@ -258,10 +258,26 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 	}
 
 	account := &txnbuild.SimpleAccount{AccountID: req.Owner}
-	results := make([]CollectionResult, len(req.Contracts))
+	skipContracts := map[string]struct{}{}
+	if h.MeridianPayTreasureHuntAddress != "" {
+		skipContracts[h.MeridianPayTreasureHuntAddress] = struct{}{}
+	}
+	if h.MeridianPayTreasurePoapAddress != "" {
+		skipContracts[h.MeridianPayTreasurePoapAddress] = struct{}{}
+	}
+
+	// Filter user-requested contracts to exclude Meridian Pay addresses
+	var filteredContracts []contractDetails
+	for _, c := range req.Contracts {
+		if _, skip := skipContracts[c.ID]; !skip {
+			filteredContracts = append(filteredContracts, c)
+		}
+	}
+
+	results := make([]CollectionResult, len(filteredContracts))
 	var wg sync.WaitGroup
 
-	for i, contract := range req.Contracts {
+	for i, contract := range filteredContracts {
 		wg.Add(1)
 		go func(i int, c contractDetails) {
 			defer wg.Done()
