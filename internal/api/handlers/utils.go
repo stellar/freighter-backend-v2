@@ -74,7 +74,7 @@ func FetchCollection(
 	}, nil
 }
 
-func FetchCollectible(
+func fetchCollectible(
 	rpc types.RPCService,
 	ctx context.Context,
 	accountId *txnbuild.SimpleAccount,
@@ -142,7 +142,7 @@ func FetchCollectible(
 /*
 NOTE: This function is not part of SEP-50 and should only be used with Meridian Pay NFTs or contracts that extend the standard.
 */
-func FetchOwnerTokens(
+func fetchOwnerTokens(
 	rpc types.RPCService,
 	ctx context.Context,
 	accountId *txnbuild.SimpleAccount,

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
@@ -167,7 +168,7 @@ func (h *CollectiblesHandler) fetchCollectibles(
 		wg.Add(1)
 		go func(tokenID string) {
 			defer wg.Done()
-			c, err := FetchCollectible(h.RpcService, ctx, account, contractID, tokenID)
+			c, err := fetchCollectible(h.RpcService, ctx, account, contractID, tokenID)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -210,7 +211,7 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 		go func(i int, contract string) {
 			defer wg.Done()
 
-			tokenIds, err := FetchOwnerTokens(h.RpcService, ctx, account, contract, owner)
+			tokenIds, err := fetchOwnerTokens(h.RpcService, ctx, account, contract, owner)
 			if err != nil {
 				results[i] = CollectionResult{
 					Error: &CollectionError{
@@ -258,18 +259,18 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 	}
 
 	account := &txnbuild.SimpleAccount{AccountID: req.Owner}
-	skipContracts := map[string]struct{}{}
+	skipContracts := mapset.NewSet[string]()
 	if h.MeridianPayTreasureHuntAddress != "" {
-		skipContracts[h.MeridianPayTreasureHuntAddress] = struct{}{}
+		skipContracts.Add(h.MeridianPayTreasureHuntAddress)
 	}
 	if h.MeridianPayTreasurePoapAddress != "" {
-		skipContracts[h.MeridianPayTreasurePoapAddress] = struct{}{}
+		skipContracts.Add(h.MeridianPayTreasurePoapAddress)
 	}
 
 	// Filter user-requested contracts to exclude Meridian Pay addresses
 	var filteredContracts []contractDetails
 	for _, c := range req.Contracts {
-		if _, skip := skipContracts[c.ID]; !skip {
+		if !skipContracts.Contains(c.ID) {
 			filteredContracts = append(filteredContracts, c)
 		}
 	}
