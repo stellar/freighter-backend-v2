@@ -74,7 +74,7 @@ func FetchCollection(
 	}, nil
 }
 
-func FetchCollectible(
+func fetchCollectible(
 	rpc types.RPCService,
 	ctx context.Context,
 	accountId *txnbuild.SimpleAccount,
@@ -137,4 +137,58 @@ func FetchCollectible(
 		TokenUri: tokenURIRes.val.String(),
 		TokenId:  tokenId,
 	}, nil
+}
+
+/*
+NOTE: This function is not part of SEP-50 and should only be used with Meridian Pay NFTs or contracts that extend the standard.
+*/
+func fetchOwnerTokens(
+	rpc types.RPCService,
+	ctx context.Context,
+	accountId *txnbuild.SimpleAccount,
+	contractID string,
+	owner string,
+) ([]string, error) {
+
+	id, err := utils.ScAddressFromString(contractID)
+	if err != nil {
+		return nil, err
+	}
+
+	ownerAddress, err := utils.ScAddressFromString(owner)
+	if err != nil {
+		return nil, err
+	}
+
+	type result struct {
+		val xdr.ScVal
+		err error
+	}
+	ownerTokensCh := make(chan result, 1)
+	ownerVal := xdr.ScVal{
+		Type:    xdr.ScValTypeScvAddress,
+		Address: ownerAddress,
+	}
+
+	go func() {
+		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "get_owner_tokens", []xdr.ScVal{ownerVal}, txnbuild.NewTimeout(300))
+		if err != nil {
+			ownerTokensCh <- result{xdr.ScVal{}, err}
+			return
+		}
+		ownerTokensCh <- result{*res, nil}
+	}()
+
+	ownerTokensRes := <-ownerTokensCh
+
+	if ownerTokensRes.err != nil {
+		return nil, ownerTokensRes.err
+	}
+
+	tokenIDs, err := utils.ScVecToStrings(*ownerTokensRes.val.Vec)
+	if err != nil {
+		return nil, err
+	}
+
+	return tokenIDs, nil
 }

@@ -41,6 +41,13 @@ func (m *MockRPCService) SimulateInvocation(
 
 	var result xdr.ScVal
 	switch fn {
+	case "get_owner_tokens":
+		scVec := xdr.ScVec{}
+		vecPtr := &scVec
+		result = xdr.ScVal{
+			Type: xdr.ScValTypeScvVec,
+			Vec:  &vecPtr,
+		}
 	case "owner_of":
 		owner := xdr.ScSymbol("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")
 		result = xdr.ScVal{Type: xdr.ScValTypeScvSymbol, Sym: &owner}

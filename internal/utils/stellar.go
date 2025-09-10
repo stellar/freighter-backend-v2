@@ -71,3 +71,21 @@ func ScAddressFromString(addr string) (*xdr.ScAddress, error) {
 		return nil, fmt.Errorf("unsupported address prefix")
 	}
 }
+
+func ScVecToStrings(vec *xdr.ScVec) ([]string, error) {
+	if vec == nil {
+		return []string{}, nil
+	}
+
+	scvals := *vec
+	members := make([]string, len(scvals))
+
+	for i, v := range scvals {
+		if v.Type != xdr.ScValTypeScvU32 || v.U32 == nil {
+			return nil, fmt.Errorf("unexpected element type at index %d: %v", i, v.Type)
+		}
+		members[i] = fmt.Sprintf("%d", *v.U32)
+	}
+
+	return members, nil
+}

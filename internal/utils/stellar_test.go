@@ -240,3 +240,50 @@ func TestScAddressFromString(t *testing.T) {
 		assert.Nil(t, scAddr)
 	})
 }
+
+func TestScVecToStrings(t *testing.T) {
+	t.Run("nil vector returns empty slice", func(t *testing.T) {
+		res, err := ScVecToStrings(nil)
+		assert.NoError(t, err)
+		assert.Empty(t, res)
+	})
+
+	t.Run("empty vector returns empty slice", func(t *testing.T) {
+		vec := xdr.ScVec{}
+		res, err := ScVecToStrings(&vec)
+		assert.NoError(t, err)
+		assert.Empty(t, res)
+	})
+
+	t.Run("vector with U32 values", func(t *testing.T) {
+		v1Val := xdr.Uint32(10)
+		v2Val := xdr.Uint32(42)
+
+		v1 := xdr.ScVal{Type: xdr.ScValTypeScvU32, U32: &v1Val}
+		v2 := xdr.ScVal{Type: xdr.ScValTypeScvU32, U32: &v2Val}
+		vec := xdr.ScVec{v1, v2}
+
+		res, err := ScVecToStrings(&vec)
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"10", "42"}, res)
+	})
+
+	t.Run("vector with wrong type returns error", func(t *testing.T) {
+		i32Val := xdr.Int32(5)
+		v := xdr.ScVal{Type: xdr.ScValTypeScvI32, I32: &i32Val}
+		vec := xdr.ScVec{v}
+
+		res, err := ScVecToStrings(&vec)
+		assert.Error(t, err)
+		assert.Nil(t, res)
+	})
+
+	t.Run("vector with U32 nil pointer returns error", func(t *testing.T) {
+		v := xdr.ScVal{Type: xdr.ScValTypeScvU32, U32: nil}
+		vec := xdr.ScVec{v}
+
+		res, err := ScVecToStrings(&vec)
+		assert.Error(t, err)
+		assert.Nil(t, res)
+	})
+}
