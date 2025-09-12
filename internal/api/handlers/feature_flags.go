@@ -11,7 +11,7 @@ type FeatureFlagsHandler struct{}
 type FeatureFlagsResponse struct {
 	SwapEnabled     bool `json:"swap_enabled"`
 	DiscoverEnabled bool `json:"discover_enabled"`
-	CoinbaseEnabled bool `json:"coinbase_enabled"`
+	OnrampEnabled   bool `json:"onramp_enabled"`
 }
 
 func NewFeatureFlagsHandler() *FeatureFlagsHandler {
@@ -27,12 +27,12 @@ func (h *FeatureFlagsHandler) GetFeatureFlags(w http.ResponseWriter, r *http.Req
 	resp := FeatureFlagsResponse{
 		SwapEnabled:     true,
 		DiscoverEnabled: true,
-		CoinbaseEnabled: true,
+		OnrampEnabled:   true,
 	}
 	if platform == "ios" {
 		resp.SwapEnabled = false
 		resp.DiscoverEnabled = false
-		resp.CoinbaseEnabled = false
+		resp.OnrampEnabled = false
 	}
 
 	w.Header().Set("Content-Type", "application/json")
