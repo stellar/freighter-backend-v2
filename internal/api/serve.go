@@ -65,6 +65,9 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 
 	collectiblesHandler := handlers.NewCollectiblesHandler(s.rpcService, s.cfg.AppConfig.MeridianPayTreasureHuntAddress, s.cfg.AppConfig.MeridianPayTreasurePoapAddress)
 	mux.HandleFunc("POST /api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles))
+
+	featureFlagsHandler := handlers.NewFeatureFlagsHandler()
+	mux.HandleFunc("GET /api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags))
 	return mux
 }
 
