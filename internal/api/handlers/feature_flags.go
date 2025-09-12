@@ -9,7 +9,8 @@ import (
 type FeatureFlagsHandler struct{}
 
 type FeatureFlagsResponse struct {
-	SwapEnabled bool `json:"swap_enabled"`
+	SwapEnabled     bool `json:"swap_enabled"`
+	DiscoverEnabled bool `json:"discover_enabled"`
 }
 
 func NewFeatureFlagsHandler() *FeatureFlagsHandler {
@@ -22,9 +23,13 @@ func (h *FeatureFlagsHandler) GetFeatureFlags(w http.ResponseWriter, r *http.Req
 
 	platform := r.URL.Query().Get("platform")
 
-	resp := FeatureFlagsResponse{SwapEnabled: true}
+	resp := FeatureFlagsResponse{
+		SwapEnabled:     true,
+		DiscoverEnabled: true,
+	}
 	if platform == "ios" {
 		resp.SwapEnabled = false
+		resp.DiscoverEnabled = false
 	}
 
 	w.Header().Set("Content-Type", "application/json")
