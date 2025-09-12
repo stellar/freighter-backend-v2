@@ -24,6 +24,7 @@ func TestFeatureFlagsHandler(t *testing.T) {
 			expectedResponse: FeatureFlagsResponse{
 				SwapEnabled:     true,
 				DiscoverEnabled: true,
+				OnrampEnabled:   true,
 			},
 		},
 		{
@@ -32,6 +33,7 @@ func TestFeatureFlagsHandler(t *testing.T) {
 			expectedResponse: FeatureFlagsResponse{
 				SwapEnabled:     false,
 				DiscoverEnabled: false,
+				OnrampEnabled:   false,
 			},
 		},
 		{
@@ -40,6 +42,7 @@ func TestFeatureFlagsHandler(t *testing.T) {
 			expectedResponse: FeatureFlagsResponse{
 				SwapEnabled:     true,
 				DiscoverEnabled: true,
+				OnrampEnabled:   true,
 			},
 		},
 	}
