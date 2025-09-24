@@ -30,10 +30,11 @@ func (h *FeatureFlagsHandler) GetFeatureFlags(w http.ResponseWriter, r *http.Req
 		DiscoverEnabled: true,
 		OnrampEnabled:   true,
 	}
-	if platform == "ios" && version != "1.3.23" {
-		resp.SwapEnabled = true
-		resp.DiscoverEnabled = true
-		resp.OnrampEnabled = true
+
+	if platform == "ios" && version == "1.3.23" {
+		resp.SwapEnabled = false
+		resp.DiscoverEnabled = false
+		resp.OnrampEnabled = false
 	}
 
 	w.Header().Set("Content-Type", "application/json")
