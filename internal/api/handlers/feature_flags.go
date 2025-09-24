@@ -23,13 +23,15 @@ func (h *FeatureFlagsHandler) GetFeatureFlags(w http.ResponseWriter, r *http.Req
 	defer cancel()
 
 	platform := r.URL.Query().Get("platform")
+	version := r.URL.Query().Get("version")
 
 	resp := FeatureFlagsResponse{
 		SwapEnabled:     true,
 		DiscoverEnabled: true,
 		OnrampEnabled:   true,
 	}
-	if platform == "ios" {
+
+	if platform == "ios" && version == "1.3.23" {
 		resp.SwapEnabled = false
 		resp.DiscoverEnabled = false
 		resp.OnrampEnabled = false

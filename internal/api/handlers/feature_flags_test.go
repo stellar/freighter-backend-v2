@@ -16,11 +16,13 @@ func TestFeatureFlagsHandler(t *testing.T) {
 	tests := []struct {
 		name             string
 		platform         string
+		version          string
 		expectedResponse FeatureFlagsResponse
 	}{
 		{
-			name:     "android platform enables both flags",
+			name:     "android platform enables all flags",
 			platform: "android",
+			version:  "",
 			expectedResponse: FeatureFlagsResponse{
 				SwapEnabled:     true,
 				DiscoverEnabled: true,
@@ -28,8 +30,9 @@ func TestFeatureFlagsHandler(t *testing.T) {
 			},
 		},
 		{
-			name:     "ios platform disables both flags",
+			name:     "ios platform with disabled version 1.3.23",
 			platform: "ios",
+			version:  "1.3.23",
 			expectedResponse: FeatureFlagsResponse{
 				SwapEnabled:     false,
 				DiscoverEnabled: false,
@@ -37,8 +40,19 @@ func TestFeatureFlagsHandler(t *testing.T) {
 			},
 		},
 		{
-			name:     "no platform query param (defaults to enabled)",
-			platform: "",
+			name:     "ios platform with newer version enables flags",
+			platform: "ios",
+			version:  "1.3.24",
+			expectedResponse: FeatureFlagsResponse{
+				SwapEnabled:     true,
+				DiscoverEnabled: true,
+				OnrampEnabled:   true,
+			},
+		},
+		{
+			name:     "ios platform with no version defaults to enabled",
+			platform: "ios",
+			version:  "",
 			expectedResponse: FeatureFlagsResponse{
 				SwapEnabled:     true,
 				DiscoverEnabled: true,
@@ -49,7 +63,11 @@ func TestFeatureFlagsHandler(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/feature-flags?platform="+tc.platform, nil)
+			url := "/feature-flags?platform=" + tc.platform
+			if tc.version != "" {
+				url += "&version=" + tc.version
+			}
+			req := httptest.NewRequest(http.MethodGet, url, nil)
 			rr := httptest.NewRecorder()
 
 			err := handler.GetFeatureFlags(rr, req)
