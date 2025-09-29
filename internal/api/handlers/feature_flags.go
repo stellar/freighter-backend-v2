@@ -31,7 +31,7 @@ func (h *FeatureFlagsHandler) GetFeatureFlags(w http.ResponseWriter, r *http.Req
 		OnrampEnabled:   true,
 	}
 
-	if platform == "ios" && version == "1.4.23" {
+	if platform == "ios" && version == "1.5.23" {
 		resp.SwapEnabled = false
 		resp.DiscoverEnabled = false
 		resp.OnrampEnabled = false
