@@ -30,9 +30,9 @@ func TestFeatureFlagsHandler(t *testing.T) {
 			},
 		},
 		{
-			name:     "ios platform with disabled version 1.5.23",
+			name:     "ios platform with disabled version 1.6.23",
 			platform: "ios",
-			version:  "1.5.23",
+			version:  "1.6.23",
 			expectedResponse: FeatureFlagsResponse{
 				SwapEnabled:     false,
 				DiscoverEnabled: false,
