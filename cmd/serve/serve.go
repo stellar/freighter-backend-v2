@@ -41,6 +41,8 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.Mode, "mode", "development", "The mode of the server")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.SentryKey, "sentry-key", "", "The Sentry key")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.ProtocolsConfigPath, "protocols-config-path", "/app/config/protocols.json", "The path to the protocols config file while lists all supported protocols in Freighter")
+	cmd.Flags().StringVar(&s.Cfg.AppConfig.MeridianPayTreasureHuntAddress, "meridian-pay-treasure-hunt-address", "", "The Meridian Pay Treasure Hunt collection address")
+	cmd.Flags().StringVar(&s.Cfg.AppConfig.MeridianPayTreasurePoapAddress, "meridian-pay-poap-address", "", "The Meridian Pay Poap collection address")
 
 	// RPC Config
 	cmd.Flags().StringVar(&s.Cfg.RpcConfig.RpcUrl, "rpc-url", "", "The URL of the RPC instance")

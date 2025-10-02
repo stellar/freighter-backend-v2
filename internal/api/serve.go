@@ -28,7 +28,7 @@ const (
 type ApiServer struct {
 	cfg        *config.Config
 	redis      *store.RedisStore
-	rpcService types.Service
+	rpcService types.RPCService
 }
 
 func NewApiServer(cfg *config.Config) *ApiServer {
@@ -62,6 +62,12 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 
 	protocolsHandler := handlers.NewProtocolsHandler(s.cfg.AppConfig.ProtocolsConfigPath)
 	mux.HandleFunc("GET /api/v1/protocols", handlers.CustomHandler(protocolsHandler.GetProtocols))
+
+	collectiblesHandler := handlers.NewCollectiblesHandler(s.rpcService, s.cfg.AppConfig.MeridianPayTreasureHuntAddress, s.cfg.AppConfig.MeridianPayTreasurePoapAddress)
+	mux.HandleFunc("POST /api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles))
+
+	featureFlagsHandler := handlers.NewFeatureFlagsHandler()
+	mux.HandleFunc("GET /api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags))
 	return mux
 }
 
