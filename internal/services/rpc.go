@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -20,12 +21,28 @@ const (
 
 type rpcService struct {
 	client *client.Client
+	testnetClient *client.Client
+	futurenetClient *client.Client
 }
 
-func NewRPCService(rpcURL string) types.RPCService {
+func NewRPCService(rpcURL string, testnetRPCURL string, futurenetRPCURL string) types.RPCService {
 	return &rpcService{
 		client: client.NewClient(rpcURL, &http.Client{}),
+		testnetClient: client.NewClient(testnetRPCURL, &http.Client{}),
+		futurenetClient: client.NewClient(futurenetRPCURL, &http.Client{}),
 	}
+}
+
+func (r *rpcService) ConfigureNetworkClient(network string) *client.Client {
+	switch network {
+	case types.TESTNET:
+		return r.testnetClient
+	case types.FUTURENET:
+		return r.futurenetClient
+	case types.PUBLIC:
+		return r.client
+	}
+	return r.client
 }
 
 func (r *rpcService) Name() string {
@@ -33,7 +50,8 @@ func (r *rpcService) Name() string {
 }
 
 func (r *rpcService) GetHealth(ctx context.Context) (types.GetHealthResponse, error) {
-	response, err := r.client.GetHealth(ctx)
+	networkclient := r.ConfigureNetworkClient(types.TESTNET)
+	response, err := networkclient.GetHealth(ctx)
 	if err != nil {
 		return types.GetHealthResponse{Status: types.StatusError}, err
 	}
@@ -118,4 +136,22 @@ func (r *rpcService) SimulateInvocation(
 	}
 
 	return r.SimulateTx(ctx, tx)
+}
+
+func (r *rpcService) GetLedgerEntry(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
+	networkClient := r.ConfigureNetworkClient(network)
+	response, err := networkClient.GetLedgerEntries(ctx, protocol.GetLedgerEntriesRequest{
+		Keys: keys,
+		Format: "json",
+	})
+	
+	var entries []types.LedgerEntryMap
+
+	for _, entry := range response.Entries {
+		var entryMap types.LedgerEntryMap
+		json.Unmarshal(entry.DataJSON, &entryMap)
+		entries = append(entries, entryMap)
+	}
+
+	return entries, err
 }
