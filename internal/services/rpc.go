@@ -148,7 +148,10 @@ func (r *rpcService) GetLedgerEntry(ctx context.Context, keys []string, network 
 
 	for _, entry := range response.Entries {
 		var entryMap types.LedgerEntryMap
-		json.Unmarshal(entry.DataJSON, &entryMap)
+		err := json.Unmarshal(entry.DataJSON, &entryMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal ledger entry: %w", err)
+		}
 		entries = append(entries, entryMap)
 	}
 

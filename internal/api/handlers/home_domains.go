@@ -63,7 +63,11 @@ func getLedgerKeyAccountKeys(publicKeys []string) (LedgerKeyAccountKeys, HomeDom
 		} else {
 			key := xdr.LedgerKey{}
 	
-			key.SetAccount(accountId)
+			err = key.SetAccount(accountId)
+			if err != nil {
+				homeDomainsError.ErrorMessage = "error setting account id"
+				homeDomainsError.Error_keys = append(homeDomainsError.Error_keys, PublicKeyError{PublicKey: publicKey, ErrorMessage: err.Error()})
+			}
 		
 			ledgerKeyAccount := xdr.LedgerKeyAccount{
 				AccountId: accountId,
