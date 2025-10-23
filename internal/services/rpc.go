@@ -50,8 +50,7 @@ func (r *rpcService) Name() string {
 }
 
 func (r *rpcService) GetHealth(ctx context.Context) (types.GetHealthResponse, error) {
-	networkclient := r.ConfigureNetworkClient(types.TESTNET)
-	response, err := networkclient.GetHealth(ctx)
+	response, err := r.client.GetHealth(ctx)
 	if err != nil {
 		return types.GetHealthResponse{Status: types.StatusError}, err
 	}

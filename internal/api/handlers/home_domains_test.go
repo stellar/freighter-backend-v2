@@ -30,7 +30,7 @@ func TestGetHomeDomains(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("POST", "/api/v1/home-domains?pub_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/home-domains?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetHomeDomains(rr, req)
@@ -66,7 +66,7 @@ func TestGetHomeDomains(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("POST", "/api/v1/home-domains?pub_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&pub_key=GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/home-domains?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetHomeDomains(rr, req)
@@ -106,7 +106,7 @@ func TestGetHomeDomains(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("POST", "/api/v1/home-domains?pub_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&pub_key=asdff", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/home-domains?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=asdff", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetHomeDomains(rr, req)
@@ -148,7 +148,7 @@ func TestGetHomeDomains(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("POST", "/api/v1/home-domains?pub_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&pub_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/home-domains?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetHomeDomains(rr, req)
@@ -184,7 +184,7 @@ func TestGetHomeDomains(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("POST", "/api/v1/home-domains?pub_key=GDCSWQBW6GWUPOZ7PJTSSSLL5M5ICJUEIRQZ3TLVNO7PCOOX2PSLISRR", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/home-domains?public_key=GDCSWQBW6GWUPOZ7PJTSSSLL5M5ICJUEIRQZ3TLVNO7PCOOX2PSLISRR", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetHomeDomains(rr, req)

@@ -120,7 +120,7 @@ func (h *HomeDomainsHandler) GetHomeDomains(w http.ResponseWriter, r *http.Reque
 	network := queryParams.Get("network") 
 
 	for key, publicKeys := range queryParams {
-		if key == "pub_key" {
+		if key == "public_key" {
 			deduplicatedPublicKeys := []string{}
 			
 			for _, publicKey := range publicKeys {
