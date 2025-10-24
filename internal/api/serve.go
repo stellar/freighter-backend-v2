@@ -49,7 +49,7 @@ func (s *ApiServer) Start() error {
 
 func (s *ApiServer) initServices() error {
 	s.redis = store.NewRedisStore(s.cfg.RedisConfig.Host, s.cfg.RedisConfig.Port, s.cfg.RedisConfig.Password)
-	s.rpcService = services.NewRPCService(s.cfg.RpcConfig.RpcUrl)
+	s.rpcService = services.NewRPCService(s.cfg.RpcConfig.PubnetRpcUrl, s.cfg.RpcConfig.TestnetRpcUrl, s.cfg.RpcConfig.FuturenetRpcUrl)
 	return nil
 }
 
@@ -65,6 +65,9 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 
 	collectiblesHandler := handlers.NewCollectiblesHandler(s.rpcService, s.cfg.AppConfig.MeridianPayTreasureHuntAddress, s.cfg.AppConfig.MeridianPayTreasurePoapAddress)
 	mux.HandleFunc("POST /api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles))
+
+	homeDomainsHandler := handlers.NewHomeDomainsHandler(s.rpcService)
+	mux.HandleFunc("GET /api/v1/home-domains", handlers.CustomHandler(homeDomainsHandler.GetHomeDomains))
 
 	featureFlagsHandler := handlers.NewFeatureFlagsHandler()
 	mux.HandleFunc("GET /api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags))

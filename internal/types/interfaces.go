@@ -5,6 +5,7 @@ import (
 
 	"github.com/stellar/go/txnbuild"
 	"github.com/stellar/go/xdr"
+	"github.com/stellar/stellar-rpc/client"
 )
 
 const (
@@ -20,6 +21,7 @@ type Service interface {
 
 type RPCService interface {
 	Service
+	ConfigureNetworkClient(network string) *client.Client
 	SimulateTx(ctx context.Context, tx *txnbuild.Transaction) (SimulateTransactionResponse, error)
 	SimulateInvocation(
 		ctx context.Context,
@@ -29,4 +31,11 @@ type RPCService interface {
 		params []xdr.ScVal,
 		timeout txnbuild.TimeBounds,
 	) (SimulateTransactionResponse, error)
+	GetLedgerEntry(ctx context.Context, keys []string, network string) ([]LedgerEntryMap, error)
 }
+
+const (
+	PUBLIC = "PUBLIC"
+	TESTNET = "TESTNET"
+	FUTURENET = "FUTURENET"
+)

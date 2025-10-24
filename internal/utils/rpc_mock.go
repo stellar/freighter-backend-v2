@@ -6,11 +6,14 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/go/txnbuild"
 	"github.com/stellar/go/xdr"
+	"github.com/stellar/stellar-rpc/client"
 )
 
 type MockRPCService struct {
 	SimulateError    error
 	TokenURIOverride string
+	GetLedgerEntryOverride []types.LedgerEntryMap
+	GetLedgerEntryError error
 }
 
 func (m *MockRPCService) Name() string {
@@ -19,6 +22,10 @@ func (m *MockRPCService) Name() string {
 
 func (m *MockRPCService) GetHealth(ctx context.Context) (types.GetHealthResponse, error) {
 	return types.GetHealthResponse{Status: types.StatusHealthy}, nil
+}
+
+func (m *MockRPCService) ConfigureNetworkClient(network string) *client.Client {
+	return nil
 }
 
 func (m *MockRPCService) SimulateTx(ctx context.Context, tx *txnbuild.Transaction) (types.SimulateTransactionResponse, error) {
@@ -70,4 +77,16 @@ func (m *MockRPCService) SimulateInvocation(
 	}
 
 	return &result, nil
+}
+
+
+func (m *MockRPCService) GetLedgerEntry(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
+	if m.GetLedgerEntryOverride != nil {
+		return m.GetLedgerEntryOverride, nil
+	}
+
+	if (m.GetLedgerEntryError != nil) {
+		return nil, m.GetLedgerEntryError
+	}
+	return nil, nil
 }

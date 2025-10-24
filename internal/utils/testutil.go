@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+
+	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
 // ErrorResponseWriter is a custom http.ResponseWriter that can be configured to error on Write.
@@ -75,4 +77,32 @@ var MockTokenData = struct {
 	Description: "A mock NFT",
 	URL:         "https://example.com/image.png",
 	Issuer:      "G123",
+}
+
+var MockHomeDomainsData = struct {
+	HomeDomains map[string]string
+}{
+	HomeDomains: map[string]string{
+		"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF": "example.com",
+		"GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX": "example2.com",
+	},
+}
+
+var MockLedgerEntryData = struct {
+	LedgerEntry []types.LedgerEntryMap
+}{
+	LedgerEntry: []types.LedgerEntryMap{
+		{
+			Account: types.AccountInfo{
+				AccountId: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+				HomeDomain: "example.com",
+			},
+		},
+		{
+			Account: types.AccountInfo{
+				AccountId: "GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX",
+				HomeDomain: "example2.com",
+			},
+		},
+	},
 }

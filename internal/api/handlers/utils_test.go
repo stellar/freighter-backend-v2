@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/txnbuild"
 	"github.com/stretchr/testify/assert"
@@ -124,5 +125,25 @@ func TestFetchOwnerTokens_SimulateInvocationError(t *testing.T) {
 	contractID := "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
 
 	_, err := fetchOwnerTokens(mockRPC, context.Background(), account, contractID, owner)
+	assert.Error(t, err)
+}
+
+func TestFetchHomeDomains_Success(t *testing.T) {
+	mockLedgerEntryData := []types.LedgerEntryMap{
+		{Account: types.AccountInfo{AccountId: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", HomeDomain: "example.com"}},
+	}
+	mockRPC := &utils.MockRPCService{
+		GetLedgerEntryOverride: mockLedgerEntryData,
+	}
+	homeDomains, err := FetchHomeDomains(mockRPC, context.Background(), []string{"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}, "TESTNET")
+	assert.NoError(t, err)
+	assert.Equal(t, mockLedgerEntryData, homeDomains)
+}
+
+func TestFetchHomeDomains_GetLedgerEntryError(t *testing.T) {
+	mockRPC := &utils.MockRPCService{
+		GetLedgerEntryError: errors.New("rpc failure"),
+	}
+	_, err := FetchHomeDomains(mockRPC, context.Background(), []string{"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}, "TESTNET")
 	assert.Error(t, err)
 }
