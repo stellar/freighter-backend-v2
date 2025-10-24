@@ -125,8 +125,8 @@ func (h *CollectiblesHandler) fetchCollection(
 
 	collectibles, tokenErrs := h.fetchCollectibles(ctx, account, c.ID, c.TokenIDs)
 
-	if len(collectibles) == 0 && len(tokenErrs) > 0 {
-		// If no collectibles were successfully fetched, treat as collection-level failure
+	if len(collectibles) == 0 {
+		// If no collectibles were fetched (either no tokens requested or all fetches failed), treat as collection-level failure
 		return nil, &CollectionError{
 			ErrorMessage:      fmt.Sprintf("no collectibles fetched for contract %s", c.ID),
 			CollectionAddress: c.ID,
