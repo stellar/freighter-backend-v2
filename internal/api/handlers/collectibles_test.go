@@ -82,6 +82,64 @@ func TestFetchCollection(t *testing.T) {
 		require.NotNil(t, collection)
 		require.Len(t, collection.Collectibles, 2)
 	})
+
+	t.Run("returns collection-level error when all token fetches fail", func(t *testing.T) {
+		mockRPC := &utils.MockRPCService{}
+		handler := NewCollectiblesHandler(mockRPC, "", "")
+
+		account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
+		// Use invalid token IDs (non-numeric) that will fail to parse
+		contract := contractDetails{
+			ID:       "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+			TokenIDs: []string{"invalid", "bad-token"},
+		}
+
+		ctx := context.Background()
+		collection, err := handler.fetchCollection(ctx, account, contract)
+
+		// Should return nil collection (collection-level failure)
+		require.Nil(t, collection)
+
+		// Should return collection error
+		require.NotNil(t, err)
+		assert.Equal(t, contract.ID, err.CollectionAddress)
+		assert.Contains(t, err.ErrorMessage, "no collectibles fetched")
+
+		// Should include token errors
+		require.Len(t, err.Tokens, 2)
+		// Check that both token IDs are present (order may vary due to concurrent fetching)
+		tokenIDs := []string{err.Tokens[0].TokenID, err.Tokens[1].TokenID}
+		assert.Contains(t, tokenIDs, "invalid")
+		assert.Contains(t, tokenIDs, "bad-token")
+		// Both should have error messages
+		assert.NotEmpty(t, err.Tokens[0].ErrorMessage)
+		assert.NotEmpty(t, err.Tokens[1].ErrorMessage)
+	})
+
+	t.Run("returns collection-level error when token IDs is empty", func(t *testing.T) {
+		mockRPC := &utils.MockRPCService{}
+		handler := NewCollectiblesHandler(mockRPC, "", "")
+
+		account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
+		contract := contractDetails{
+			ID:       "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+			TokenIDs: []string{},
+		}
+
+		ctx := context.Background()
+		collection, err := handler.fetchCollection(ctx, account, contract)
+
+		// Should return nil collection (collection-level failure)
+		require.Nil(t, collection)
+
+		// Should return collection error
+		require.NotNil(t, err)
+		assert.Equal(t, contract.ID, err.CollectionAddress)
+		assert.Contains(t, err.ErrorMessage, "no collectibles fetched")
+
+		// Should have empty token errors since no tokens were requested
+		assert.Empty(t, err.Tokens)
+	})
 }
 
 func TestFetchCollectibles(t *testing.T) {
@@ -110,9 +168,11 @@ func TestFetchMeridianPayCollectibles(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 
+	// When mock returns empty token IDs, should return collection-level errors
 	for _, res := range results {
-		assert.NotNil(t, res.Collection)
-		assert.Empty(t, res.Error)
+		assert.Nil(t, res.Collection)
+		assert.NotNil(t, res.Error)
+		assert.Contains(t, res.Error.ErrorMessage, "no collectibles fetched")
 	}
 }
 
@@ -144,13 +204,15 @@ func TestGetCollectibles_WithMeridianPayAddresses(t *testing.T) {
 	err = json.Unmarshal(rr.Body.Bytes(), &response)
 	require.NoError(t, err)
 
-	// Should dedupe and only have 2 collections
+	// Should have 2 results (Meridian Pay collections, with empty token IDs return errors)
 	collections := response.Data.Collections
 	require.Len(t, collections, 2)
 
 	for _, col := range collections {
-		require.NotNil(t, col.Collection)
-		assert.Empty(t, col.Error)
+		// Mock returns empty token IDs, so expect collection-level errors
+		assert.Nil(t, col.Collection)
+		assert.NotNil(t, col.Error)
+		assert.Contains(t, col.Error.ErrorMessage, "no collectibles fetched")
 	}
 }
 
@@ -181,7 +243,9 @@ func TestGetCollectibles_Empty(t *testing.T) {
 	require.Len(t, collections, 2)
 
 	for _, col := range collections {
-		require.NotNil(t, col.Collection)
-		assert.Empty(t, col.Error)
+		// Mock returns empty token IDs, so expect collection-level errors
+		assert.Nil(t, col.Collection)
+		assert.NotNil(t, col.Error)
+		assert.Contains(t, col.Error.ErrorMessage, "no collectibles fetched")
 	}
 }
