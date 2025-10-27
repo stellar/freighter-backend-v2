@@ -11,6 +11,8 @@ import (
 type MockRPCService struct {
 	SimulateError    error
 	TokenURIOverride string
+	GetLedgerEntryOverride []types.LedgerEntryMap
+	GetLedgerEntryError error
 }
 
 func (m *MockRPCService) Name() string {
@@ -70,4 +72,16 @@ func (m *MockRPCService) SimulateInvocation(
 	}
 
 	return &result, nil
+}
+
+
+func (m *MockRPCService) GetLedgerEntry(ctx context.Context, keys []string) ([]types.LedgerEntryMap, error) {
+	if m.GetLedgerEntryOverride != nil {
+		return m.GetLedgerEntryOverride, nil
+	}
+
+	if (m.GetLedgerEntryError != nil) {
+		return nil, m.GetLedgerEntryError
+	}
+	return nil, nil
 }

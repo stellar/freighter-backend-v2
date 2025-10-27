@@ -29,4 +29,5 @@ type RPCService interface {
 		params []xdr.ScVal,
 		timeout txnbuild.TimeBounds,
 	) (SimulateTransactionResponse, error)
+	GetLedgerEntry(ctx context.Context, keys []string) ([]LedgerEntryMap, error)
 }

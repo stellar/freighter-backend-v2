@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -118,4 +119,28 @@ func (r *rpcService) SimulateInvocation(
 	}
 
 	return r.SimulateTx(ctx, tx)
+}
+
+func (r *rpcService) GetLedgerEntry(ctx context.Context, keys []string) ([]types.LedgerEntryMap, error) {
+	response, err := r.client.GetLedgerEntries(ctx, protocol.GetLedgerEntriesRequest{
+		Keys: keys,
+		Format: "json",
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ledger entries: %w", err)
+	}
+	
+	var entries []types.LedgerEntryMap
+
+	for _, entry := range response.Entries {
+		var entryMap types.LedgerEntryMap
+		err := json.Unmarshal(entry.DataJSON, &entryMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal ledger entry: %w", err)
+		}
+		entries = append(entries, entryMap)
+	}
+
+	return entries, err
 }
