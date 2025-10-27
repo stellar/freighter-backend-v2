@@ -86,7 +86,6 @@ func getLedgerKeyAccountKeys(publicKeys []string) (LedgerKeyAccountKeys, LedgerK
 			}
 		
 		
-		
 			xdr := base64.StdEncoding.EncodeToString(bkey)
 			ledgerKeyAccountKeys = append(ledgerKeyAccountKeys, xdr)
 			ledgerKeyAccountMap[publicKey] = types.AccountInfo{}
@@ -141,7 +140,7 @@ func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r 
 			
 			ledgerKeyAccountsRpcData, e := FetchLedgerEntries(h.RpcService, r.Context(), ledgerKeyAccountKeys.LedgerKeys)
 
-			if e != nil {
+			if e != nil && ledgerKeyAccountKeysError.ErrorMessage == "" {
 				ledgerKeyAccountError = LedgerKeyAccountError{ErrorMessage: e.Error()}
 			}
 
