@@ -21,28 +21,12 @@ const (
 
 type rpcService struct {
 	client *client.Client
-	testnetClient *client.Client
-	futurenetClient *client.Client
 }
 
-func NewRPCService(rpcURL string, testnetRPCURL string, futurenetRPCURL string) types.RPCService {
+func NewRPCService(rpcURL string) types.RPCService {
 	return &rpcService{
 		client: client.NewClient(rpcURL, &http.Client{}),
-		testnetClient: client.NewClient(testnetRPCURL, &http.Client{}),
-		futurenetClient: client.NewClient(futurenetRPCURL, &http.Client{}),
 	}
-}
-
-func (r *rpcService) ConfigureNetworkClient(network string) *client.Client {
-	switch network {
-	case types.TESTNET:
-		return r.testnetClient
-	case types.FUTURENET:
-		return r.futurenetClient
-	case types.PUBLIC:
-		return r.client
-	}
-	return r.client
 }
 
 func (r *rpcService) Name() string {
@@ -137,9 +121,8 @@ func (r *rpcService) SimulateInvocation(
 	return r.SimulateTx(ctx, tx)
 }
 
-func (r *rpcService) GetLedgerEntry(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
-	networkClient := r.ConfigureNetworkClient(network)
-	response, err := networkClient.GetLedgerEntries(ctx, protocol.GetLedgerEntriesRequest{
+func (r *rpcService) GetLedgerEntry(ctx context.Context, keys []string) ([]types.LedgerEntryMap, error) {
+	response, err := r.client.GetLedgerEntries(ctx, protocol.GetLedgerEntriesRequest{
 		Keys: keys,
 		Format: "json",
 	})

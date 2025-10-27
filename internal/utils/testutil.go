@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 
 	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/go/xdr"
 )
 
 // ErrorResponseWriter is a custom http.ResponseWriter that can be configured to error on Write.
@@ -79,12 +80,60 @@ var MockTokenData = struct {
 	Issuer:      "G123",
 }
 
-var MockHomeDomainsData = struct {
-	HomeDomains map[string]string
+var MockLedgerKeyAccount0 = types.AccountInfo{
+	AccountId: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+	HomeDomain: "example.com",
+	Balance: "1000000000000000000",
+	Seq_num: "1000000000000000000",
+	Num_sub_entries: 1000000000000000000,
+	Inflation_dest: "1000000000000000000",
+	Flags: 1000000000000000000,
+	Thresholds: "1000000000000000000",
+	Signers: []types.Signer{
+		{Key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", Weight: 1},
+	},
+	Ext: xdr.LedgerEntryExt{
+	},
+}
+
+var MockLedgerKeyAccount1 = types.AccountInfo{
+	AccountId: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+	HomeDomain: "example2.com",
+	Balance: "1000000000000000000",
+	Seq_num: "1000000000000000000",
+	Num_sub_entries: 1000000000000000000,
+	Inflation_dest: "1000000000000000000",
+	Flags: 1000000000000000000,
+	Thresholds: "1000000000000000000",
+	Signers: []types.Signer{
+		{Key: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5", Weight: 1},
+	},
+	Ext: xdr.LedgerEntryExt{
+	},
+}
+
+var MockLedgerKeyAccount2 = types.AccountInfo{
+	AccountId: "",
+	HomeDomain: "",
+	Balance: "",
+	Seq_num: "",
+	Num_sub_entries: 0,
+	Inflation_dest: "",
+	Flags: 0,
+	Thresholds: "",
+	Signers: []types.Signer{
+	},
+	Ext: xdr.LedgerEntryExt{
+	},
+}
+
+var MockLedgerKeyAccountsData = struct {
+	LedgerKeyAccounts map[string]types.AccountInfo
 }{
-	HomeDomains: map[string]string{
-		"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF": "example.com",
-		"GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX": "example2.com",
+	LedgerKeyAccounts: map[string]types.AccountInfo{
+		"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF": MockLedgerKeyAccount0,
+		"GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5": MockLedgerKeyAccount1,
+		"GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX": MockLedgerKeyAccount2,
 	},
 }
 
@@ -93,16 +142,10 @@ var MockLedgerEntryData = struct {
 }{
 	LedgerEntry: []types.LedgerEntryMap{
 		{
-			Account: types.AccountInfo{
-				AccountId: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-				HomeDomain: "example.com",
-			},
+			Account: MockLedgerKeyAccount0,
 		},
 		{
-			Account: types.AccountInfo{
-				AccountId: "GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX",
-				HomeDomain: "example2.com",
-			},
+			Account: MockLedgerKeyAccount1,
 		},
 	},
 }

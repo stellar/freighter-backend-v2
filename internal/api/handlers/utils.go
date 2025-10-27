@@ -194,13 +194,12 @@ func fetchOwnerTokens(
 }
 
 
-func FetchHomeDomains(
+func FetchLedgerEntries(
 	rpc types.RPCService,
 	ctx context.Context,
-	ledgerKeyAccountKeys []string,
-	network string,
+	ledgerKeyKeys []string,
 ) ([]types.LedgerEntryMap, error) {
-	data, e := rpc.GetLedgerEntry(ctx, ledgerKeyAccountKeys, network)
+	data, e := rpc.GetLedgerEntry(ctx, ledgerKeyKeys)
 	if e != nil {
 		return nil, e
 	}

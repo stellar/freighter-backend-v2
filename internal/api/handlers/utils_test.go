@@ -128,22 +128,22 @@ func TestFetchOwnerTokens_SimulateInvocationError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestFetchHomeDomains_Success(t *testing.T) {
+func TestFetchLedgerKeyAccounts_Success(t *testing.T) {
 	mockLedgerEntryData := []types.LedgerEntryMap{
-		{Account: types.AccountInfo{AccountId: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", HomeDomain: "example.com"}},
+		{Account: utils.MockLedgerKeyAccount0 },
 	}
 	mockRPC := &utils.MockRPCService{
 		GetLedgerEntryOverride: mockLedgerEntryData,
 	}
-	homeDomains, err := FetchHomeDomains(mockRPC, context.Background(), []string{"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}, "TESTNET")
+	ledgerKeyAccounts, err := FetchLedgerEntries(mockRPC, context.Background(), []string{"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"})
 	assert.NoError(t, err)
-	assert.Equal(t, mockLedgerEntryData, homeDomains)
+	assert.Equal(t, mockLedgerEntryData, ledgerKeyAccounts)
 }
 
-func TestFetchHomeDomains_GetLedgerEntryError(t *testing.T) {
+func TestFetchLedgerKeyAccounts_GetLedgerEntryError(t *testing.T) {
 	mockRPC := &utils.MockRPCService{
 		GetLedgerEntryError: errors.New("rpc failure"),
 	}
-	_, err := FetchHomeDomains(mockRPC, context.Background(), []string{"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}, "TESTNET")
+	_, err := FetchLedgerEntries(mockRPC, context.Background(), []string{"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"})
 	assert.Error(t, err)
 }
