@@ -126,6 +126,10 @@ func (r *rpcService) GetLedgerEntry(ctx context.Context, keys []string) ([]types
 		Keys: keys,
 		Format: "json",
 	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ledger entries: %w", err)
+	}
 	
 	var entries []types.LedgerEntryMap
 

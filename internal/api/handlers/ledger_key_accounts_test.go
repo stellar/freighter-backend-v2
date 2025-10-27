@@ -32,7 +32,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", strings.NewReader(body))
+		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
@@ -83,7 +83,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5", strings.NewReader(body))
+		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
@@ -153,7 +153,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=asdff", strings.NewReader(body))
+		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=asdff", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
@@ -186,7 +186,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			},
 		}
 		assert.Equal(t, testAccount0, d0)
-		e0 := ledgerKeyAccounts.Data.Error.Error_keys[0]
+		e0 := ledgerKeyAccounts.Data.Error.ErrorKeys[0]
 		require.NotNil(t, e0)
 		assert.Equal(t, "asdff", e0.PublicKey)
 		assert.Equal(t, "base32 decode failed: illegal base32 data at input byte 5", e0.ErrorMessage)
@@ -210,7 +210,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", strings.NewReader(body))
+		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
@@ -261,7 +261,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?public_key=GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX", strings.NewReader(body))
+		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)

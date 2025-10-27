@@ -37,7 +37,7 @@ type PublicKeyError struct {
 
 type LedgerKeyAccountError struct {
 	ErrorMessage      string       `json:"error_message"`
-	Error_keys        []PublicKeyError `json:"error_keys,omitempty"`
+	ErrorKeys        []PublicKeyError `json:"error_keys,omitempty"`
 }
 
 type LedgerKeyAccountsResponse struct {
@@ -52,43 +52,43 @@ type LedgerKeyAccountKeys struct {
 
 func getLedgerKeyAccountKeys(publicKeys []string) (LedgerKeyAccountKeys, LedgerKeyAccountError) {
 	ledgerKeyAccountMap := LedgerKeyAccountMap{}
-	ledgerKeyAccountError := LedgerKeyAccountError{Error_keys: []PublicKeyError{}}
+	ledgerKeyAccountError := LedgerKeyAccountError{ErrorKeys: []PublicKeyError{}}
 	ledgerKeyAccountKeys := []string{}
 
 	for _, publicKey := range publicKeys {
 		accountId, err := xdr.AddressToAccountId(publicKey)
 		if err != nil {
 			ledgerKeyAccountError.ErrorMessage = "error converting public key to account id"
-			ledgerKeyAccountError.Error_keys = append(ledgerKeyAccountError.Error_keys, PublicKeyError{PublicKey: publicKey, ErrorMessage: err.Error()})
+			ledgerKeyAccountError.ErrorKeys = append(ledgerKeyAccountError.ErrorKeys, PublicKeyError{PublicKey: publicKey, ErrorMessage: err.Error()})
 		} else {
 			key := xdr.LedgerKey{}
 	
 			err = key.SetAccount(accountId)
 			if err != nil {
 				ledgerKeyAccountError.ErrorMessage = "error setting account id"
-				ledgerKeyAccountError.Error_keys = append(ledgerKeyAccountError.Error_keys, PublicKeyError{PublicKey: publicKey, ErrorMessage: err.Error()})
+				ledgerKeyAccountError.ErrorKeys = append(ledgerKeyAccountError.ErrorKeys, PublicKeyError{PublicKey: publicKey, ErrorMessage: err.Error()})
+			} else {
+				ledgerKeyAccount := xdr.LedgerKeyAccount{
+					AccountId: accountId,
+				}
+			
+				ledgerKey := xdr.LedgerKey{
+					Type: xdr.LedgerEntryTypeAccount,
+					Account: &ledgerKeyAccount,
+				}
+			
+			
+				bkey, err := ledgerKey.MarshalBinary()
+				if err != nil {
+					ledgerKeyAccountError.ErrorMessage = "error marshalling ledger key"
+					ledgerKeyAccountError.ErrorKeys = append(ledgerKeyAccountError.ErrorKeys, PublicKeyError{PublicKey: publicKey, ErrorMessage: err.Error()})
+				}
+			
+			
+				xdr := base64.StdEncoding.EncodeToString(bkey)
+				ledgerKeyAccountKeys = append(ledgerKeyAccountKeys, xdr)
+				ledgerKeyAccountMap[publicKey] = types.AccountInfo{}
 			}
-		
-			ledgerKeyAccount := xdr.LedgerKeyAccount{
-				AccountId: accountId,
-			}
-		
-			ledgerKey := xdr.LedgerKey{
-				Type: xdr.LedgerEntryTypeAccount,
-				Account: &ledgerKeyAccount,
-			}
-		
-		
-			bkey, err := ledgerKey.MarshalBinary()
-			if err != nil {
-				ledgerKeyAccountError.ErrorMessage = "error marshalling ledger key"
-				ledgerKeyAccountError.Error_keys = append(ledgerKeyAccountError.Error_keys, PublicKeyError{PublicKey: publicKey, ErrorMessage: err.Error()})
-			}
-		
-		
-			xdr := base64.StdEncoding.EncodeToString(bkey)
-			ledgerKeyAccountKeys = append(ledgerKeyAccountKeys, xdr)
-			ledgerKeyAccountMap[publicKey] = types.AccountInfo{}
 		}
 	}
 
@@ -97,7 +97,7 @@ func getLedgerKeyAccountKeys(publicKeys []string) (LedgerKeyAccountKeys, LedgerK
 
 func processLedgerKeyAccountsEntries(publicKeys []string, data []types.LedgerEntryMap) (LedgerKeyAccountMap, LedgerKeyAccountError) {
 	ledgerKeyAccountsMap := LedgerKeyAccountMap{}
-	ledgerKeyAccountsError := LedgerKeyAccountError{Error_keys: []PublicKeyError{}}
+	ledgerKeyAccountsError := LedgerKeyAccountError{ErrorKeys: []PublicKeyError{}}
 
 	for _, publicKey := range publicKeys {
 		for _, entry := range data {
@@ -115,11 +115,15 @@ func processLedgerKeyAccountsEntries(publicKeys []string, data []types.LedgerEnt
 // It returns a map of public keys to AccountInfo and a map of errors if some of the public keys are invalid
 // This is designed to be flexible so valid public keys will return results while invalid public keys will return errors
 func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r *http.Request) error {
-	_, cancel := context.WithTimeout(r.Context(), HealthCheckContextTimeout)
+	contextWithTimeout, cancel := context.WithTimeout(r.Context(), HealthCheckContextTimeout)
 	defer cancel()
 	ledgerKeyAccountList := make(map[string]types.AccountInfo)
 	var ledgerKeyAccountError LedgerKeyAccountError
 	queryParams := r.URL.Query()
+
+	if (len(queryParams) == 0) {
+		return httperror.BadRequest("no params passed: public key query param is required", errors.New("no params provided"))
+	}
 
 	for key, publicKeys := range queryParams {
 		if key == "public_key" {
@@ -138,7 +142,7 @@ func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r 
 			}
 			ledgerKeyAccountList = ledgerKeyAccountKeys.LedgerKeyAccountMap
 			
-			ledgerKeyAccountsRpcData, e := FetchLedgerEntries(h.RpcService, r.Context(), ledgerKeyAccountKeys.LedgerKeys)
+			ledgerKeyAccountsRpcData, e := FetchLedgerEntries(h.RpcService, contextWithTimeout, ledgerKeyAccountKeys.LedgerKeys)
 
 			if e != nil && ledgerKeyAccountKeysError.ErrorMessage == "" {
 				ledgerKeyAccountError = LedgerKeyAccountError{ErrorMessage: e.Error()}
