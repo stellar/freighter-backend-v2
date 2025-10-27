@@ -45,7 +45,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.MeridianPayTreasurePoapAddress, "meridian-pay-poap-address", "", "The Meridian Pay Poap collection address")
 
 	// RPC Config
-	cmd.Flags().StringVar(&s.Cfg.RpcConfig.PubnetRpcUrl, "rpc-url", "", "The URL of the RPC instance")
+	cmd.Flags().StringVar(&s.Cfg.RpcConfig.RpcUrl, "rpc-url", "", "The URL of the RPC instance")
 
 	// Horizon Config
 	cmd.Flags().StringVar(&s.Cfg.HorizonConfig.HorizonPubnetURL, "horizon-pubnet-url", "https://horizon.stellar.org/", "The URL of the pubnet Horizon")
