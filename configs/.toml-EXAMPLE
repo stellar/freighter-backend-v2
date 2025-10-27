@@ -7,7 +7,6 @@ SENTRY_KEY = "not-set"
 # RPC
 RPC_URL = "not-set"
 
-
 # Horizon
 HORIZON_PUBNET_URL = "not-set"
 HORIZON_TESTNET_URL = "not-set"

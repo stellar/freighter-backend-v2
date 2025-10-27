@@ -18,7 +18,6 @@ import (
 
 func TestNewRPCService(t *testing.T) {
 	rpcURL := "http://localhost:8000"
-
 	service := NewRPCService(rpcURL)
 
 	require.NotNil(t, service)
