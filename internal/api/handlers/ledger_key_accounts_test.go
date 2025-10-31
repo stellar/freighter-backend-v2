@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,7 +33,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", strings.NewReader(body))
+		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
@@ -83,7 +84,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5", strings.NewReader(body))
+		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5&network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
@@ -153,7 +154,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=asdff", strings.NewReader(body))
+		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=asdff&network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
@@ -210,7 +211,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", strings.NewReader(body))
+		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
@@ -261,7 +262,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		body := ``
 
-		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX", strings.NewReader(body))
+		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX&network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
@@ -292,6 +293,57 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			},
 		}
 		assert.Equal(t, testAccount, d0)
+	})
+	t.Run("should return an error if network is invalid", func(t *testing.T) {
+		t.Parallel()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewEncoder(w).Encode(utils.MockLedgerKeyAccountsData); err != nil {
+				t.Fatalf("failed to encode mock response: %v", err)
+			}
+		}))
+		defer server.Close()
+
+		mockRPC := &utils.MockRPCService{
+			GetLedgerEntryOverride: utils.MockLedgerEntryData.LedgerEntry,
+		}
+
+		handler := NewLedgerKeyAccountHandler(mockRPC)
+
+		body := ``
+
+		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		err := handler.GetLedgerKeyAccounts(rr, req)
+		require.Error(t, err)
+		fmt.Println(rr)
+		assert.EqualError(t, err, "invalid network: network must be PUBLIC, TESTNET or FUTURENET")
+	})
+
+	t.Run("should return an error if no params are passed", func(t *testing.T) {
+		t.Parallel()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewEncoder(w).Encode(utils.MockLedgerKeyAccountsData); err != nil {
+				t.Fatalf("failed to encode mock response: %v", err)
+			}
+		}))
+		defer server.Close()
+
+		mockRPC := &utils.MockRPCService{
+			GetLedgerEntryOverride: utils.MockLedgerEntryData.LedgerEntry,
+		}
+
+		handler := NewLedgerKeyAccountHandler(mockRPC)
+
+		body := ``
+
+		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		err := handler.GetLedgerKeyAccounts(rr, req)
+		require.Error(t, err)
+		fmt.Println(rr)
+		assert.EqualError(t, err, "no params passed: public key and network query params are required")
 	})
 
 }

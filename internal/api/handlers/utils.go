@@ -26,6 +26,7 @@ func FetchCollection(
 	ctx context.Context,
 	accountId *txnbuild.SimpleAccount,
 	contractID string,
+	network string,
 ) (*collection, error) {
 	id, err := utils.ScAddressFromString(contractID)
 	if err != nil {
@@ -41,7 +42,7 @@ func FetchCollection(
 	symbolCh := make(chan result, 1)
 
 	go func() {
-		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "name", []xdr.ScVal{}, txnbuild.NewTimeout(300))
+		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "name", []xdr.ScVal{}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			nameCh <- result{"", err}
 			return
@@ -50,7 +51,7 @@ func FetchCollection(
 	}()
 
 	go func() {
-		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "symbol", []xdr.ScVal{}, txnbuild.NewTimeout(300))
+		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "symbol", []xdr.ScVal{}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			symbolCh <- result{"", err}
 			return
@@ -80,6 +81,7 @@ func fetchCollectible(
 	accountId *txnbuild.SimpleAccount,
 	contractID string,
 	tokenId string,
+	network string,
 ) (*Collectible, error) {
 
 	id, err := utils.ScAddressFromString(contractID)
@@ -105,7 +107,7 @@ func fetchCollectible(
 	tokenURICh := make(chan result, 1)
 
 	go func() {
-		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "owner_of", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300))
+		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "owner_of", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			ownerCh <- result{xdr.ScVal{}, err}
 			return
@@ -114,7 +116,7 @@ func fetchCollectible(
 	}()
 
 	go func() {
-		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "token_uri", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300))
+		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "token_uri", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			tokenURICh <- result{xdr.ScVal{}, err}
 			return
@@ -148,6 +150,7 @@ func fetchOwnerTokens(
 	accountId *txnbuild.SimpleAccount,
 	contractID string,
 	owner string,
+	network string,
 ) ([]string, error) {
 
 	id, err := utils.ScAddressFromString(contractID)
@@ -171,7 +174,7 @@ func fetchOwnerTokens(
 	}
 
 	go func() {
-		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "get_owner_tokens", []xdr.ScVal{ownerVal}, txnbuild.NewTimeout(300))
+		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "get_owner_tokens", []xdr.ScVal{ownerVal}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			ownerTokensCh <- result{xdr.ScVal{}, err}
 			return
@@ -198,8 +201,9 @@ func FetchLedgerEntries(
 	rpc types.RPCService,
 	ctx context.Context,
 	ledgerKeyKeys []string,
+	network string,
 ) ([]types.LedgerEntryMap, error) {
-	data, e := rpc.GetLedgerEntry(ctx, ledgerKeyKeys)
+	data, e := rpc.GetLedgerEntry(ctx, ledgerKeyKeys, network)
 	if e != nil {
 		return nil, e
 	}

@@ -12,7 +12,7 @@ type MockRPCService struct {
 	HealthError    error
 }
 
-func (m *MockRPCService) GetHealth(ctx context.Context) (types.GetHealthResponse, error) {
+func (m *MockRPCService) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
 	return m.HealthResponse, m.HealthError
 }
 

@@ -6,6 +6,7 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/go/txnbuild"
 	"github.com/stellar/go/xdr"
+	"github.com/stellar/stellar-rpc/client"
 )
 
 type MockRPCService struct {
@@ -15,15 +16,19 @@ type MockRPCService struct {
 	GetLedgerEntryError error
 }
 
+func (m *MockRPCService) ConfigureNetworkClient(network string) *client.Client {
+	return nil
+}
+
 func (m *MockRPCService) Name() string {
 	return "mock-rpc"
 }
 
-func (m *MockRPCService) GetHealth(ctx context.Context) (types.GetHealthResponse, error) {
+func (m *MockRPCService) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
 	return types.GetHealthResponse{Status: types.StatusHealthy}, nil
 }
 
-func (m *MockRPCService) SimulateTx(ctx context.Context, tx *txnbuild.Transaction) (types.SimulateTransactionResponse, error) {
+func (m *MockRPCService) SimulateTx(ctx context.Context, tx *txnbuild.Transaction, network string) (types.SimulateTransactionResponse, error) {
 	return nil, nil
 }
 
@@ -34,6 +39,7 @@ func (m *MockRPCService) SimulateInvocation(
 	functionName xdr.ScSymbol,
 	params []xdr.ScVal,
 	timeout txnbuild.TimeBounds,
+	network string,
 ) (types.SimulateTransactionResponse, error) {
 	if m.SimulateError != nil {
 		return nil, m.SimulateError
@@ -75,7 +81,7 @@ func (m *MockRPCService) SimulateInvocation(
 }
 
 
-func (m *MockRPCService) GetLedgerEntry(ctx context.Context, keys []string) ([]types.LedgerEntryMap, error) {
+func (m *MockRPCService) GetLedgerEntry(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
 	if m.GetLedgerEntryOverride != nil {
 		return m.GetLedgerEntryOverride, nil
 	}

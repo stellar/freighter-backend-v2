@@ -49,7 +49,7 @@ func (s *ApiServer) Start() error {
 
 func (s *ApiServer) initServices() error {
 	s.redis = store.NewRedisStore(s.cfg.RedisConfig.Host, s.cfg.RedisConfig.Port, s.cfg.RedisConfig.Password)
-	s.rpcService = services.NewRPCService(s.cfg.RpcConfig.RpcUrl)
+	s.rpcService = services.NewRPCService(s.cfg.RpcConfig.PubnetRpcUrl, s.cfg.RpcConfig.TestnetRpcUrl, s.cfg.RpcConfig.FuturenetRpcUrl)
 	return nil
 }
 

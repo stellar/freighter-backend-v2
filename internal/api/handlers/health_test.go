@@ -27,7 +27,7 @@ func TestHealthHandler_CheckHealth(t *testing.T) {
 		}
 		handler := NewHealthHandler(mockRPC)
 
-		req, _ := http.NewRequest("GET", "/health", nil)
+		req, _ := http.NewRequest("GET", "/health?network=PUBLIC", nil)
 		rr := httptest.NewRecorder()
 
 		err := handler.CheckHealth(rr, req)
@@ -53,7 +53,7 @@ func TestHealthHandler_CheckHealth(t *testing.T) {
 		}
 		handler := NewHealthHandler(mockRPC)
 
-		req, _ := http.NewRequest("GET", "/health", nil)
+		req, _ := http.NewRequest("GET", "/health?network=PUBLIC", nil)
 		rr := httptest.NewRecorder()
 
 		err := handler.CheckHealth(rr, req)
@@ -78,7 +78,7 @@ func TestHealthHandler_CheckHealth(t *testing.T) {
 		}
 		handler := NewHealthHandler(mockRPC)
 
-		req, _ := http.NewRequest("GET", "/health", nil)
+		req, _ := http.NewRequest("GET", "/health?network=PUBLIC", nil)
 		rr := httptest.NewRecorder()
 
 		err := handler.CheckHealth(rr, req)
@@ -103,7 +103,7 @@ func TestHealthHandler_CheckHealth(t *testing.T) {
 		}
 		handler := NewHealthHandler(mockRPC)
 
-		req, _ := http.NewRequest("GET", "/health", nil)
+		req, _ := http.NewRequest("GET", "/health?network=PUBLIC", nil)
 		w := utils.NewErrorResponseWriter(true)
 
 		err := handler.CheckHealth(w, req)
@@ -112,5 +112,17 @@ func TestHealthHandler_CheckHealth(t *testing.T) {
 		require.True(t, ok, "error should be an HttpError")
 		assert.Equal(t, http.StatusInternalServerError, httpErr.StatusCode)
 		assert.Contains(t, httpErr.Message, "writing health check response")
+	})
+
+	t.Run("should return an error if network is invalid", func(t *testing.T) {
+		t.Parallel()
+		handler := NewHealthHandler()
+
+		req, _ := http.NewRequest("GET", "/health?network=INVALID", nil)
+		rr := httptest.NewRecorder()
+
+		err := handler.CheckHealth(rr, req)
+		require.Error(t, err)
+		assert.EqualError(t, err, "invalid network: network must be PUBLIC, TESTNET or FUTURENET")
 	})
 }
