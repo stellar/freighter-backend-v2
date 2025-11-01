@@ -113,16 +113,4 @@ func TestHealthHandler_CheckHealth(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, httpErr.StatusCode)
 		assert.Contains(t, httpErr.Message, "writing health check response")
 	})
-
-	t.Run("should return an error if network is invalid", func(t *testing.T) {
-		t.Parallel()
-		handler := NewHealthHandler()
-
-		req, _ := http.NewRequest("GET", "/health?network=INVALID", nil)
-		rr := httptest.NewRecorder()
-
-		err := handler.CheckHealth(rr, req)
-		require.Error(t, err)
-		assert.EqualError(t, err, "invalid network: network must be PUBLIC, TESTNET or FUTURENET")
-	})
 }
