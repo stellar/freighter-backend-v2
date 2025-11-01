@@ -106,6 +106,7 @@ func (h *CollectiblesHandler) fetchCollection(
 	ctx context.Context,
 	account *txnbuild.SimpleAccount,
 	c contractDetails,
+	network string,
 ) (*Collection, *CollectionError) {
 
 	if !utils.IsValidContractID(c.ID) {
@@ -115,7 +116,7 @@ func (h *CollectiblesHandler) fetchCollection(
 		}
 	}
 
-	details, err := FetchCollection(h.RpcService, ctx, account, c.ID)
+	details, err := FetchCollection(h.RpcService, ctx, account, c.ID, network)
 	if err != nil {
 		return nil, &CollectionError{
 			ErrorMessage:      fmt.Sprintf("fetching collection: %v", err),
@@ -123,7 +124,7 @@ func (h *CollectiblesHandler) fetchCollection(
 		}
 	}
 
-	collectibles, tokenErrs := h.fetchCollectibles(ctx, account, c.ID, c.TokenIDs)
+	collectibles, tokenErrs := h.fetchCollectibles(ctx, account, c.ID, c.TokenIDs, network)
 
 	if len(collectibles) == 0 && len(tokenErrs) > 0 {
 		// If no collectibles were successfully fetched, treat as collection-level failure
@@ -155,6 +156,7 @@ func (h *CollectiblesHandler) fetchCollectibles(
 	account *txnbuild.SimpleAccount,
 	contractID string,
 	tokenIDs []string,
+	network string,
 ) ([]Collectible, []TokenError) {
 
 	var (
@@ -168,7 +170,7 @@ func (h *CollectiblesHandler) fetchCollectibles(
 		wg.Add(1)
 		go func(tokenID string) {
 			defer wg.Done()
-			c, err := fetchCollectible(h.RpcService, ctx, account, contractID, tokenID)
+			c, err := fetchCollectible(h.RpcService, ctx, account, contractID, tokenID, network)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -190,6 +192,7 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 	ctx context.Context,
 	account *txnbuild.SimpleAccount,
 	owner string,
+	network string,
 ) ([]CollectionResult, error) {
 	contracts := []string{}
 	if h.MeridianPayTreasureHuntAddress != "" {
@@ -211,7 +214,7 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 		go func(i int, contract string) {
 			defer wg.Done()
 
-			tokenIds, err := fetchOwnerTokens(h.RpcService, ctx, account, contract, owner)
+			tokenIds, err := fetchOwnerTokens(h.RpcService, ctx, account, contract, owner, network)
 			if err != nil {
 				results[i] = CollectionResult{
 					Error: &CollectionError{
@@ -227,7 +230,7 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 				TokenIDs: tokenIds,
 			}
 
-			collection, colErr := h.fetchCollection(ctx, account, contractDetails)
+			collection, colErr := h.fetchCollection(ctx, account, contractDetails, network)
 			results[i] = CollectionResult{
 				Collection: collection,
 				Error:      colErr,
@@ -242,6 +245,13 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := context.WithTimeout(r.Context(), HealthCheckContextTimeout)
 	defer cancel()
+
+	network := r.URL.Query().Get("network")
+	if network != types.PUBLIC && network != types.TESTNET && network != types.FUTURENET {
+		// After clients have updated to use the network query param, we can remove this and return the error
+		network = types.PUBLIC
+		// return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
+	}
 
 	req, err := validateRequest(r)
 	if err != nil {
@@ -282,7 +292,7 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 		wg.Add(1)
 		go func(i int, c contractDetails) {
 			defer wg.Done()
-			collection, colErr := h.fetchCollection(ctx, account, c)
+			collection, colErr := h.fetchCollection(ctx, account, c, network)
 			if colErr != nil && len(colErr.Tokens) == 0 && collection == nil {
 				results[i] = CollectionResult{Error: colErr}
 				return
@@ -295,7 +305,7 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 	}
 	wg.Wait()
 
-	meridianResults, err := h.fetchMeridianPayCollectibles(ctx, account, owner)
+	meridianResults, err := h.fetchMeridianPayCollectibles(ctx, account, owner, network)
 	if err != nil {
 		logger.ErrorWithContext(ctx, fmt.Sprintf(ErrInternal.LogMessage, err))
 	}

@@ -20,21 +20,39 @@ const (
 )
 
 type rpcService struct {
-	client *client.Client
+	pubnetClient *client.Client
+	testnetClient *client.Client
+	futurenetClient *client.Client
 }
 
-func NewRPCService(rpcURL string) types.RPCService {
+func NewRPCService(rpcURL string, testnetRPCURL string, futurenetRPCURL string) types.RPCService {
 	return &rpcService{
-		client: client.NewClient(rpcURL, &http.Client{}),
+		pubnetClient: client.NewClient(rpcURL, &http.Client{}),
+		testnetClient: client.NewClient(testnetRPCURL, &http.Client{}),
+		futurenetClient: client.NewClient(futurenetRPCURL, &http.Client{}),
 	}
 }
+
+func (r *rpcService) ConfigureNetworkClient(network string) *client.Client {
+	switch network {
+	case types.TESTNET:
+		return r.testnetClient
+	case types.FUTURENET:
+		return r.futurenetClient
+	case types.PUBLIC:
+		return r.pubnetClient
+	}
+	return r.pubnetClient
+}
+
 
 func (r *rpcService) Name() string {
 	return serviceName
 }
 
-func (r *rpcService) GetHealth(ctx context.Context) (types.GetHealthResponse, error) {
-	response, err := r.client.GetHealth(ctx)
+func (r *rpcService) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
+	networkclient := r.ConfigureNetworkClient(network)
+	response, err := networkclient.GetHealth(ctx)
 	if err != nil {
 		return types.GetHealthResponse{Status: types.StatusError}, err
 	}
@@ -47,13 +65,14 @@ func (r *rpcService) GetHealth(ctx context.Context) (types.GetHealthResponse, er
 func (r *rpcService) SimulateTx(
 	ctx context.Context,
 	tx *txnbuild.Transaction,
+	network string,
 ) (types.SimulateTransactionResponse, error) {
 	txeB64, err := tx.Base64()
 	if err != nil {
 		return nil, fmt.Errorf("could not encode transaction: %w", err)
 	}
-
-	resp, err := r.client.SimulateTransaction(ctx, protocol.SimulateTransactionRequest{
+	networkclient := r.ConfigureNetworkClient(network)
+	resp, err := networkclient.SimulateTransaction(ctx, protocol.SimulateTransactionRequest{
 		Transaction: txeB64,
 	})
 	if err != nil {
@@ -85,6 +104,7 @@ func (r *rpcService) SimulateInvocation(
 	functionName xdr.ScSymbol,
 	params []xdr.ScVal,
 	timeout txnbuild.TimeBounds,
+	network string,
 ) (types.SimulateTransactionResponse, error) {
 	contractHash := contractId.ContractId
 	contractIdStr, err := strkey.Encode(strkey.VersionByteContract, contractHash[:])
@@ -118,11 +138,12 @@ func (r *rpcService) SimulateInvocation(
 		return nil, fmt.Errorf("failed to build transaction: %w", err)
 	}
 
-	return r.SimulateTx(ctx, tx)
+	return r.SimulateTx(ctx, tx, network)
 }
 
-func (r *rpcService) GetLedgerEntry(ctx context.Context, keys []string) ([]types.LedgerEntryMap, error) {
-	response, err := r.client.GetLedgerEntries(ctx, protocol.GetLedgerEntriesRequest{
+func (r *rpcService) GetLedgerEntry(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
+	networkClient := r.ConfigureNetworkClient(network)
+	response, err := networkClient.GetLedgerEntries(ctx, protocol.GetLedgerEntriesRequest{
 		Keys: keys,
 		Format: "json",
 	})

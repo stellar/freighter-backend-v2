@@ -120,9 +120,14 @@ func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r 
 	ledgerKeyAccountList := make(map[string]types.AccountInfo)
 	var ledgerKeyAccountError LedgerKeyAccountError
 	queryParams := r.URL.Query()
+	network := queryParams.Get("network") 
 
 	if (len(queryParams) == 0) {
-		return httperror.BadRequest("no params passed: public key query param is required", errors.New("no params provided"))
+		return httperror.BadRequest("no params passed: public key and network query params are required", errors.New("no params provided"))
+	}
+
+	if network != types.PUBLIC && network != types.TESTNET && network != types.FUTURENET {
+		return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
 	}
 
 	for key, publicKeys := range queryParams {
@@ -142,7 +147,7 @@ func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r 
 			}
 			ledgerKeyAccountList = ledgerKeyAccountKeys.LedgerKeyAccountMap
 			
-			ledgerKeyAccountsRpcData, e := FetchLedgerEntries(h.RpcService, contextWithTimeout, ledgerKeyAccountKeys.LedgerKeys)
+			ledgerKeyAccountsRpcData, e := FetchLedgerEntries(h.RpcService, contextWithTimeout, ledgerKeyAccountKeys.LedgerKeys, network)
 
 			if e != nil && ledgerKeyAccountKeysError.ErrorMessage == "" {
 				ledgerKeyAccountError = LedgerKeyAccountError{ErrorMessage: e.Error()}
