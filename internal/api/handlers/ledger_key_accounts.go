@@ -131,7 +131,7 @@ func processLedgerKeyAccountsEntries(publicKeys []string, data []types.LedgerEnt
 func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r *http.Request) error {
 	contextWithTimeout, cancel := context.WithTimeout(r.Context(), HealthCheckContextTimeout)
 	defer cancel()
-	var ledgerKeyAccountList = make(map[string]types.AccountInfo)
+	var ledgerKeyAccountList map[string]types.AccountInfo
 	var ledgerKeyAccountError LedgerKeyAccountError
 	queryParams := r.URL.Query()
 	network := queryParams.Get("network") 
