@@ -10,7 +10,14 @@ func ResponseHeader() Middleware {
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.Header().Set("X-Frame-Options", "DENY")
 			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+			// Handle preflight requests (OPTIONS method)
+    		if r.Method == "OPTIONS" {
+    			w.WriteHeader(http.StatusOK)
+    			return
+    		}
 			next.ServeHTTP(w, r)
 		})
 	}
