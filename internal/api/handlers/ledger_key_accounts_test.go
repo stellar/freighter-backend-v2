@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
-	"github.com/stellar/go/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -62,8 +60,6 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			Signers: []types.Signer{
 				{Key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", Weight: 1},
 			},
-			Ext: xdr.LedgerEntryExt{
-			},
 		}
 		assert.Equal(t, testAccount, d0)
 	})
@@ -113,8 +109,6 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			Signers: []types.Signer{
 				{Key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", Weight: 1},
 			},
-			Ext: xdr.LedgerEntryExt{
-			},
 		}
 		assert.Equal(t, testAccount0, d0)
 		d1 := ledgerKeyAccounts.Data.LedgerKeyAccounts["GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"]
@@ -130,8 +124,6 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			Thresholds: "1000000000000000000",
 			Signers: []types.Signer{
 				{Key: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5", Weight: 1},
-			},
-			Ext: xdr.LedgerEntryExt{
 			},
 		}
 		assert.Equal(t, testAccount1, d1)
@@ -182,8 +174,6 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			Thresholds: "1000000000000000000",
 			Signers: []types.Signer{
 				{Key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", Weight: 1},
-			},
-			Ext: xdr.LedgerEntryExt{
 			},
 		}
 		assert.Equal(t, testAccount0, d0)
@@ -240,8 +230,6 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			Signers: []types.Signer{
 				{Key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", Weight: 1},
 			},
-			Ext: xdr.LedgerEntryExt{
-			},
 		}
 		assert.Equal(t, testAccount0, d0)
 	})
@@ -289,8 +277,6 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			Flags: 0,
 			Thresholds: "",
 			Signers: nil,
-			Ext: xdr.LedgerEntryExt{
-			},
 		}
 		assert.Equal(t, testAccount, d0)
 	})
@@ -316,7 +302,6 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
 		require.Error(t, err)
-		fmt.Println(rr)
 		assert.EqualError(t, err, "invalid network: network must be PUBLIC, TESTNET or FUTURENET")
 	})
 
@@ -342,7 +327,6 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
 		require.Error(t, err)
-		fmt.Println(rr)
 		assert.EqualError(t, err, "no params passed: public key and network query params are required")
 	})
 
