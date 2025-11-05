@@ -14,7 +14,7 @@ func ResponseHeader() Middleware {
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 			// Handle preflight requests (OPTIONS method)
-    		if r.Method == "OPTIONS" {
+    		if r.Method == http.MethodOptions {
     			w.WriteHeader(http.StatusOK)
     			return
     		}
