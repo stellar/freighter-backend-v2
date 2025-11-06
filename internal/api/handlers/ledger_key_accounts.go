@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
-	"slices"
+
+	set "github.com/deckarep/golang-set/v2"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
@@ -145,28 +146,21 @@ func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r 
 		return httperror.BadRequest(fmt.Sprintf("%s: %s", "Invalid request - public keys are required", err.Error()), err)
 	}
 
-	deduplicatedPublicKeys := []string{}
+	deduplicatedPublicKeys := set.NewSet[string](req.PublicKeys...)
 	
-	for _, publicKey := range req.PublicKeys {
-		// RPC does not tolerate duplicate public keys, so we need to remove duplicates
-		if !slices.Contains(deduplicatedPublicKeys, publicKey) {
-			deduplicatedPublicKeys = append(deduplicatedPublicKeys, publicKey)
-		}
-	}
-
-	ledgerKeyAccountKeys, ledgerKeyAccountKeysError := getLedgerKeyAccountKeys(deduplicatedPublicKeys)
+	ledgerKeyAccountKeys, ledgerKeyAccountKeysError := getLedgerKeyAccountKeys(deduplicatedPublicKeys.ToSlice())
 	if ledgerKeyAccountKeysError.ErrorMessage != "" {
 		ledgerKeyAccountError = ledgerKeyAccountKeysError
 	}
 	ledgerKeyAccountList = ledgerKeyAccountKeys.LedgerKeyAccountMap
 	
-	ledgerKeyAccountsRpcData, e := FetchLedgerEntries(h.RpcService, contextWithTimeout, ledgerKeyAccountKeys.LedgerKeys, network)
-
+	ledgerKeyAccountsRpcData, e := h.RpcService.GetLedgerEntry(contextWithTimeout, ledgerKeyAccountKeys.LedgerKeys, network)
+	
 	if e != nil && ledgerKeyAccountKeysError.ErrorMessage == "" {
 		ledgerKeyAccountError = LedgerKeyAccountError{ErrorMessage: e.Error()}
 	}
 
-	processedLedgerKeyAccountsMap, processedLedgerKeyAccountsError := processLedgerKeyAccountsEntries(deduplicatedPublicKeys, ledgerKeyAccountsRpcData)
+	processedLedgerKeyAccountsMap, processedLedgerKeyAccountsError := processLedgerKeyAccountsEntries(deduplicatedPublicKeys.ToSlice(), ledgerKeyAccountsRpcData)
 	if processedLedgerKeyAccountsError.ErrorMessage != "" {
 		ledgerKeyAccountError = processedLedgerKeyAccountsError
 	}
