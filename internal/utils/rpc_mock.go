@@ -81,7 +81,7 @@ func (m *MockRPCService) SimulateInvocation(
 }
 
 
-func (m *MockRPCService) GetLedgerEntry(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
+func (m *MockRPCService) GetLedgerEntries(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
 	if m.GetLedgerEntryOverride != nil {
 		return m.GetLedgerEntryOverride, nil
 	}

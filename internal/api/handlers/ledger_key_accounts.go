@@ -154,7 +154,7 @@ func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r 
 	}
 	ledgerKeyAccountList = ledgerKeyAccountKeys.LedgerKeyAccountMap
 	
-	ledgerKeyAccountsRpcData, e := h.RpcService.GetLedgerEntry(contextWithTimeout, ledgerKeyAccountKeys.LedgerKeys, network)
+	ledgerKeyAccountsRpcData, e := h.RpcService.GetLedgerEntries(contextWithTimeout, ledgerKeyAccountKeys.LedgerKeys, network)
 	
 	if e != nil && ledgerKeyAccountKeysError.ErrorMessage == "" {
 		ledgerKeyAccountError = LedgerKeyAccountError{ErrorMessage: e.Error()}
