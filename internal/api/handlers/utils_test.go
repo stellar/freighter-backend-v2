@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/txnbuild"
 	"github.com/stretchr/testify/assert"
@@ -18,7 +17,7 @@ func TestFetchCollection_Success(t *testing.T) {
 	mockRPC := &utils.MockRPCService{}
 
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
-	collection, err := FetchCollection(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA")
+	collection, err := FetchCollection(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "PUBLIC")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, collection)
@@ -30,7 +29,7 @@ func TestFetchCollection_InvalidContractID(t *testing.T) {
 	mockRPC := &utils.MockRPCService{}
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
 
-	_, err := FetchCollection(mockRPC, context.Background(), account, "INVALID")
+	_, err := FetchCollection(mockRPC, context.Background(), account, "INVALID", "PUBLIC")
 	assert.Error(t, err)
 }
 
@@ -40,7 +39,7 @@ func TestFetchCollection_SimulateInvocationError(t *testing.T) {
 	}
 
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
-	_, err := FetchCollection(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA")
+	_, err := FetchCollection(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "PUBLIC")
 	assert.Error(t, err)
 }
 
@@ -58,7 +57,7 @@ func TestFetchCollectible_Success(t *testing.T) {
 	}
 
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
-	collectible, err := fetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", tokenId)
+	collectible, err := fetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", tokenId, "PUBLIC")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, collectible)
@@ -72,7 +71,7 @@ func TestFetchCollectible_InvalidTokenID(t *testing.T) {
 	mockRPC := &utils.MockRPCService{}
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
 
-	_, err := fetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "not-a-number")
+	_, err := fetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "not-a-number", "PUBLIC")
 	assert.Error(t, err)
 }
 
@@ -82,7 +81,7 @@ func TestFetchCollectible_SimulateInvocationError(t *testing.T) {
 	}
 
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
-	_, err := fetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "1")
+	_, err := fetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "1", "PUBLIC")
 	assert.Error(t, err)
 }
 
@@ -93,7 +92,7 @@ func TestFetchOwnerTokens_Success(t *testing.T) {
 	owner := "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
 	contractID := "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
 
-	tokens, err := fetchOwnerTokens(mockRPC, context.Background(), account, contractID, owner)
+	tokens, err := fetchOwnerTokens(mockRPC, context.Background(), account, contractID, owner, "PUBLIC")
 	assert.NoError(t, err)
 	assert.Equal(t, []string{}, tokens)
 }
@@ -103,7 +102,7 @@ func TestFetchOwnerTokens_InvalidContractID(t *testing.T) {
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
 	owner := "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
 
-	_, err := fetchOwnerTokens(mockRPC, context.Background(), account, "INVALID", owner)
+	_, err := fetchOwnerTokens(mockRPC, context.Background(), account, "INVALID", owner, "PUBLIC")
 	assert.Error(t, err)
 }
 
@@ -112,7 +111,7 @@ func TestFetchOwnerTokens_InvalidOwnerAddress(t *testing.T) {
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
 	contractID := "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
 
-	_, err := fetchOwnerTokens(mockRPC, context.Background(), account, contractID, "INVALID")
+	_, err := fetchOwnerTokens(mockRPC, context.Background(), account, contractID, "INVALID", "PUBLIC")
 	assert.Error(t, err)
 }
 
@@ -124,26 +123,6 @@ func TestFetchOwnerTokens_SimulateInvocationError(t *testing.T) {
 	owner := "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
 	contractID := "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
 
-	_, err := fetchOwnerTokens(mockRPC, context.Background(), account, contractID, owner)
-	assert.Error(t, err)
-}
-
-func TestFetchLedgerKeyAccounts_Success(t *testing.T) {
-	mockLedgerEntryData := []types.LedgerEntryMap{
-		{Account: utils.MockLedgerKeyAccount0 },
-	}
-	mockRPC := &utils.MockRPCService{
-		GetLedgerEntryOverride: mockLedgerEntryData,
-	}
-	ledgerKeyAccounts, err := FetchLedgerEntries(mockRPC, context.Background(), []string{"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"})
-	assert.NoError(t, err)
-	assert.Equal(t, mockLedgerEntryData, ledgerKeyAccounts)
-}
-
-func TestFetchLedgerKeyAccounts_GetLedgerEntryError(t *testing.T) {
-	mockRPC := &utils.MockRPCService{
-		GetLedgerEntryError: errors.New("rpc failure"),
-	}
-	_, err := FetchLedgerEntries(mockRPC, context.Background(), []string{"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"})
+	_, err := fetchOwnerTokens(mockRPC, context.Background(), account, contractID, owner, "PUBLIC")
 	assert.Error(t, err)
 }

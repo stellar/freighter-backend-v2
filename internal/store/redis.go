@@ -32,7 +32,7 @@ func (r *RedisStore) Name() string {
 	return serviceName
 }
 
-func (r *RedisStore) GetHealth(ctx context.Context) (types.GetHealthResponse, error) {
+func (r *RedisStore) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
 	_, err := r.redis.Ping(ctx).Result()
 	if err != nil {
 		return types.GetHealthResponse{Status: types.StatusError}, err

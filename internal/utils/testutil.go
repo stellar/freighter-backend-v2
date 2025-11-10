@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 
 	"github.com/stellar/freighter-backend-v2/internal/types"
-	"github.com/stellar/go/xdr"
 )
 
 // ErrorResponseWriter is a custom http.ResponseWriter that can be configured to error on Write.
@@ -92,8 +91,6 @@ var MockLedgerKeyAccount0 = types.AccountInfo{
 	Signers: []types.Signer{
 		{Key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", Weight: 1},
 	},
-	Ext: xdr.LedgerEntryExt{
-	},
 }
 
 var MockLedgerKeyAccount1 = types.AccountInfo{
@@ -108,8 +105,6 @@ var MockLedgerKeyAccount1 = types.AccountInfo{
 	Signers: []types.Signer{
 		{Key: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5", Weight: 1},
 	},
-	Ext: xdr.LedgerEntryExt{
-	},
 }
 
 var MockLedgerKeyAccount2 = types.AccountInfo{
@@ -122,8 +117,6 @@ var MockLedgerKeyAccount2 = types.AccountInfo{
 	Flags: 0,
 	Thresholds: "",
 	Signers: []types.Signer{
-	},
-	Ext: xdr.LedgerEntryExt{
 	},
 }
 

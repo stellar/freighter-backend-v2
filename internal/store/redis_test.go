@@ -62,7 +62,7 @@ func TestRedisStore_GetHealth(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 
-		response, err := store.GetHealth(ctx)
+		response, err := store.GetHealth(ctx, "PUBLIC")
 
 		require.Error(t, err)
 		assert.Equal(t, types.StatusError, response.Status)
@@ -75,7 +75,7 @@ func TestRedisStore_GetHealth(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 
-		response, err := store.GetHealth(ctx)
+		response, err := store.GetHealth(ctx, "PUBLIC")
 
 		require.Error(t, err)
 		assert.Equal(t, types.StatusError, response.Status)
@@ -91,7 +91,7 @@ func TestRedisStore_GetHealth(t *testing.T) {
 		// Give context time to expire
 		time.Sleep(2 * time.Millisecond)
 
-		response, err := store.GetHealth(ctx)
+		response, err := store.GetHealth(ctx, "PUBLIC")
 
 		require.Error(t, err)
 		assert.Equal(t, types.StatusError, response.Status)

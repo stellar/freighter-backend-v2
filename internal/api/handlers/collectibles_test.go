@@ -77,7 +77,7 @@ func TestFetchCollection(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		collection, err := handler.fetchCollection(ctx, account, contract)
+		collection, err := handler.fetchCollection(ctx, account, contract, "PUBLIC")
 		require.Nil(t, err)
 		require.NotNil(t, collection)
 		require.Len(t, collection.Collectibles, 2)
@@ -93,7 +93,7 @@ func TestFetchCollectibles(t *testing.T) {
 		tokenIDs := []string{}
 
 		ctx := context.Background()
-		results, err := handler.fetchCollectibles(ctx, account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", tokenIDs)
+		results, err := handler.fetchCollectibles(ctx, account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", tokenIDs, "PUBLIC")
 		require.Nil(t, err)
 		assert.Empty(t, results)
 	})
@@ -106,7 +106,7 @@ func TestFetchMeridianPayCollectibles(t *testing.T) {
 	handler := NewCollectiblesHandler(mockRPC, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "CDSN4MICK7U5XOP4DE6OIZQCRMYO3UTQ5VYZV7ZA7H63OICZPBLXYRGJ")
 
 	ctx := context.Background()
-	results, err := handler.fetchMeridianPayCollectibles(ctx, account, account.AccountID)
+	results, err := handler.fetchMeridianPayCollectibles(ctx, account, account.AccountID, "PUBLIC")
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 

@@ -27,7 +27,7 @@ func TestHealthHandler_CheckHealth(t *testing.T) {
 		}
 		handler := NewHealthHandler(mockRPC)
 
-		req, _ := http.NewRequest("GET", "/health", nil)
+		req, _ := http.NewRequest("GET", "/health?network=PUBLIC", nil)
 		rr := httptest.NewRecorder()
 
 		err := handler.CheckHealth(rr, req)
@@ -53,7 +53,7 @@ func TestHealthHandler_CheckHealth(t *testing.T) {
 		}
 		handler := NewHealthHandler(mockRPC)
 
-		req, _ := http.NewRequest("GET", "/health", nil)
+		req, _ := http.NewRequest("GET", "/health?network=PUBLIC", nil)
 		rr := httptest.NewRecorder()
 
 		err := handler.CheckHealth(rr, req)
@@ -78,7 +78,7 @@ func TestHealthHandler_CheckHealth(t *testing.T) {
 		}
 		handler := NewHealthHandler(mockRPC)
 
-		req, _ := http.NewRequest("GET", "/health", nil)
+		req, _ := http.NewRequest("GET", "/health?network=PUBLIC", nil)
 		rr := httptest.NewRecorder()
 
 		err := handler.CheckHealth(rr, req)
@@ -103,7 +103,7 @@ func TestHealthHandler_CheckHealth(t *testing.T) {
 		}
 		handler := NewHealthHandler(mockRPC)
 
-		req, _ := http.NewRequest("GET", "/health", nil)
+		req, _ := http.NewRequest("GET", "/health?network=PUBLIC", nil)
 		w := utils.NewErrorResponseWriter(true)
 
 		err := handler.CheckHealth(w, req)

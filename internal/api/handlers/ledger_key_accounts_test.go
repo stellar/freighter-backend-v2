@@ -9,7 +9,6 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
-	"github.com/stellar/go/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,9 +29,13 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		handler := NewLedgerKeyAccountHandler(mockRPC)
 
-		body := ``
 
-		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", strings.NewReader(body))
+		body := `{
+			"public_keys": [
+				"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
+			]
+		}`
+		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
@@ -61,8 +64,6 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			Signers: []types.Signer{
 				{Key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", Weight: 1},
 			},
-			Ext: xdr.LedgerEntryExt{
-			},
 		}
 		assert.Equal(t, testAccount, d0)
 	})
@@ -81,9 +82,14 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		handler := NewLedgerKeyAccountHandler(mockRPC)
 
-		body := ``
+		body := `{
+			"public_keys": [
+				"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+				"GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+			]
+		}`
 
-		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
@@ -112,8 +118,6 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			Signers: []types.Signer{
 				{Key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", Weight: 1},
 			},
-			Ext: xdr.LedgerEntryExt{
-			},
 		}
 		assert.Equal(t, testAccount0, d0)
 		d1 := ledgerKeyAccounts.Data.LedgerKeyAccounts["GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"]
@@ -129,8 +133,6 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			Thresholds: "1000000000000000000",
 			Signers: []types.Signer{
 				{Key: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5", Weight: 1},
-			},
-			Ext: xdr.LedgerEntryExt{
 			},
 		}
 		assert.Equal(t, testAccount1, d1)
@@ -151,9 +153,14 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		handler := NewLedgerKeyAccountHandler(mockRPC)
 
-		body := ``
+		body := `{
+			"public_keys": [
+				"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+				"asdff"
+			]
+		}`
 
-		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=asdff", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
@@ -181,8 +188,6 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			Thresholds: "1000000000000000000",
 			Signers: []types.Signer{
 				{Key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", Weight: 1},
-			},
-			Ext: xdr.LedgerEntryExt{
 			},
 		}
 		assert.Equal(t, testAccount0, d0)
@@ -208,9 +213,14 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		handler := NewLedgerKeyAccountHandler(mockRPC)
 
-		body := ``
+		body := `{
+			"public_keys": [
+				"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+				"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
+			]
+		}`
 
-		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&public_key=GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF&network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
@@ -239,8 +249,6 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			Signers: []types.Signer{
 				{Key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", Weight: 1},
 			},
-			Ext: xdr.LedgerEntryExt{
-			},
 		}
 		assert.Equal(t, testAccount0, d0)
 	})
@@ -259,9 +267,13 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 
 		handler := NewLedgerKeyAccountHandler(mockRPC)
 
-		body := ``
+		body := `{
+			"public_keys": [
+				"GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX"
+			]
+		}`
 
-		req, _ := http.NewRequest("GET", "/api/v1/ledger-key/accounts?public_key=GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetLedgerKeyAccounts(rr, req)
@@ -288,10 +300,61 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			Flags: 0,
 			Thresholds: "",
 			Signers: nil,
-			Ext: xdr.LedgerEntryExt{
-			},
 		}
 		assert.Equal(t, testAccount, d0)
+	})
+	t.Run("should return an error if network is invalid", func(t *testing.T) {
+		t.Parallel()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewEncoder(w).Encode(utils.MockLedgerKeyAccountsData); err != nil {
+				t.Fatalf("failed to encode mock response: %v", err)
+			}
+		}))
+		defer server.Close()
+
+		mockRPC := &utils.MockRPCService{
+			GetLedgerEntryOverride: utils.MockLedgerEntryData.LedgerEntry,
+		}
+
+		handler := NewLedgerKeyAccountHandler(mockRPC)
+
+		body := `{
+			"public_keys": [
+				"GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX",
+			]
+		}`
+
+		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		err := handler.GetLedgerKeyAccounts(rr, req)
+		require.Error(t, err)
+		assert.EqualError(t, err, "invalid network: network must be PUBLIC, TESTNET or FUTURENET")
+	})
+
+	t.Run("should return an error if no public keys are passed", func(t *testing.T) {
+		t.Parallel()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewEncoder(w).Encode(utils.MockLedgerKeyAccountsData); err != nil {
+				t.Fatalf("failed to encode mock response: %v", err)
+			}
+		}))
+		defer server.Close()
+
+		mockRPC := &utils.MockRPCService{
+			GetLedgerEntryOverride: utils.MockLedgerEntryData.LedgerEntry,
+		}
+
+		handler := NewLedgerKeyAccountHandler(mockRPC)
+
+		body := ``
+
+		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?network=PUBLIC", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		err := handler.GetLedgerKeyAccounts(rr, req)
+		require.Error(t, err)
+		assert.EqualError(t, err, "Invalid request - public keys are required: invalid JSON: EOF")
 	})
 
 }

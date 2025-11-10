@@ -28,6 +28,5 @@ type AccountInfo struct {
 	HomeDomain string `json:"home_domain"`
 	Thresholds string `json:"thresholds"`
 	Signers []Signer `json:"signers"`
-	Ext xdr.LedgerEntryExt `json:"ext"`
 	SequenceNumber uint64 `json:"sequence_number"`
 }
