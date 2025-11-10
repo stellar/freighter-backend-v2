@@ -21,7 +21,10 @@ type AppConfig struct {
 }
 
 type RPCConfig struct {
-	RpcUrl string
+	RpcUrl         string
+	PubnetRpcUrl   string
+	TestnetRpcUrl  string
+	FuturenetRpcUrl string
 }
 
 type RedisConfig struct {

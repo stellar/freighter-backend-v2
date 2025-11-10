@@ -46,6 +46,9 @@ func (s *ServeCmd) Command() *cobra.Command {
 
 	// RPC Config
 	cmd.Flags().StringVar(&s.Cfg.RpcConfig.RpcUrl, "rpc-url", "", "The URL of the RPC instance")
+	cmd.Flags().StringVar(&s.Cfg.RpcConfig.PubnetRpcUrl, "pubnet-rpc-url", "", "The Pubnet URL of the Pubnet RPC instance")
+	cmd.Flags().StringVar(&s.Cfg.RpcConfig.TestnetRpcUrl, "testnet-rpc-url", "", "The Testnet URL of the Testnet RPC instance")
+	cmd.Flags().StringVar(&s.Cfg.RpcConfig.FuturenetRpcUrl, "futurenet-rpc-url", "", "The Futurenet URL of the Futurenet RPC instance")
 
 	// Horizon Config
 	cmd.Flags().StringVar(&s.Cfg.HorizonConfig.HorizonPubnetURL, "horizon-pubnet-url", "https://horizon.stellar.org/", "The URL of the pubnet Horizon")
