@@ -3,11 +3,13 @@ package handlers
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"net/http"
-	"slices"
+
+	set "github.com/deckarep/golang-set/v2"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
@@ -48,6 +50,19 @@ type LedgerKeyAccountsResponse struct {
 type LedgerKeyAccountKeys struct {
 	LedgerKeys []string `json:"ledger_keys"`
 	LedgerKeyAccountMap LedgerKeyAccountMap `json:"ledger_key_account_map"`
+}
+
+type LedgerKeyAccountRequest struct {
+	PublicKeys []string `json:"public_keys"`
+}
+
+func validateLedgerKeyAccountRequest(r *http.Request) (*LedgerKeyAccountRequest, error) {
+	var req LedgerKeyAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return nil, fmt.Errorf("invalid JSON: %w", err)
+	}
+
+	return &req, nil
 }
 
 func getLedgerKeyAccountKeys(publicKeys []string) (LedgerKeyAccountKeys, LedgerKeyAccountError) {
@@ -117,49 +132,39 @@ func processLedgerKeyAccountsEntries(publicKeys []string, data []types.LedgerEnt
 func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r *http.Request) error {
 	contextWithTimeout, cancel := context.WithTimeout(r.Context(), HealthCheckContextTimeout)
 	defer cancel()
-	ledgerKeyAccountList := make(map[string]types.AccountInfo)
+	var ledgerKeyAccountList map[string]types.AccountInfo
 	var ledgerKeyAccountError LedgerKeyAccountError
 	queryParams := r.URL.Query()
 	network := queryParams.Get("network") 
-
-	if (len(queryParams) == 0) {
-		return httperror.BadRequest("no params passed: public key and network query params are required", errors.New("no params provided"))
-	}
 
 	if network != types.PUBLIC && network != types.TESTNET && network != types.FUTURENET {
 		return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
 	}
 
-	for key, publicKeys := range queryParams {
-		if key == "public_key" {
-			deduplicatedPublicKeys := []string{}
-			
-			for _, publicKey := range publicKeys {
-				// RPC does not tolerate duplicate public keys, so we need to remove duplicates
-				if !slices.Contains(deduplicatedPublicKeys, publicKey) {
-					deduplicatedPublicKeys = append(deduplicatedPublicKeys, publicKey)
-				}
-			}
-
-			ledgerKeyAccountKeys, ledgerKeyAccountKeysError := getLedgerKeyAccountKeys(deduplicatedPublicKeys)
-			if ledgerKeyAccountKeysError.ErrorMessage != "" {
-				ledgerKeyAccountError = ledgerKeyAccountKeysError
-			}
-			ledgerKeyAccountList = ledgerKeyAccountKeys.LedgerKeyAccountMap
-			
-			ledgerKeyAccountsRpcData, e := FetchLedgerEntries(h.RpcService, contextWithTimeout, ledgerKeyAccountKeys.LedgerKeys, network)
-
-			if e != nil && ledgerKeyAccountKeysError.ErrorMessage == "" {
-				ledgerKeyAccountError = LedgerKeyAccountError{ErrorMessage: e.Error()}
-			}
-
-			processedLedgerKeyAccountsMap, processedLedgerKeyAccountsError := processLedgerKeyAccountsEntries(deduplicatedPublicKeys, ledgerKeyAccountsRpcData)
-			if processedLedgerKeyAccountsError.ErrorMessage != "" {
-				ledgerKeyAccountError = processedLedgerKeyAccountsError
-			}
-			maps.Copy(ledgerKeyAccountList, processedLedgerKeyAccountsMap)
-		}
+	req, err := validateLedgerKeyAccountRequest(r)
+	if err != nil {
+		return httperror.BadRequest(fmt.Sprintf("%s: %s", "Invalid request - public keys are required", err.Error()), err)
 	}
+
+	deduplicatedPublicKeys := set.NewSet[string](req.PublicKeys...)
+	
+	ledgerKeyAccountKeys, ledgerKeyAccountKeysError := getLedgerKeyAccountKeys(deduplicatedPublicKeys.ToSlice())
+	if ledgerKeyAccountKeysError.ErrorMessage != "" {
+		ledgerKeyAccountError = ledgerKeyAccountKeysError
+	}
+	ledgerKeyAccountList = ledgerKeyAccountKeys.LedgerKeyAccountMap
+	
+	ledgerKeyAccountsRpcData, e := h.RpcService.GetLedgerEntries(contextWithTimeout, ledgerKeyAccountKeys.LedgerKeys, network)
+	
+	if e != nil && ledgerKeyAccountKeysError.ErrorMessage == "" {
+		ledgerKeyAccountError = LedgerKeyAccountError{ErrorMessage: e.Error()}
+	}
+
+	processedLedgerKeyAccountsMap, processedLedgerKeyAccountsError := processLedgerKeyAccountsEntries(deduplicatedPublicKeys.ToSlice(), ledgerKeyAccountsRpcData)
+	if processedLedgerKeyAccountsError.ErrorMessage != "" {
+		ledgerKeyAccountError = processedLedgerKeyAccountsError
+	}
+	maps.Copy(ledgerKeyAccountList, processedLedgerKeyAccountsMap)
 
 	if (len(ledgerKeyAccountList) == 0 && ledgerKeyAccountError.ErrorMessage != "") {
 		return httperror.BadRequest(fmt.Sprintf("%s: %s", "No entries found", ledgerKeyAccountError.ErrorMessage),

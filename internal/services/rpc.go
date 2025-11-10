@@ -141,7 +141,7 @@ func (r *rpcService) SimulateInvocation(
 	return r.SimulateTx(ctx, tx, network)
 }
 
-func (r *rpcService) GetLedgerEntry(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
+func (r *rpcService) GetLedgerEntries(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
 	networkClient := r.ConfigureNetworkClient(network)
 	response, err := networkClient.GetLedgerEntries(ctx, protocol.GetLedgerEntriesRequest{
 		Keys: keys,

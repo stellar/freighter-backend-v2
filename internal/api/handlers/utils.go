@@ -195,17 +195,3 @@ func fetchOwnerTokens(
 
 	return tokenIDs, nil
 }
-
-
-func FetchLedgerEntries(
-	rpc types.RPCService,
-	ctx context.Context,
-	ledgerKeyKeys []string,
-	network string,
-) ([]types.LedgerEntryMap, error) {
-	data, e := rpc.GetLedgerEntry(ctx, ledgerKeyKeys, network)
-	if e != nil {
-		return nil, e
-	}
-	return data, e
-}

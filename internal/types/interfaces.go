@@ -38,5 +38,5 @@ type RPCService interface {
 		timeout txnbuild.TimeBounds,
 		network string,
 	) (SimulateTransactionResponse, error)
-	GetLedgerEntry(ctx context.Context, keys []string, network string) ([]LedgerEntryMap, error)
+	GetLedgerEntries(ctx context.Context, keys []string, network string) ([]LedgerEntryMap, error)
 }

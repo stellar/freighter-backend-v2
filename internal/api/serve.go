@@ -67,7 +67,7 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 	mux.HandleFunc("POST /api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles))
 
 	ledgerKeyAccountsHandler := handlers.NewLedgerKeyAccountHandler(s.rpcService)
-	mux.HandleFunc("GET /api/v1/ledger-key/accounts", handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts))
+	mux.HandleFunc("POST /api/v1/ledger-key/accounts", handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts))
 
 	featureFlagsHandler := handlers.NewFeatureFlagsHandler()
 	mux.HandleFunc("GET /api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags))

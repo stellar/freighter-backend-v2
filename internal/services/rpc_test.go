@@ -440,7 +440,7 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 		defer pubnetServer.Close()
 
 		service := NewRPCService(pubnetServer.URL, "http://localhost:8001", "http://localhost:8002")
-		response, err := service.GetLedgerEntry(context.Background(), []string{"foo"}, types.PUBLIC)
+		response, err := service.GetLedgerEntries(context.Background(), []string{"foo"}, types.PUBLIC)
 
 		require.NoError(t, err)
 		assert.Equal(t, "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN", response[0].Account.AccountId)
@@ -466,7 +466,7 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 		defer testnetServer.Close()
 
 		service := NewRPCService("http://localhost:8000", testnetServer.URL, "http://localhost:8000")
-		response, err := service.GetLedgerEntry(context.Background(), []string{"foo"}, types.TESTNET)
+		response, err := service.GetLedgerEntries(context.Background(), []string{"foo"}, types.TESTNET)
 
 		require.NoError(t, err)
 		assert.Equal(t, "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN", response[0].Account.AccountId)
@@ -492,7 +492,7 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 		defer futurenetServer.Close()
 
 		service := NewRPCService("http://localhost:8000",  "http://localhost:8001",  futurenetServer.URL,)
-		response, err := service.GetLedgerEntry(context.Background(), []string{"foo"}, types.FUTURENET)
+		response, err := service.GetLedgerEntries(context.Background(), []string{"foo"}, types.FUTURENET)
 
 		require.NoError(t, err)
 		assert.Equal(t, "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN", response[0].Account.AccountId)
@@ -519,7 +519,7 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 		defer futurenetServer.Close()
 
 		service := NewRPCService("http://localhost:8000",  "http://localhost:8001",  "http://localhost:8002",)
-		response, err := service.GetLedgerEntry(context.Background(), []string{"foo"}, types.FUTURENET)
+		response, err := service.GetLedgerEntries(context.Background(), []string{"foo"}, types.FUTURENET)
 
 		assert.Nil(t, response)
 		assert.Equal(t, "failed to get ledger entries: [-32603] Post \"http://localhost:8002\": dial tcp [::1]:8002: connect: connection refused", err.Error())
