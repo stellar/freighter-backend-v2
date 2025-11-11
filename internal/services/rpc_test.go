@@ -347,22 +347,22 @@ func TestRPCService_SimulateInvocation(t *testing.T) {
 		assert.Equal(t, xdr.ScValTypeScvI64, resp.Type)
 		assert.Equal(t, val, *resp.I64)
 	})
-		t.Run("successfully simulates contract invocation on testnet", func(t *testing.T) {
-			val := xdr.Int64(100)
-			validXDR := xdr.ScVal{
-				Type: xdr.ScValTypeScvI64,
-				I64:  &val,
-			}
-			b64, err := xdr.MarshalBase64(validXDR)
-			if err != nil {
-				t.Fatalf("failed to marshal ScVal: %v", err)
-			}
+	t.Run("successfully simulates contract invocation on testnet", func(t *testing.T) {
+		val := xdr.Int64(100)
+		validXDR := xdr.ScVal{
+			Type: xdr.ScValTypeScvI64,
+			I64:  &val,
+		}
+		b64, err := xdr.MarshalBase64(validXDR)
+		if err != nil {
+			t.Fatalf("failed to marshal ScVal: %v", err)
+		}
 
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, "/", r.URL.Path)
-				assert.Equal(t, "POST", r.Method)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/", r.URL.Path)
+			assert.Equal(t, "POST", r.Method)
 
-				response := fmt.Sprintf(`{
+			response := fmt.Sprintf(`{
 					"jsonrpc":"2.0",
 					"id":1,
 					"result":{
@@ -372,35 +372,35 @@ func TestRPCService_SimulateInvocation(t *testing.T) {
 						}]
 					}
 				}`, b64)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, _ = fmt.Fprint(w, response)
-			}))
-			defer server.Close()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, response)
+		}))
+		defer server.Close()
 
-			service := NewRPCService("http://localhost:8000", server.URL, "http://localhost:8002")
-			resp, err := service.SimulateInvocation(context.Background(), contractId, sourceAccount, "get_metadata", []xdr.ScVal{}, timeout, "TESTNET")
-			assert.NoError(t, err)
-			assert.NotNil(t, resp)
-			assert.Equal(t, xdr.ScValTypeScvI64, resp.Type)
-			assert.Equal(t, val, *resp.I64)
-		})
-		t.Run("successfully simulates contract invocation on futurenet", func(t *testing.T) {
-			val := xdr.Int64(100)
-			validXDR := xdr.ScVal{
-				Type: xdr.ScValTypeScvI64,
-				I64:  &val,
-			}
-			b64, err := xdr.MarshalBase64(validXDR)
-			if err != nil {
-				t.Fatalf("failed to marshal ScVal: %v", err)
-			}
-	
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, "/", r.URL.Path)
-				assert.Equal(t, "POST", r.Method)
-	
-				response := fmt.Sprintf(`{
+		service := NewRPCService("http://localhost:8000", server.URL, "http://localhost:8002")
+		resp, err := service.SimulateInvocation(context.Background(), contractId, sourceAccount, "get_metadata", []xdr.ScVal{}, timeout, "TESTNET")
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Equal(t, xdr.ScValTypeScvI64, resp.Type)
+		assert.Equal(t, val, *resp.I64)
+	})
+	t.Run("successfully simulates contract invocation on futurenet", func(t *testing.T) {
+		val := xdr.Int64(100)
+		validXDR := xdr.ScVal{
+			Type: xdr.ScValTypeScvI64,
+			I64:  &val,
+		}
+		b64, err := xdr.MarshalBase64(validXDR)
+		if err != nil {
+			t.Fatalf("failed to marshal ScVal: %v", err)
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/", r.URL.Path)
+			assert.Equal(t, "POST", r.Method)
+
+			response := fmt.Sprintf(`{
 					"jsonrpc":"2.0",
 					"id":1,
 					"result":{
@@ -410,19 +410,19 @@ func TestRPCService_SimulateInvocation(t *testing.T) {
 						}]
 					}
 				}`, b64)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, _ = fmt.Fprint(w, response)
-			}))
-			defer server.Close()
-	
-			service := NewRPCService("http://localhost:8000", "http://localhost:8001", server.URL)
-			resp, err := service.SimulateInvocation(context.Background(), contractId, sourceAccount, "get_metadata", []xdr.ScVal{}, timeout, "FUTURENET")
-			assert.NoError(t, err)
-			assert.NotNil(t, resp)
-			assert.Equal(t, xdr.ScValTypeScvI64, resp.Type)
-			assert.Equal(t, val, *resp.I64)
-		})
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, response)
+		}))
+		defer server.Close()
+
+		service := NewRPCService("http://localhost:8000", "http://localhost:8001", server.URL)
+		resp, err := service.SimulateInvocation(context.Background(), contractId, sourceAccount, "get_metadata", []xdr.ScVal{}, timeout, "FUTURENET")
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.Equal(t, xdr.ScValTypeScvI64, resp.Type)
+		assert.Equal(t, val, *resp.I64)
+	})
 }
 
 func TestNewRPCService_GetLedgerEntry(t *testing.T) {
@@ -491,7 +491,7 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 		}))
 		defer futurenetServer.Close()
 
-		service := NewRPCService("http://localhost:8000",  "http://localhost:8001",  futurenetServer.URL,)
+		service := NewRPCService("http://localhost:8000", "http://localhost:8001", futurenetServer.URL)
 		response, err := service.GetLedgerEntries(context.Background(), []string{"foo"}, types.FUTURENET)
 
 		require.NoError(t, err)
@@ -518,7 +518,7 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 		}))
 		defer futurenetServer.Close()
 
-		service := NewRPCService("http://localhost:8000",  "http://localhost:8001",  "http://localhost:8002",)
+		service := NewRPCService("http://localhost:8000", "http://localhost:8001", "http://localhost:8002")
 		response, err := service.GetLedgerEntries(context.Background(), []string{"foo"}, types.FUTURENET)
 
 		assert.Nil(t, response)

@@ -17,14 +17,11 @@ import (
 	"github.com/stellar/go/xdr"
 )
 
-
 type LedgerKeyAccountHandler struct {
 	RpcService types.RPCService
-
 }
 
 type LedgerKeyAccountMap map[string]types.AccountInfo
-
 
 func NewLedgerKeyAccountHandler(rpc types.RPCService) *LedgerKeyAccountHandler {
 	return &LedgerKeyAccountHandler{
@@ -38,17 +35,17 @@ type PublicKeyError struct {
 }
 
 type LedgerKeyAccountError struct {
-	ErrorMessage      string       `json:"error_message"`
-	ErrorKeys        []PublicKeyError `json:"error_keys,omitempty"`
+	ErrorMessage string           `json:"error_message"`
+	ErrorKeys    []PublicKeyError `json:"error_keys,omitempty"`
 }
 
 type LedgerKeyAccountsResponse struct {
 	LedgerKeyAccounts map[string]types.AccountInfo `json:"ledger_key_accounts"` // Removed omitempty
-	Error       LedgerKeyAccountError `json:"error,omitempty"`
+	Error             LedgerKeyAccountError        `json:"error,omitempty"`
 }
 
 type LedgerKeyAccountKeys struct {
-	LedgerKeys []string `json:"ledger_keys"`
+	LedgerKeys          []string            `json:"ledger_keys"`
 	LedgerKeyAccountMap LedgerKeyAccountMap `json:"ledger_key_account_map"`
 }
 
@@ -77,7 +74,7 @@ func getLedgerKeyAccountKeys(publicKeys []string) (LedgerKeyAccountKeys, LedgerK
 			ledgerKeyAccountError.ErrorKeys = append(ledgerKeyAccountError.ErrorKeys, PublicKeyError{PublicKey: publicKey, ErrorMessage: err.Error()})
 		} else {
 			key := xdr.LedgerKey{}
-	
+
 			err = key.SetAccount(accountId)
 			if err != nil {
 				ledgerKeyAccountError.ErrorMessage = "error setting account id"
@@ -86,20 +83,18 @@ func getLedgerKeyAccountKeys(publicKeys []string) (LedgerKeyAccountKeys, LedgerK
 				ledgerKeyAccount := xdr.LedgerKeyAccount{
 					AccountId: accountId,
 				}
-			
+
 				ledgerKey := xdr.LedgerKey{
-					Type: xdr.LedgerEntryTypeAccount,
+					Type:    xdr.LedgerEntryTypeAccount,
 					Account: &ledgerKeyAccount,
 				}
-			
-			
+
 				bkey, err := ledgerKey.MarshalBinary()
 				if err != nil {
 					ledgerKeyAccountError.ErrorMessage = "error marshalling ledger key"
 					ledgerKeyAccountError.ErrorKeys = append(ledgerKeyAccountError.ErrorKeys, PublicKeyError{PublicKey: publicKey, ErrorMessage: err.Error()})
 				}
-			
-			
+
 				xdr := base64.StdEncoding.EncodeToString(bkey)
 				ledgerKeyAccountKeys = append(ledgerKeyAccountKeys, xdr)
 				ledgerKeyAccountMap[publicKey] = types.AccountInfo{}
@@ -116,11 +111,11 @@ func processLedgerKeyAccountsEntries(publicKeys []string, data []types.LedgerEnt
 
 	for _, publicKey := range publicKeys {
 		for _, entry := range data {
-			if (entry.Account.AccountId == publicKey) {
+			if entry.Account.AccountId == publicKey {
 				ledgerKeyAccountsMap[publicKey] = entry.Account
 				break
 			}
-		} 
+		}
 	}
 
 	return ledgerKeyAccountsMap, ledgerKeyAccountsError
@@ -135,7 +130,7 @@ func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r 
 	var ledgerKeyAccountList map[string]types.AccountInfo
 	var ledgerKeyAccountError LedgerKeyAccountError
 	queryParams := r.URL.Query()
-	network := queryParams.Get("network") 
+	network := queryParams.Get("network")
 
 	if network != types.PUBLIC && network != types.TESTNET && network != types.FUTURENET {
 		return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
@@ -147,15 +142,15 @@ func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r 
 	}
 
 	deduplicatedPublicKeys := set.NewSet[string](req.PublicKeys...)
-	
+
 	ledgerKeyAccountKeys, ledgerKeyAccountKeysError := getLedgerKeyAccountKeys(deduplicatedPublicKeys.ToSlice())
 	if ledgerKeyAccountKeysError.ErrorMessage != "" {
 		ledgerKeyAccountError = ledgerKeyAccountKeysError
 	}
 	ledgerKeyAccountList = ledgerKeyAccountKeys.LedgerKeyAccountMap
-	
+
 	ledgerKeyAccountsRpcData, e := h.RpcService.GetLedgerEntries(contextWithTimeout, ledgerKeyAccountKeys.LedgerKeys, network)
-	
+
 	if e != nil && ledgerKeyAccountKeysError.ErrorMessage == "" {
 		ledgerKeyAccountError = LedgerKeyAccountError{ErrorMessage: e.Error()}
 	}
@@ -166,22 +161,20 @@ func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r 
 	}
 	maps.Copy(ledgerKeyAccountList, processedLedgerKeyAccountsMap)
 
-	if (len(ledgerKeyAccountList) == 0 && ledgerKeyAccountError.ErrorMessage != "") {
+	if len(ledgerKeyAccountList) == 0 && ledgerKeyAccountError.ErrorMessage != "" {
 		return httperror.BadRequest(fmt.Sprintf("%s: %s", "No entries found", ledgerKeyAccountError.ErrorMessage),
-		 errors.New(ledgerKeyAccountError.ErrorMessage))
+			errors.New(ledgerKeyAccountError.ErrorMessage))
 	}
-
-
 
 	resp := LedgerKeyAccountsResponse{
 		LedgerKeyAccounts: ledgerKeyAccountList,
-		Error:       ledgerKeyAccountError,
+		Error:             ledgerKeyAccountError,
 	}
 
 	responseData := HttpResponse{
 		Data: LedgerKeyAccountsResponse{
 			LedgerKeyAccounts: resp.LedgerKeyAccounts,
-			Error:       resp.Error,
+			Error:             resp.Error,
 		},
 	}
 

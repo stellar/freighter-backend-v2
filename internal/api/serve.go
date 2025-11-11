@@ -71,6 +71,7 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 
 	featureFlagsHandler := handlers.NewFeatureFlagsHandler()
 	mux.HandleFunc("GET /api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags))
+
 	return mux
 }
 

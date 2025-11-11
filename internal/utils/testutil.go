@@ -80,44 +80,43 @@ var MockTokenData = struct {
 }
 
 var MockLedgerKeyAccount0 = types.AccountInfo{
-	AccountId: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-	HomeDomain: "example.com",
-	Balance: "1000000000000000000",
-	Seq_num: "1000000000000000000",
+	AccountId:       "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+	HomeDomain:      "example.com",
+	Balance:         "1000000000000000000",
+	Seq_num:         "1000000000000000000",
 	Num_sub_entries: 1000000000000000000,
-	Inflation_dest: "1000000000000000000",
-	Flags: 1000000000000000000,
-	Thresholds: "1000000000000000000",
+	Inflation_dest:  "1000000000000000000",
+	Flags:           1000000000000000000,
+	Thresholds:      "1000000000000000000",
 	Signers: []types.Signer{
 		{Key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", Weight: 1},
 	},
 }
 
 var MockLedgerKeyAccount1 = types.AccountInfo{
-	AccountId: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
-	HomeDomain: "example2.com",
-	Balance: "1000000000000000000",
-	Seq_num: "1000000000000000000",
+	AccountId:       "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+	HomeDomain:      "example2.com",
+	Balance:         "1000000000000000000",
+	Seq_num:         "1000000000000000000",
 	Num_sub_entries: 1000000000000000000,
-	Inflation_dest: "1000000000000000000",
-	Flags: 1000000000000000000,
-	Thresholds: "1000000000000000000",
+	Inflation_dest:  "1000000000000000000",
+	Flags:           1000000000000000000,
+	Thresholds:      "1000000000000000000",
 	Signers: []types.Signer{
 		{Key: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5", Weight: 1},
 	},
 }
 
 var MockLedgerKeyAccount2 = types.AccountInfo{
-	AccountId: "",
-	HomeDomain: "",
-	Balance: "",
-	Seq_num: "",
+	AccountId:       "",
+	HomeDomain:      "",
+	Balance:         "",
+	Seq_num:         "",
 	Num_sub_entries: 0,
-	Inflation_dest: "",
-	Flags: 0,
-	Thresholds: "",
-	Signers: []types.Signer{
-	},
+	Inflation_dest:  "",
+	Flags:           0,
+	Thresholds:      "",
+	Signers:         []types.Signer{},
 }
 
 var MockLedgerKeyAccountsData = struct {

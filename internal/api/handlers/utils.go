@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/alitto/pond"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/txnbuild"
@@ -27,6 +28,7 @@ func FetchCollection(
 	accountId *txnbuild.SimpleAccount,
 	contractID string,
 	network string,
+	pool *pond.WorkerPool,
 ) (*collection, error) {
 	id, err := utils.ScAddressFromString(contractID)
 	if err != nil {
@@ -41,23 +43,23 @@ func FetchCollection(
 	nameCh := make(chan result, 1)
 	symbolCh := make(chan result, 1)
 
-	go func() {
+	pool.Submit(func() {
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "name", []xdr.ScVal{}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			nameCh <- result{"", err}
 			return
 		}
 		nameCh <- result{res.String(), nil}
-	}()
+	})
 
-	go func() {
+	pool.Submit(func() {
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "symbol", []xdr.ScVal{}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			symbolCh <- result{"", err}
 			return
 		}
 		symbolCh <- result{res.String(), nil}
-	}()
+	})
 
 	nameRes := <-nameCh
 	symbolRes := <-symbolCh
@@ -82,6 +84,7 @@ func fetchCollectible(
 	contractID string,
 	tokenId string,
 	network string,
+	pool *pond.WorkerPool,
 ) (*Collectible, error) {
 
 	id, err := utils.ScAddressFromString(contractID)
@@ -99,6 +102,8 @@ func fetchCollectible(
 		U32:  &tokenVal,
 	}
 
+	// Make direct RPC calls since this function is already running within a pool task
+	// Using goroutines for parallelism without pool nesting issues
 	type result struct {
 		val xdr.ScVal
 		err error
@@ -163,32 +168,18 @@ func fetchOwnerTokens(
 		return nil, err
 	}
 
-	type result struct {
-		val xdr.ScVal
-		err error
-	}
-	ownerTokensCh := make(chan result, 1)
 	ownerVal := xdr.ScVal{
 		Type:    xdr.ScValTypeScvAddress,
 		Address: ownerAddress,
 	}
 
-	go func() {
-		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "get_owner_tokens", []xdr.ScVal{ownerVal}, txnbuild.NewTimeout(300), network)
-		if err != nil {
-			ownerTokensCh <- result{xdr.ScVal{}, err}
-			return
-		}
-		ownerTokensCh <- result{*res, nil}
-	}()
-
-	ownerTokensRes := <-ownerTokensCh
-
-	if ownerTokensRes.err != nil {
-		return nil, ownerTokensRes.err
+	// Make direct RPC call (already running within a pool task from caller)
+	res, err := rpc.SimulateInvocation(ctx, *id, accountId, "get_owner_tokens", []xdr.ScVal{ownerVal}, txnbuild.NewTimeout(300), network)
+	if err != nil {
+		return nil, err
 	}
 
-	tokenIDs, err := utils.ScVecToStrings(*ownerTokensRes.val.Vec)
+	tokenIDs, err := utils.ScVecToStrings(*res.Vec)
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/alitto/pond"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
@@ -16,6 +17,10 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/txnbuild"
+)
+
+const (
+	MaxConcurrentRPCCalls = 10
 )
 
 var (
@@ -116,7 +121,11 @@ func (h *CollectiblesHandler) fetchCollection(
 		}
 	}
 
-	details, err := FetchCollection(h.RpcService, ctx, account, c.ID, network)
+	// Create pool for FetchCollection metadata calls (name + symbol = 2 calls)
+	metaPool := pond.New(2, 2, pond.Context(ctx))
+	defer metaPool.StopAndWait()
+
+	details, err := FetchCollection(h.RpcService, ctx, account, c.ID, network, metaPool)
 	if err != nil {
 		return nil, &CollectionError{
 			ErrorMessage:      fmt.Sprintf("fetching collection: %v", err),
@@ -163,14 +172,14 @@ func (h *CollectiblesHandler) fetchCollectibles(
 		results   []Collectible
 		tokenErrs []TokenError
 		mu        sync.Mutex
-		wg        sync.WaitGroup
 	)
 
+	pool := pond.New(MaxConcurrentRPCCalls, MaxConcurrentRPCCalls*2, pond.Context(ctx))
+
 	for _, tokenID := range tokenIDs {
-		wg.Add(1)
-		go func(tokenID string) {
-			defer wg.Done()
-			c, err := fetchCollectible(h.RpcService, ctx, account, contractID, tokenID, network)
+		tokenID := tokenID // Capture loop variable
+		pool.Submit(func() {
+			c, err := fetchCollectible(h.RpcService, ctx, account, contractID, tokenID, network, pool)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -181,10 +190,11 @@ func (h *CollectiblesHandler) fetchCollectibles(
 				return
 			}
 			results = append(results, *c)
-		}(tokenID)
+		})
 	}
 
-	wg.Wait()
+	pool.StopAndWait()
+
 	return results, tokenErrs
 }
 
@@ -207,12 +217,12 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 	}
 
 	results := make([]CollectionResult, len(contracts))
-	var wg sync.WaitGroup
+
+	pool := pond.New(len(contracts), len(contracts)*2, pond.Context(ctx))
 
 	for i, contract := range contracts {
-		wg.Add(1)
-		go func(i int, contract string) {
-			defer wg.Done()
+		i, contract := i, contract // Capture loop variables
+		pool.Submit(func() {
 
 			tokenIds, err := fetchOwnerTokens(h.RpcService, ctx, account, contract, owner, network)
 			if err != nil {
@@ -235,10 +245,11 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 				Collection: collection,
 				Error:      colErr,
 			}
-		}(i, contract)
+		})
 	}
 
-	wg.Wait()
+	pool.StopAndWait()
+
 	return results, nil
 }
 

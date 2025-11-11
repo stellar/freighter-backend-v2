@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
@@ -20,16 +21,42 @@ const (
 )
 
 type rpcService struct {
-	pubnetClient *client.Client
-	testnetClient *client.Client
+	pubnetClient    *client.Client
+	testnetClient   *client.Client
 	futurenetClient *client.Client
+	httpClient      *http.Client
+}
+
+func createDefaultClient() *http.Client {
+	return &http.Client{
+		Timeout: 30 * time.Second, // Overall request timeout
+		Transport: &http.Transport{
+			// Connection pooling settings
+			MaxIdleConns:        100,              // Total idle connections across all hosts
+			MaxIdleConnsPerHost: 10,               // Idle connections per host
+			MaxConnsPerHost:     50,               // Total connections per host (active + idle)
+			IdleConnTimeout:     90 * time.Second, // How long idle connections stay alive
+
+			// Timeout settings to prevent hung connections
+			ResponseHeaderTimeout: 10 * time.Second, // Timeout waiting for response headers
+			ExpectContinueTimeout: 1 * time.Second,  // Timeout for 100-continue
+
+			// Connection settings
+			DisableKeepAlives:  false, // Keep connections alive for reuse
+			DisableCompression: false, // Allow compression
+			ForceAttemptHTTP2:  true,  // Try HTTP/2
+		},
+	}
 }
 
 func NewRPCService(rpcURL string, testnetRPCURL string, futurenetRPCURL string) types.RPCService {
+	httpClient := createDefaultClient()
+
 	return &rpcService{
-		pubnetClient: client.NewClient(rpcURL, &http.Client{}),
-		testnetClient: client.NewClient(testnetRPCURL, &http.Client{}),
-		futurenetClient: client.NewClient(futurenetRPCURL, &http.Client{}),
+		httpClient:      httpClient,
+		pubnetClient:    client.NewClient(rpcURL, httpClient),
+		testnetClient:   client.NewClient(testnetRPCURL, httpClient),
+		futurenetClient: client.NewClient(futurenetRPCURL, httpClient),
 	}
 }
 
@@ -44,7 +71,6 @@ func (r *rpcService) ConfigureNetworkClient(network string) *client.Client {
 	}
 	return r.pubnetClient
 }
-
 
 func (r *rpcService) Name() string {
 	return serviceName
@@ -71,6 +97,7 @@ func (r *rpcService) SimulateTx(
 	if err != nil {
 		return nil, fmt.Errorf("could not encode transaction: %w", err)
 	}
+
 	networkclient := r.ConfigureNetworkClient(network)
 	resp, err := networkclient.SimulateTransaction(ctx, protocol.SimulateTransactionRequest{
 		Transaction: txeB64,
@@ -144,14 +171,14 @@ func (r *rpcService) SimulateInvocation(
 func (r *rpcService) GetLedgerEntries(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
 	networkClient := r.ConfigureNetworkClient(network)
 	response, err := networkClient.GetLedgerEntries(ctx, protocol.GetLedgerEntriesRequest{
-		Keys: keys,
+		Keys:   keys,
 		Format: "json",
 	})
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ledger entries: %w", err)
 	}
-	
+
 	var entries []types.LedgerEntryMap
 
 	for _, entry := range response.Entries {

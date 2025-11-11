@@ -21,9 +21,9 @@ type AppConfig struct {
 }
 
 type RPCConfig struct {
-	RpcUrl         string
-	PubnetRpcUrl   string
-	TestnetRpcUrl  string
+	RpcUrl          string
+	PubnetRpcUrl    string
+	TestnetRpcUrl   string
 	FuturenetRpcUrl string
 }
 

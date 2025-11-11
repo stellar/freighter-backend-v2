@@ -95,7 +95,7 @@ func TestFetchCollection(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		collection, err := handler.fetchCollection(ctx, account, contract)
+		collection, err := handler.fetchCollection(ctx, account, contract, "PUBLIC")
 
 		// Should return nil collection (collection-level failure)
 		require.Nil(t, collection)
@@ -127,7 +127,7 @@ func TestFetchCollection(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		collection, err := handler.fetchCollection(ctx, account, contract)
+		collection, err := handler.fetchCollection(ctx, account, contract, "PUBLIC")
 
 		// Should return nil collection (collection-level failure)
 		require.Nil(t, collection)
