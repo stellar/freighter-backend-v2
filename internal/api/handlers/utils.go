@@ -63,7 +63,9 @@ func FetchCollection(
 		symbolCh <- result{res.String(), nil}
 	})
 
-	group.Wait()
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
 
 	nameRes := <-nameCh
 	symbolRes := <-symbolCh

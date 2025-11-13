@@ -197,7 +197,7 @@ func (h *CollectiblesHandler) fetchCollectibles(
 		})
 	}
 
-	group.Wait()
+	_ = group.Wait() // Task errors already captured in tokenErrs
 
 	return results, tokenErrs
 }
@@ -252,7 +252,9 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 		})
 	}
 
-	group.Wait()
+	if err := group.Wait(); err != nil {
+		return results, fmt.Errorf("waiting for meridian pay collectibles: %w", err)
+	}
 
 	return results, nil
 }
