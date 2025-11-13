@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/alitto/pond"
+	"github.com/alitto/pond/v2"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
@@ -78,6 +78,7 @@ type CollectiblesHandler struct {
 	MeridianPayTreasureHuntAddress string
 	MeridianPayTreasurePoapAddress string
 	maxConcurrentRPCCalls          int
+	pool                           pond.Pool
 }
 
 func NewCollectiblesHandler(rpc types.RPCService, meridianPayTreasureHuntAddress string, meridianPayTreasurePoapAddress string, maxConcurrentRPCCalls int) *CollectiblesHandler {
@@ -86,6 +87,7 @@ func NewCollectiblesHandler(rpc types.RPCService, meridianPayTreasureHuntAddress
 		MeridianPayTreasureHuntAddress: meridianPayTreasureHuntAddress,
 		MeridianPayTreasurePoapAddress: meridianPayTreasurePoapAddress,
 		maxConcurrentRPCCalls:          maxConcurrentRPCCalls,
+		pool:                           pond.NewPool(maxConcurrentRPCCalls),
 	}
 }
 
@@ -127,11 +129,7 @@ func (h *CollectiblesHandler) fetchCollection(
 		}
 	}
 
-	// Create pool for FetchCollection metadata calls (name + symbol = 2 calls)
-	metaPool := pond.New(2, 2, pond.Context(ctx))
-	defer metaPool.StopAndWait()
-
-	details, err := FetchCollection(h.RpcService, ctx, account, c.ID, network, metaPool)
+	details, err := FetchCollection(h.RpcService, ctx, account, c.ID, network, h.pool)
 	if err != nil {
 		return nil, &CollectionError{
 			ErrorMessage:      fmt.Sprintf("fetching collection: %v", err),
@@ -180,12 +178,12 @@ func (h *CollectiblesHandler) fetchCollectibles(
 		mu        sync.Mutex
 	)
 
-	pool := pond.New(h.maxConcurrentRPCCalls, h.maxConcurrentRPCCalls*2, pond.Context(ctx))
+	group := h.pool.NewGroupContext(ctx)
 
 	for _, tokenID := range tokenIDs {
 		tokenID := tokenID // Capture loop variable
-		pool.Submit(func() {
-			c, err := fetchCollectible(h.RpcService, ctx, account, contractID, tokenID, network, pool)
+		group.Submit(func() {
+			c, err := fetchCollectible(h.RpcService, ctx, account, contractID, tokenID, network, h.pool)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -199,7 +197,7 @@ func (h *CollectiblesHandler) fetchCollectibles(
 		})
 	}
 
-	pool.StopAndWait()
+	group.Wait()
 
 	return results, tokenErrs
 }
@@ -224,11 +222,11 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 
 	results := make([]CollectionResult, len(contracts))
 
-	pool := pond.New(len(contracts), len(contracts)*2, pond.Context(ctx))
+	group := h.pool.NewGroupContext(ctx)
 
 	for i, contract := range contracts {
 		i, contract := i, contract // Capture loop variables
-		pool.Submit(func() {
+		group.Submit(func() {
 
 			tokenIds, err := fetchOwnerTokens(h.RpcService, ctx, account, contract, owner, network)
 			if err != nil {
@@ -254,7 +252,7 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 		})
 	}
 
-	pool.StopAndWait()
+	group.Wait()
 
 	return results, nil
 }

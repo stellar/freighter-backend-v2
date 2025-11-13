@@ -3,7 +3,7 @@ module github.com/stellar/freighter-backend-v2
 go 1.24
 
 require (
-	github.com/alitto/pond v1.9.2
+	github.com/alitto/pond/v2 v2.5.0
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/redis/go-redis/v9 v9.7.3
 	github.com/spf13/cobra v1.9.1

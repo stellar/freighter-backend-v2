@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alitto/pond"
+	"github.com/alitto/pond/v2"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/txnbuild"
 	"github.com/stretchr/testify/assert"
@@ -18,8 +18,7 @@ func TestFetchCollection_Success(t *testing.T) {
 	mockRPC := &utils.MockRPCService{}
 
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
-	pool := pond.New(2, 2, pond.Context(context.Background()))
-	defer pool.StopAndWait()
+	pool := pond.NewPool(2)
 
 	collection, err := FetchCollection(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "PUBLIC", pool)
 
@@ -32,8 +31,7 @@ func TestFetchCollection_Success(t *testing.T) {
 func TestFetchCollection_InvalidContractID(t *testing.T) {
 	mockRPC := &utils.MockRPCService{}
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
-	pool := pond.New(2, 2, pond.Context(context.Background()))
-	defer pool.StopAndWait()
+	pool := pond.NewPool(2)
 
 	_, err := FetchCollection(mockRPC, context.Background(), account, "INVALID", "PUBLIC", pool)
 	assert.Error(t, err)
@@ -45,8 +43,7 @@ func TestFetchCollection_SimulateInvocationError(t *testing.T) {
 	}
 
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
-	pool := pond.New(2, 2, pond.Context(context.Background()))
-	defer pool.StopAndWait()
+	pool := pond.NewPool(2)
 
 	_, err := FetchCollection(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "PUBLIC", pool)
 	assert.Error(t, err)
@@ -66,8 +63,7 @@ func TestFetchCollectible_Success(t *testing.T) {
 	}
 
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
-	pool := pond.New(2, 4, pond.Context(context.Background()))
-	defer pool.StopAndWait()
+	pool := pond.NewPool(2)
 
 	collectible, err := fetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", tokenId, "PUBLIC", pool)
 
@@ -82,8 +78,7 @@ func TestFetchCollectible_Success(t *testing.T) {
 func TestFetchCollectible_InvalidTokenID(t *testing.T) {
 	mockRPC := &utils.MockRPCService{}
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
-	pool := pond.New(2, 4, pond.Context(context.Background()))
-	defer pool.StopAndWait()
+	pool := pond.NewPool(2)
 
 	_, err := fetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "not-a-number", "PUBLIC", pool)
 	assert.Error(t, err)
@@ -95,8 +90,7 @@ func TestFetchCollectible_SimulateInvocationError(t *testing.T) {
 	}
 
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
-	pool := pond.New(2, 4, pond.Context(context.Background()))
-	defer pool.StopAndWait()
+	pool := pond.NewPool(2)
 
 	_, err := fetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "1", "PUBLIC", pool)
 	assert.Error(t, err)

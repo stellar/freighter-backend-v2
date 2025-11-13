@@ -4,7 +4,7 @@ import (
 	"context"
 	"strconv"
 
-	"github.com/alitto/pond"
+	"github.com/alitto/pond/v2"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/txnbuild"
@@ -28,7 +28,7 @@ func FetchCollection(
 	accountId *txnbuild.SimpleAccount,
 	contractID string,
 	network string,
-	pool *pond.WorkerPool,
+	pool pond.Pool,
 ) (*collection, error) {
 	id, err := utils.ScAddressFromString(contractID)
 	if err != nil {
@@ -43,7 +43,9 @@ func FetchCollection(
 	nameCh := make(chan result, 1)
 	symbolCh := make(chan result, 1)
 
-	pool.Submit(func() {
+	group := pool.NewGroupContext(ctx)
+
+	group.Submit(func() {
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "name", []xdr.ScVal{}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			nameCh <- result{"", err}
@@ -52,7 +54,7 @@ func FetchCollection(
 		nameCh <- result{res.String(), nil}
 	})
 
-	pool.Submit(func() {
+	group.Submit(func() {
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "symbol", []xdr.ScVal{}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			symbolCh <- result{"", err}
@@ -60,6 +62,8 @@ func FetchCollection(
 		}
 		symbolCh <- result{res.String(), nil}
 	})
+
+	group.Wait()
 
 	nameRes := <-nameCh
 	symbolRes := <-symbolCh
@@ -84,7 +88,7 @@ func fetchCollectible(
 	contractID string,
 	tokenId string,
 	network string,
-	pool *pond.WorkerPool,
+	pool pond.Pool,
 ) (*Collectible, error) {
 
 	id, err := utils.ScAddressFromString(contractID)
