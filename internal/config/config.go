@@ -21,10 +21,11 @@ type AppConfig struct {
 }
 
 type RPCConfig struct {
-	RpcUrl          string
-	PubnetRpcUrl    string
-	TestnetRpcUrl   string
-	FuturenetRpcUrl string
+	RpcUrl                string
+	PubnetRpcUrl          string
+	TestnetRpcUrl         string
+	FuturenetRpcUrl       string
+	MaxConcurrentRPCCalls int
 }
 
 type RedisConfig struct {

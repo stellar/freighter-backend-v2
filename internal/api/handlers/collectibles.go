@@ -77,10 +77,16 @@ type CollectiblesHandler struct {
 	RpcService                     types.RPCService
 	MeridianPayTreasureHuntAddress string
 	MeridianPayTreasurePoapAddress string
+	maxConcurrentRPCCalls          int
 }
 
-func NewCollectiblesHandler(rpc types.RPCService, meridianPayTreasureHuntAddress string, meridianPayTreasurePoapAddress string) *CollectiblesHandler {
-	return &CollectiblesHandler{RpcService: rpc, MeridianPayTreasureHuntAddress: meridianPayTreasureHuntAddress, MeridianPayTreasurePoapAddress: meridianPayTreasurePoapAddress}
+func NewCollectiblesHandler(rpc types.RPCService, meridianPayTreasureHuntAddress string, meridianPayTreasurePoapAddress string, maxConcurrentRPCCalls int) *CollectiblesHandler {
+	return &CollectiblesHandler{
+		RpcService:                     rpc,
+		MeridianPayTreasureHuntAddress: meridianPayTreasureHuntAddress,
+		MeridianPayTreasurePoapAddress: meridianPayTreasurePoapAddress,
+		maxConcurrentRPCCalls:          maxConcurrentRPCCalls,
+	}
 }
 
 func validateRequest(r *http.Request) (*collectibleRequest, error) {
@@ -174,7 +180,7 @@ func (h *CollectiblesHandler) fetchCollectibles(
 		mu        sync.Mutex
 	)
 
-	pool := pond.New(MaxConcurrentRPCCalls, MaxConcurrentRPCCalls*2, pond.Context(ctx))
+	pool := pond.New(h.maxConcurrentRPCCalls, h.maxConcurrentRPCCalls*2, pond.Context(ctx))
 
 	for _, tokenID := range tokenIDs {
 		tokenID := tokenID // Capture loop variable

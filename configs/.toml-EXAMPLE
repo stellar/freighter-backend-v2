@@ -35,3 +35,6 @@ COINBASE_API_SECRET = "not-set"
 # Meridian Pay
 MERIDIAN_PAY_TREASURE_HUNT_ADDRESS = "not-set"
 MERIDIAN_PAY_POAP_ADDRESS = "not-set"
+
+# Collectibles
+MAX_CONCURRENT_RPC_CALLS = "10"
