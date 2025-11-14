@@ -185,7 +185,7 @@ func (h *CollectiblesHandler) fetchCollectibles(
 	for _, tokenID := range tokenIDs {
 		tokenID := tokenID // Capture loop variable
 		group.Submit(func() {
-			c, err := fetchCollectible(h.RpcService, ctx, account, contractID, tokenID, network, h.pool)
+			c, err := fetchCollectible(h.RpcService, ctx, account, contractID, tokenID, network)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
