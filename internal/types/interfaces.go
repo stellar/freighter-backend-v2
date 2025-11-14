@@ -15,8 +15,8 @@ const (
 )
 
 const (
-	PUBLIC = "PUBLIC"
-	TESTNET = "TESTNET"
+	PUBLIC    = "PUBLIC"
+	TESTNET   = "TESTNET"
 	FUTURENET = "FUTURENET"
 )
 

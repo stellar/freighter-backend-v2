@@ -10,10 +10,10 @@ import (
 )
 
 type MockRPCService struct {
-	SimulateError    error
-	TokenURIOverride string
+	SimulateError          error
+	TokenURIOverride       string
 	GetLedgerEntryOverride []types.LedgerEntryMap
-	GetLedgerEntryError error
+	GetLedgerEntryError    error
 }
 
 func (m *MockRPCService) ConfigureNetworkClient(network string) *client.Client {
@@ -80,13 +80,12 @@ func (m *MockRPCService) SimulateInvocation(
 	return &result, nil
 }
 
-
 func (m *MockRPCService) GetLedgerEntries(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
 	if m.GetLedgerEntryOverride != nil {
 		return m.GetLedgerEntryOverride, nil
 	}
 
-	if (m.GetLedgerEntryError != nil) {
+	if m.GetLedgerEntryError != nil {
 		return nil, m.GetLedgerEntryError
 	}
 	return nil, nil

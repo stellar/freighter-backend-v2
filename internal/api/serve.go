@@ -63,7 +63,7 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 	protocolsHandler := handlers.NewProtocolsHandler(s.cfg.AppConfig.ProtocolsConfigPath)
 	mux.HandleFunc("GET /api/v1/protocols", handlers.CustomHandler(protocolsHandler.GetProtocols))
 
-	collectiblesHandler := handlers.NewCollectiblesHandler(s.rpcService, s.cfg.AppConfig.MeridianPayTreasureHuntAddress, s.cfg.AppConfig.MeridianPayTreasurePoapAddress)
+	collectiblesHandler := handlers.NewCollectiblesHandler(s.rpcService, s.cfg.AppConfig.MeridianPayTreasureHuntAddress, s.cfg.AppConfig.MeridianPayTreasurePoapAddress, s.cfg.RpcConfig.MaxConcurrentRPCCalls)
 	mux.HandleFunc("POST /api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles))
 
 	ledgerKeyAccountsHandler := handlers.NewLedgerKeyAccountHandler(s.rpcService)
@@ -71,6 +71,7 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 
 	featureFlagsHandler := handlers.NewFeatureFlagsHandler()
 	mux.HandleFunc("GET /api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags))
+
 	return mux
 }
 

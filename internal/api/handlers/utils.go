@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/alitto/pond/v2"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/txnbuild"
@@ -27,6 +28,7 @@ func FetchCollection(
 	accountId *txnbuild.SimpleAccount,
 	contractID string,
 	network string,
+	rpcPool pond.Pool,
 ) (*collection, error) {
 	id, err := utils.ScAddressFromString(contractID)
 	if err != nil {
@@ -41,26 +43,45 @@ func FetchCollection(
 	nameCh := make(chan result, 1)
 	symbolCh := make(chan result, 1)
 
-	go func() {
+	// Use rpcPool to bound concurrent RPC calls
+	group := rpcPool.NewGroupContext(ctx)
+
+	group.Submit(func() {
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "name", []xdr.ScVal{}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			nameCh <- result{"", err}
 			return
 		}
 		nameCh <- result{res.String(), nil}
-	}()
+	})
 
-	go func() {
+	group.Submit(func() {
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "symbol", []xdr.ScVal{}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			symbolCh <- result{"", err}
 			return
 		}
 		symbolCh <- result{res.String(), nil}
-	}()
+	})
 
-	nameRes := <-nameCh
-	symbolRes := <-symbolCh
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+
+	// Use context-aware channel reads to prevent blocking forever
+	var nameRes, symbolRes result
+
+	select {
+	case nameRes = <-nameCh:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	select {
+	case symbolRes = <-symbolCh:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 
 	if nameRes.err != nil {
 		return nil, nameRes.err
@@ -82,6 +103,7 @@ func fetchCollectible(
 	contractID string,
 	tokenId string,
 	network string,
+	rpcPool pond.Pool,
 ) (*Collectible, error) {
 
 	id, err := utils.ScAddressFromString(contractID)
@@ -99,6 +121,7 @@ func fetchCollectible(
 		U32:  &tokenVal,
 	}
 
+	// Use rpcPool to bound concurrent RPC calls
 	type result struct {
 		val xdr.ScVal
 		err error
@@ -106,26 +129,44 @@ func fetchCollectible(
 	ownerCh := make(chan result, 1)
 	tokenURICh := make(chan result, 1)
 
-	go func() {
+	group := rpcPool.NewGroupContext(ctx)
+
+	group.Submit(func() {
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "owner_of", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			ownerCh <- result{xdr.ScVal{}, err}
 			return
 		}
 		ownerCh <- result{*res, nil}
-	}()
+	})
 
-	go func() {
+	group.Submit(func() {
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "token_uri", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			tokenURICh <- result{xdr.ScVal{}, err}
 			return
 		}
 		tokenURICh <- result{*res, nil}
-	}()
+	})
 
-	ownerRes := <-ownerCh
-	tokenURIRes := <-tokenURICh
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+
+	// Use context-aware channel reads to prevent blocking forever
+	var ownerRes, tokenURIRes result
+
+	select {
+	case ownerRes = <-ownerCh:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	select {
+	case tokenURIRes = <-tokenURICh:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 
 	if ownerRes.err != nil {
 		return nil, ownerRes.err
@@ -163,32 +204,18 @@ func fetchOwnerTokens(
 		return nil, err
 	}
 
-	type result struct {
-		val xdr.ScVal
-		err error
-	}
-	ownerTokensCh := make(chan result, 1)
 	ownerVal := xdr.ScVal{
 		Type:    xdr.ScValTypeScvAddress,
 		Address: ownerAddress,
 	}
 
-	go func() {
-		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "get_owner_tokens", []xdr.ScVal{ownerVal}, txnbuild.NewTimeout(300), network)
-		if err != nil {
-			ownerTokensCh <- result{xdr.ScVal{}, err}
-			return
-		}
-		ownerTokensCh <- result{*res, nil}
-	}()
-
-	ownerTokensRes := <-ownerTokensCh
-
-	if ownerTokensRes.err != nil {
-		return nil, ownerTokensRes.err
+	// Make direct RPC call (already running within a pool task from caller)
+	res, err := rpc.SimulateInvocation(ctx, *id, accountId, "get_owner_tokens", []xdr.ScVal{ownerVal}, txnbuild.NewTimeout(300), network)
+	if err != nil {
+		return nil, err
 	}
 
-	tokenIDs, err := utils.ScVecToStrings(*ownerTokensRes.val.Vec)
+	tokenIDs, err := utils.ScVecToStrings(*res.Vec)
 	if err != nil {
 		return nil, err
 	}

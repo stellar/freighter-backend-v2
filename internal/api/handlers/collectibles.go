@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/alitto/pond/v2"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
@@ -16,6 +18,11 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/txnbuild"
+)
+
+const (
+	MaxConcurrentRPCCalls      = 10
+	CollectiblesContextTimeout = 30 * time.Second
 )
 
 var (
@@ -72,10 +79,22 @@ type CollectiblesHandler struct {
 	RpcService                     types.RPCService
 	MeridianPayTreasureHuntAddress string
 	MeridianPayTreasurePoapAddress string
+	maxConcurrentRPCCalls          int
+	pool                           pond.Pool
+	tokenPool                      pond.Pool
+	rpcPool                        pond.Pool
 }
 
-func NewCollectiblesHandler(rpc types.RPCService, meridianPayTreasureHuntAddress string, meridianPayTreasurePoapAddress string) *CollectiblesHandler {
-	return &CollectiblesHandler{RpcService: rpc, MeridianPayTreasureHuntAddress: meridianPayTreasureHuntAddress, MeridianPayTreasurePoapAddress: meridianPayTreasurePoapAddress}
+func NewCollectiblesHandler(rpc types.RPCService, meridianPayTreasureHuntAddress string, meridianPayTreasurePoapAddress string, maxConcurrentRPCCalls int) *CollectiblesHandler {
+	return &CollectiblesHandler{
+		RpcService:                     rpc,
+		MeridianPayTreasureHuntAddress: meridianPayTreasureHuntAddress,
+		MeridianPayTreasurePoapAddress: meridianPayTreasurePoapAddress,
+		maxConcurrentRPCCalls:          maxConcurrentRPCCalls,
+		pool:                           pond.NewPool(maxConcurrentRPCCalls),     // 10 contracts
+		tokenPool:                      pond.NewPool(maxConcurrentRPCCalls * 2), // 20 tokens
+		rpcPool:                        pond.NewPool(maxConcurrentRPCCalls * 4), // 40 RPC calls
+	}
 }
 
 func validateRequest(r *http.Request) (*collectibleRequest, error) {
@@ -116,7 +135,7 @@ func (h *CollectiblesHandler) fetchCollection(
 		}
 	}
 
-	details, err := FetchCollection(h.RpcService, ctx, account, c.ID, network)
+	details, err := FetchCollection(h.RpcService, ctx, account, c.ID, network, h.rpcPool)
 	if err != nil {
 		return nil, &CollectionError{
 			ErrorMessage:      fmt.Sprintf("fetching collection: %v", err),
@@ -163,14 +182,15 @@ func (h *CollectiblesHandler) fetchCollectibles(
 		results   []Collectible
 		tokenErrs []TokenError
 		mu        sync.Mutex
-		wg        sync.WaitGroup
 	)
 
+	// Use tokenPool to bound concurrent token fetching (separate from rpcPool to avoid nesting)
+	group := h.tokenPool.NewGroupContext(ctx)
+
 	for _, tokenID := range tokenIDs {
-		wg.Add(1)
-		go func(tokenID string) {
-			defer wg.Done()
-			c, err := fetchCollectible(h.RpcService, ctx, account, contractID, tokenID, network)
+		tokenID := tokenID // Capture loop variable
+		group.Submit(func() {
+			c, err := fetchCollectible(h.RpcService, ctx, account, contractID, tokenID, network, h.rpcPool)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -181,10 +201,11 @@ func (h *CollectiblesHandler) fetchCollectibles(
 				return
 			}
 			results = append(results, *c)
-		}(tokenID)
+		})
 	}
 
-	wg.Wait()
+	_ = group.Wait() // Errors already captured in tokenErrs
+
 	return results, tokenErrs
 }
 
@@ -208,11 +229,28 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 
 	results := make([]CollectionResult, len(contracts))
 	var wg sync.WaitGroup
+	errCh := make(chan error, len(contracts))
 
+	// Use WaitGroup instead of pool to avoid nesting since this is called from pool tasks
 	for i, contract := range contracts {
+		i, contract := i, contract // Capture loop variables
 		wg.Add(1)
-		go func(i int, contract string) {
+		go func() {
 			defer wg.Done()
+
+			// Check context before starting work
+			select {
+			case <-ctx.Done():
+				results[i] = CollectionResult{
+					Error: &CollectionError{
+						ErrorMessage:      ctx.Err().Error(),
+						CollectionAddress: contract,
+					},
+				}
+				errCh <- ctx.Err()
+				return
+			default:
+			}
 
 			tokenIds, err := fetchOwnerTokens(h.RpcService, ctx, account, contract, owner, network)
 			if err != nil {
@@ -235,15 +273,24 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 				Collection: collection,
 				Error:      colErr,
 			}
-		}(i, contract)
+		}()
 	}
 
 	wg.Wait()
+	close(errCh)
+
+	// Check if any goroutines reported context errors
+	for err := range errCh {
+		if err != nil {
+			return results, fmt.Errorf("waiting for meridian pay collectibles: %w", err)
+		}
+	}
+
 	return results, nil
 }
 
 func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Request) error {
-	ctx, cancel := context.WithTimeout(r.Context(), HealthCheckContextTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), CollectiblesContextTimeout)
 	defer cancel()
 
 	network := r.URL.Query().Get("network")
@@ -286,13 +333,12 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 	}
 
 	results := make([]CollectionResult, len(filteredContracts))
-	var wg sync.WaitGroup
 
+	group := h.pool.NewGroupContext(ctx)
 	for i, contract := range filteredContracts {
-		wg.Add(1)
-		go func(i int, c contractDetails) {
-			defer wg.Done()
-			collection, colErr := h.fetchCollection(ctx, account, c, network)
+		i, contract := i, contract // Capture loop variables
+		group.Submit(func() {
+			collection, colErr := h.fetchCollection(ctx, account, contract, network)
 			if colErr != nil && len(colErr.Tokens) == 0 && collection == nil {
 				results[i] = CollectionResult{Error: colErr}
 				return
@@ -301,9 +347,9 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 				Collection: collection,
 				Error:      colErr,
 			}
-		}(i, contract)
+		})
 	}
-	wg.Wait()
+	_ = group.Wait() // Wait for all contracts to complete or context to cancel
 
 	meridianResults, err := h.fetchMeridianPayCollectibles(ctx, account, owner, network)
 	if err != nil {
