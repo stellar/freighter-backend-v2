@@ -43,29 +43,40 @@ func FetchCollection(
 	nameCh := make(chan result, 1)
 	symbolCh := make(chan result, 1)
 
-	group := pool.NewGroupContext(ctx)
+	// Use goroutines instead of pool to avoid nesting since this is called from pool tasks
+	go func() {
+		// Check context before starting work
+		select {
+		case <-ctx.Done():
+			nameCh <- result{"", ctx.Err()}
+			return
+		default:
+		}
 
-	group.Submit(func() {
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "name", []xdr.ScVal{}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			nameCh <- result{"", err}
 			return
 		}
 		nameCh <- result{res.String(), nil}
-	})
+	}()
 
-	group.Submit(func() {
+	go func() {
+		// Check context before starting work
+		select {
+		case <-ctx.Done():
+			symbolCh <- result{"", ctx.Err()}
+			return
+		default:
+		}
+
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "symbol", []xdr.ScVal{}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			symbolCh <- result{"", err}
 			return
 		}
 		symbolCh <- result{res.String(), nil}
-	})
-
-	if err := group.Wait(); err != nil {
-		return nil, err
-	}
+	}()
 
 	// Use context-aware channel reads to prevent blocking forever
 	var nameRes, symbolRes result

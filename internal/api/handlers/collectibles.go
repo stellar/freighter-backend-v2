@@ -178,13 +178,29 @@ func (h *CollectiblesHandler) fetchCollectibles(
 		results   []Collectible
 		tokenErrs []TokenError
 		mu        sync.Mutex
+		wg        sync.WaitGroup
 	)
 
-	group := h.pool.NewGroupContext(ctx)
-
+	// Use WaitGroup instead of pool to avoid nesting since this is called from pool tasks
 	for _, tokenID := range tokenIDs {
 		tokenID := tokenID // Capture loop variable
-		group.Submit(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			// Check context before starting work
+			select {
+			case <-ctx.Done():
+				mu.Lock()
+				tokenErrs = append(tokenErrs, TokenError{
+					TokenID:      tokenID,
+					ErrorMessage: ctx.Err().Error(),
+				})
+				mu.Unlock()
+				return
+			default:
+			}
+
 			c, err := fetchCollectible(h.RpcService, ctx, account, contractID, tokenID, network)
 			mu.Lock()
 			defer mu.Unlock()
@@ -196,10 +212,10 @@ func (h *CollectiblesHandler) fetchCollectibles(
 				return
 			}
 			results = append(results, *c)
-		})
+		}()
 	}
 
-	_ = group.Wait() // Task errors already captured in tokenErrs
+	wg.Wait()
 
 	return results, tokenErrs
 }
@@ -223,12 +239,29 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 	}
 
 	results := make([]CollectionResult, len(contracts))
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(contracts))
 
-	group := h.pool.NewGroupContext(ctx)
-
+	// Use WaitGroup instead of pool to avoid nesting since this is called from pool tasks
 	for i, contract := range contracts {
 		i, contract := i, contract // Capture loop variables
-		group.Submit(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			// Check context before starting work
+			select {
+			case <-ctx.Done():
+				results[i] = CollectionResult{
+					Error: &CollectionError{
+						ErrorMessage:      ctx.Err().Error(),
+						CollectionAddress: contract,
+					},
+				}
+				errCh <- ctx.Err()
+				return
+			default:
+			}
 
 			tokenIds, err := fetchOwnerTokens(h.RpcService, ctx, account, contract, owner, network)
 			if err != nil {
@@ -251,11 +284,17 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 				Collection: collection,
 				Error:      colErr,
 			}
-		})
+		}()
 	}
 
-	if err := group.Wait(); err != nil {
-		return results, fmt.Errorf("waiting for meridian pay collectibles: %w", err)
+	wg.Wait()
+	close(errCh)
+
+	// Check if any goroutines reported context errors
+	for err := range errCh {
+		if err != nil {
+			return results, fmt.Errorf("waiting for meridian pay collectibles: %w", err)
+		}
 	}
 
 	return results, nil
