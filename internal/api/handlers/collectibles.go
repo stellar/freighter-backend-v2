@@ -81,6 +81,8 @@ type CollectiblesHandler struct {
 	MeridianPayTreasurePoapAddress string
 	maxConcurrentRPCCalls          int
 	pool                           pond.Pool
+	tokenPool                      pond.Pool
+	rpcPool                        pond.Pool
 }
 
 func NewCollectiblesHandler(rpc types.RPCService, meridianPayTreasureHuntAddress string, meridianPayTreasurePoapAddress string, maxConcurrentRPCCalls int) *CollectiblesHandler {
@@ -89,7 +91,9 @@ func NewCollectiblesHandler(rpc types.RPCService, meridianPayTreasureHuntAddress
 		MeridianPayTreasureHuntAddress: meridianPayTreasureHuntAddress,
 		MeridianPayTreasurePoapAddress: meridianPayTreasurePoapAddress,
 		maxConcurrentRPCCalls:          maxConcurrentRPCCalls,
-		pool:                           pond.NewPool(maxConcurrentRPCCalls),
+		pool:                           pond.NewPool(maxConcurrentRPCCalls),     // 10 contracts
+		tokenPool:                      pond.NewPool(maxConcurrentRPCCalls * 2), // 20 tokens
+		rpcPool:                        pond.NewPool(maxConcurrentRPCCalls * 4), // 40 RPC calls
 	}
 }
 
@@ -131,7 +135,7 @@ func (h *CollectiblesHandler) fetchCollection(
 		}
 	}
 
-	details, err := FetchCollection(h.RpcService, ctx, account, c.ID, network, h.pool)
+	details, err := FetchCollection(h.RpcService, ctx, account, c.ID, network, h.rpcPool)
 	if err != nil {
 		return nil, &CollectionError{
 			ErrorMessage:      fmt.Sprintf("fetching collection: %v", err),
@@ -178,30 +182,15 @@ func (h *CollectiblesHandler) fetchCollectibles(
 		results   []Collectible
 		tokenErrs []TokenError
 		mu        sync.Mutex
-		wg        sync.WaitGroup
 	)
 
-	// Use WaitGroup instead of pool to avoid nesting since this is called from pool tasks
+	// Use tokenPool to bound concurrent token fetching (separate from rpcPool to avoid nesting)
+	group := h.tokenPool.NewGroupContext(ctx)
+
 	for _, tokenID := range tokenIDs {
 		tokenID := tokenID // Capture loop variable
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			// Check context before starting work
-			select {
-			case <-ctx.Done():
-				mu.Lock()
-				tokenErrs = append(tokenErrs, TokenError{
-					TokenID:      tokenID,
-					ErrorMessage: ctx.Err().Error(),
-				})
-				mu.Unlock()
-				return
-			default:
-			}
-
-			c, err := fetchCollectible(h.RpcService, ctx, account, contractID, tokenID, network)
+		group.Submit(func() {
+			c, err := fetchCollectible(h.RpcService, ctx, account, contractID, tokenID, network, h.rpcPool)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -212,10 +201,10 @@ func (h *CollectiblesHandler) fetchCollectibles(
 				return
 			}
 			results = append(results, *c)
-		}()
+		})
 	}
 
-	wg.Wait()
+	_ = group.Wait() // Errors already captured in tokenErrs
 
 	return results, tokenErrs
 }

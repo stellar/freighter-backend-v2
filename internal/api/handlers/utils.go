@@ -28,7 +28,7 @@ func FetchCollection(
 	accountId *txnbuild.SimpleAccount,
 	contractID string,
 	network string,
-	pool pond.Pool,
+	rpcPool pond.Pool,
 ) (*collection, error) {
 	id, err := utils.ScAddressFromString(contractID)
 	if err != nil {
@@ -43,40 +43,30 @@ func FetchCollection(
 	nameCh := make(chan result, 1)
 	symbolCh := make(chan result, 1)
 
-	// Use goroutines instead of pool to avoid nesting since this is called from pool tasks
-	go func() {
-		// Check context before starting work
-		select {
-		case <-ctx.Done():
-			nameCh <- result{"", ctx.Err()}
-			return
-		default:
-		}
+	// Use rpcPool to bound concurrent RPC calls
+	group := rpcPool.NewGroupContext(ctx)
 
+	group.Submit(func() {
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "name", []xdr.ScVal{}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			nameCh <- result{"", err}
 			return
 		}
 		nameCh <- result{res.String(), nil}
-	}()
+	})
 
-	go func() {
-		// Check context before starting work
-		select {
-		case <-ctx.Done():
-			symbolCh <- result{"", ctx.Err()}
-			return
-		default:
-		}
-
+	group.Submit(func() {
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "symbol", []xdr.ScVal{}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			symbolCh <- result{"", err}
 			return
 		}
 		symbolCh <- result{res.String(), nil}
-	}()
+	})
+
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
 
 	// Use context-aware channel reads to prevent blocking forever
 	var nameRes, symbolRes result
@@ -113,6 +103,7 @@ func fetchCollectible(
 	contractID string,
 	tokenId string,
 	network string,
+	rpcPool pond.Pool,
 ) (*Collectible, error) {
 
 	id, err := utils.ScAddressFromString(contractID)
@@ -130,8 +121,7 @@ func fetchCollectible(
 		U32:  &tokenVal,
 	}
 
-	// Make direct RPC calls since this function is already running within a pool task
-	// Using goroutines for parallelism without pool nesting issues
+	// Use rpcPool to bound concurrent RPC calls
 	type result struct {
 		val xdr.ScVal
 		err error
@@ -139,39 +129,29 @@ func fetchCollectible(
 	ownerCh := make(chan result, 1)
 	tokenURICh := make(chan result, 1)
 
-	go func() {
-		// Check if context is already cancelled before starting work
-		select {
-		case <-ctx.Done():
-			ownerCh <- result{xdr.ScVal{}, ctx.Err()}
-			return
-		default:
-		}
+	group := rpcPool.NewGroupContext(ctx)
 
+	group.Submit(func() {
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "owner_of", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			ownerCh <- result{xdr.ScVal{}, err}
 			return
 		}
 		ownerCh <- result{*res, nil}
-	}()
+	})
 
-	go func() {
-		// Check if context is already cancelled before starting work
-		select {
-		case <-ctx.Done():
-			tokenURICh <- result{xdr.ScVal{}, ctx.Err()}
-			return
-		default:
-		}
-
+	group.Submit(func() {
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "token_uri", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			tokenURICh <- result{xdr.ScVal{}, err}
 			return
 		}
 		tokenURICh <- result{*res, nil}
-	}()
+	})
+
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
 
 	// Use context-aware channel reads to prevent blocking forever
 	var ownerRes, tokenURIRes result
