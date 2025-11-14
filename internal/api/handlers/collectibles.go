@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/alitto/pond/v2"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -20,7 +21,8 @@ import (
 )
 
 const (
-	MaxConcurrentRPCCalls = 10
+	MaxConcurrentRPCCalls      = 10
+	CollectiblesContextTimeout = 30 * time.Second
 )
 
 var (
@@ -260,7 +262,7 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 }
 
 func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Request) error {
-	ctx, cancel := context.WithTimeout(r.Context(), HealthCheckContextTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), CollectiblesContextTimeout)
 	defer cancel()
 
 	network := r.URL.Query().Get("network")
@@ -303,13 +305,12 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 	}
 
 	results := make([]CollectionResult, len(filteredContracts))
-	var wg sync.WaitGroup
 
+	group := h.pool.NewGroupContext(ctx)
 	for i, contract := range filteredContracts {
-		wg.Add(1)
-		go func(i int, c contractDetails) {
-			defer wg.Done()
-			collection, colErr := h.fetchCollection(ctx, account, c, network)
+		i, contract := i, contract // Capture loop variables
+		group.Submit(func() {
+			collection, colErr := h.fetchCollection(ctx, account, contract, network)
 			if colErr != nil && len(colErr.Tokens) == 0 && collection == nil {
 				results[i] = CollectionResult{Error: colErr}
 				return
@@ -318,9 +319,9 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 				Collection: collection,
 				Error:      colErr,
 			}
-		}(i, contract)
+		})
 	}
-	wg.Wait()
+	_ = group.Wait() // Wait for all contracts to complete or context to cancel
 
 	meridianResults, err := h.fetchMeridianPayCollectibles(ctx, account, owner, network)
 	if err != nil {

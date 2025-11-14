@@ -67,8 +67,20 @@ func FetchCollection(
 		return nil, err
 	}
 
-	nameRes := <-nameCh
-	symbolRes := <-symbolCh
+	// Use context-aware channel reads to prevent blocking forever
+	var nameRes, symbolRes result
+
+	select {
+	case nameRes = <-nameCh:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	select {
+	case symbolRes = <-symbolCh:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 
 	if nameRes.err != nil {
 		return nil, nameRes.err
@@ -90,7 +102,6 @@ func fetchCollectible(
 	contractID string,
 	tokenId string,
 	network string,
-	pool pond.Pool,
 ) (*Collectible, error) {
 
 	id, err := utils.ScAddressFromString(contractID)
@@ -118,6 +129,14 @@ func fetchCollectible(
 	tokenURICh := make(chan result, 1)
 
 	go func() {
+		// Check if context is already cancelled before starting work
+		select {
+		case <-ctx.Done():
+			ownerCh <- result{xdr.ScVal{}, ctx.Err()}
+			return
+		default:
+		}
+
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "owner_of", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			ownerCh <- result{xdr.ScVal{}, err}
@@ -127,6 +146,14 @@ func fetchCollectible(
 	}()
 
 	go func() {
+		// Check if context is already cancelled before starting work
+		select {
+		case <-ctx.Done():
+			tokenURICh <- result{xdr.ScVal{}, ctx.Err()}
+			return
+		default:
+		}
+
 		res, err := rpc.SimulateInvocation(ctx, *id, accountId, "token_uri", []xdr.ScVal{scToken}, txnbuild.NewTimeout(300), network)
 		if err != nil {
 			tokenURICh <- result{xdr.ScVal{}, err}
@@ -135,8 +162,20 @@ func fetchCollectible(
 		tokenURICh <- result{*res, nil}
 	}()
 
-	ownerRes := <-ownerCh
-	tokenURIRes := <-tokenURICh
+	// Use context-aware channel reads to prevent blocking forever
+	var ownerRes, tokenURIRes result
+
+	select {
+	case ownerRes = <-ownerCh:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	select {
+	case tokenURIRes = <-tokenURICh:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 
 	if ownerRes.err != nil {
 		return nil, ownerRes.err
