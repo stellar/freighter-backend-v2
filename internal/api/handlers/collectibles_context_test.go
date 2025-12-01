@@ -13,7 +13,7 @@ import (
 
 func TestGetCollectibles_ContextCancellation(t *testing.T) {
 	mockRPC := &utils.MockRPCService{}
-	handler := NewCollectiblesHandler(mockRPC, "", "", 10)
+	handler := NewCollectiblesHandler(mockRPC, "", "", "", 10)
 
 	// Create a request with a very short timeout
 	payload := map[string]interface{}{
@@ -50,7 +50,7 @@ func TestGetCollectibles_ContextCancellation(t *testing.T) {
 
 func TestGetCollectibles_RespectTimeout(t *testing.T) {
 	mockRPC := &utils.MockRPCService{}
-	handler := NewCollectiblesHandler(mockRPC, "", "", 10)
+	handler := NewCollectiblesHandler(mockRPC, "", "", "", 10)
 
 	payload := map[string]interface{}{
 		"owner": "GDAFOKARX4VPZHPDBY5UTIRK32GUGCC7PQJ4SGQYGOEYNV2XSE5TY4KE",
