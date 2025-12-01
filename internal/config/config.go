@@ -18,6 +18,7 @@ type AppConfig struct {
 	ProtocolsConfigPath            string
 	MeridianPayTreasureHuntAddress string
 	MeridianPayTreasurePoapAddress string
+	MeridianPayStellarHouseAddress string
 }
 
 type RPCConfig struct {

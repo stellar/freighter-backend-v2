@@ -28,7 +28,7 @@ func TestGetCollectibles(t *testing.T) {
 			TokenURIOverride: server.URL,
 		}
 
-		handler := NewCollectiblesHandler(mockRPC, "", "", 10)
+		handler := NewCollectiblesHandler(mockRPC, "", "", "", 10)
 
 		body := `{
 			"owner": "GB7RQNG6ROYGLFKR3IDAABKI2Y2UAQKEO6BSJVR5IYS7UYQ743O7TOXE",
@@ -68,7 +68,7 @@ func TestFetchCollection(t *testing.T) {
 
 	t.Run("returns collection when collectibles exist", func(t *testing.T) {
 		mockRPC := &utils.MockRPCService{}
-		handler := NewCollectiblesHandler(mockRPC, "", "", 10)
+		handler := NewCollectiblesHandler(mockRPC, "", "", "", 10)
 
 		account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
 		contract := contractDetails{
@@ -85,7 +85,7 @@ func TestFetchCollection(t *testing.T) {
 
 	t.Run("returns collection-level error when all token fetches fail", func(t *testing.T) {
 		mockRPC := &utils.MockRPCService{}
-		handler := NewCollectiblesHandler(mockRPC, "", "", 10)
+		handler := NewCollectiblesHandler(mockRPC, "", "", "", 10)
 
 		account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
 		// Use invalid token IDs (non-numeric) that will fail to parse
@@ -118,7 +118,7 @@ func TestFetchCollection(t *testing.T) {
 
 	t.Run("returns collection-level error when token IDs is empty", func(t *testing.T) {
 		mockRPC := &utils.MockRPCService{}
-		handler := NewCollectiblesHandler(mockRPC, "", "", 10)
+		handler := NewCollectiblesHandler(mockRPC, "", "", "", 10)
 
 		account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
 		contract := contractDetails{
@@ -145,7 +145,7 @@ func TestFetchCollection(t *testing.T) {
 func TestFetchCollectibles(t *testing.T) {
 	t.Run("returns empty slice if no collectibles", func(t *testing.T) {
 		mockRPC := &utils.MockRPCService{}
-		handler := NewCollectiblesHandler(mockRPC, "", "", 10)
+		handler := NewCollectiblesHandler(mockRPC, "", "", "", 10)
 
 		account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
 		tokenIDs := []string{}
@@ -161,12 +161,12 @@ func TestFetchMeridianPayCollectibles(t *testing.T) {
 	mockRPC := &utils.MockRPCService{}
 	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
 
-	handler := NewCollectiblesHandler(mockRPC, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "CDSN4MICK7U5XOP4DE6OIZQCRMYO3UTQ5VYZV7ZA7H63OICZPBLXYRGJ", 10)
+	handler := NewCollectiblesHandler(mockRPC, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "CDSN4MICK7U5XOP4DE6OIZQCRMYO3UTQ5VYZV7ZA7H63OICZPBLXYRGJ", "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4", 10)
 
 	ctx := context.Background()
 	results, err := handler.fetchMeridianPayCollectibles(ctx, account, account.AccountID, "PUBLIC")
 	require.NoError(t, err)
-	require.Len(t, results, 2)
+	require.Len(t, results, 3)
 
 	// When mock returns empty token IDs, should return collection-level errors
 	for _, res := range results {
@@ -178,7 +178,7 @@ func TestFetchMeridianPayCollectibles(t *testing.T) {
 
 func TestGetCollectibles_WithMeridianPayAddresses(t *testing.T) {
 	mockRPC := &utils.MockRPCService{}
-	handler := NewCollectiblesHandler(mockRPC, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "CDSN4MICK7U5XOP4DE6OIZQCRMYO3UTQ5VYZV7ZA7H63OICZPBLXYRGJ", 10)
+	handler := NewCollectiblesHandler(mockRPC, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "CDSN4MICK7U5XOP4DE6OIZQCRMYO3UTQ5VYZV7ZA7H63OICZPBLXYRGJ", "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4", 10)
 
 	body := `{
 		"owner": "GB7RQNG6ROYGLFKR3IDAABKI2Y2UAQKEO6BSJVR5IYS7UYQ743O7TOXE",
@@ -204,9 +204,9 @@ func TestGetCollectibles_WithMeridianPayAddresses(t *testing.T) {
 	err = json.Unmarshal(rr.Body.Bytes(), &response)
 	require.NoError(t, err)
 
-	// Should have 2 results (Meridian Pay collections, with empty token IDs return errors)
+	// Should have 3 results (Meridian Pay collections, with empty token IDs return errors)
 	collections := response.Data.Collections
-	require.Len(t, collections, 2)
+	require.Len(t, collections, 3)
 
 	for _, col := range collections {
 		// Mock returns empty token IDs, so expect collection-level errors
@@ -218,7 +218,7 @@ func TestGetCollectibles_WithMeridianPayAddresses(t *testing.T) {
 
 func TestGetCollectibles_Empty(t *testing.T) {
 	mockRPC := &utils.MockRPCService{}
-	handler := NewCollectiblesHandler(mockRPC, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "CDSN4MICK7U5XOP4DE6OIZQCRMYO3UTQ5VYZV7ZA7H63OICZPBLXYRGJ", 10)
+	handler := NewCollectiblesHandler(mockRPC, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "CDSN4MICK7U5XOP4DE6OIZQCRMYO3UTQ5VYZV7ZA7H63OICZPBLXYRGJ", "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4", 10)
 
 	body := `{
 		"owner": "GB7RQNG6ROYGLFKR3IDAABKI2Y2UAQKEO6BSJVR5IYS7UYQ743O7TOXE",
@@ -240,7 +240,7 @@ func TestGetCollectibles_Empty(t *testing.T) {
 	require.NoError(t, err)
 
 	collections := response.Data.Collections
-	require.Len(t, collections, 2)
+	require.Len(t, collections, 3)
 
 	for _, col := range collections {
 		// Mock returns empty token IDs, so expect collection-level errors

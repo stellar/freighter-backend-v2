@@ -79,17 +79,19 @@ type CollectiblesHandler struct {
 	RpcService                     types.RPCService
 	MeridianPayTreasureHuntAddress string
 	MeridianPayTreasurePoapAddress string
+	MeridianPayStellarHouseAddress string
 	maxConcurrentRPCCalls          int
 	pool                           pond.Pool
 	tokenPool                      pond.Pool
 	rpcPool                        pond.Pool
 }
 
-func NewCollectiblesHandler(rpc types.RPCService, meridianPayTreasureHuntAddress string, meridianPayTreasurePoapAddress string, maxConcurrentRPCCalls int) *CollectiblesHandler {
+func NewCollectiblesHandler(rpc types.RPCService, meridianPayTreasureHuntAddress string, meridianPayTreasurePoapAddress string, meridianPayStellarHouseAddress string, maxConcurrentRPCCalls int) *CollectiblesHandler {
 	return &CollectiblesHandler{
 		RpcService:                     rpc,
 		MeridianPayTreasureHuntAddress: meridianPayTreasureHuntAddress,
 		MeridianPayTreasurePoapAddress: meridianPayTreasurePoapAddress,
+		MeridianPayStellarHouseAddress: meridianPayStellarHouseAddress,
 		maxConcurrentRPCCalls:          maxConcurrentRPCCalls,
 		pool:                           pond.NewPool(maxConcurrentRPCCalls),     // 10 contracts
 		tokenPool:                      pond.NewPool(maxConcurrentRPCCalls * 2), // 20 tokens
@@ -222,6 +224,9 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 	if h.MeridianPayTreasurePoapAddress != "" {
 		contracts = append(contracts, h.MeridianPayTreasurePoapAddress)
 	}
+	if h.MeridianPayStellarHouseAddress != "" {
+		contracts = append(contracts, h.MeridianPayStellarHouseAddress)
+	}
 
 	if len(contracts) == 0 {
 		return []CollectionResult{}, nil
@@ -322,6 +327,9 @@ func (h *CollectiblesHandler) GetCollectibles(w http.ResponseWriter, r *http.Req
 	}
 	if h.MeridianPayTreasurePoapAddress != "" {
 		skipContracts.Add(h.MeridianPayTreasurePoapAddress)
+	}
+	if h.MeridianPayStellarHouseAddress != "" {
+		skipContracts.Add(h.MeridianPayStellarHouseAddress)
 	}
 
 	// Filter user-requested contracts to exclude Meridian Pay addresses
