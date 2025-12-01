@@ -268,12 +268,12 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 				return
 			}
 
-			contractDetails := contractDetails{
+			contractData := contractDetails{
 				ID:       contract,
 				TokenIDs: tokenIds,
 			}
 
-			collection, colErr := h.fetchCollection(ctx, account, contractDetails, network)
+			collection, colErr := h.fetchCollection(ctx, account, contractData, network)
 			results[i] = CollectionResult{
 				Collection: collection,
 				Error:      colErr,
