@@ -51,8 +51,8 @@ func TestMockHTTPClient(t *testing.T) {
 	resp, err := client.Get("http://example.com")
 	require.NoError(t, err)
 	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			t.Fatalf("failed to close response body: %v", err)
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			t.Fatalf("failed to close response body: %v", closeErr)
 		}
 	}()
 
