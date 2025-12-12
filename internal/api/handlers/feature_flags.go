@@ -4,6 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
+)
+
+const (
+	FeatureFlagsContextTimeout = 5 * time.Second
 )
 
 type FeatureFlagsHandler struct{}
@@ -19,7 +24,7 @@ func NewFeatureFlagsHandler() *FeatureFlagsHandler {
 }
 
 func (h *FeatureFlagsHandler) GetFeatureFlags(w http.ResponseWriter, r *http.Request) error {
-	_, cancel := context.WithTimeout(r.Context(), HealthCheckContextTimeout)
+	_, cancel := context.WithTimeout(r.Context(), FeatureFlagsContextTimeout)
 	defer cancel()
 
 	platform := r.URL.Query().Get("platform")

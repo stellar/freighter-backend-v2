@@ -28,7 +28,7 @@ func (s *HealthTestSuite) SetupSuite() {
 func (s *HealthTestSuite) TestGetHealthReturns200StatusCode() {
 	t := s.T()
 
-	resp, err := http.Get(fmt.Sprintf("%s/api/v1/ping?network=PUBLIC", s.connectionString))
+	resp, err := http.Get(fmt.Sprintf("%s/api/v1/ping", s.connectionString))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 }

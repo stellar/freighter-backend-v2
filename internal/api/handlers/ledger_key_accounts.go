@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"time"
 
 	set "github.com/deckarep/golang-set/v2"
 
@@ -16,6 +17,10 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/types"
+)
+
+const (
+	LedgerKeyAccountContextTimeout = 5 * time.Second
 )
 
 type LedgerKeyAccountHandler struct {
@@ -126,7 +131,7 @@ func processLedgerKeyAccountsEntries(publicKeys []string, data []types.LedgerEnt
 // It returns a map of public keys to AccountInfo and a map of errors if some of the public keys are invalid
 // This is designed to be flexible so valid public keys will return results while invalid public keys will return errors
 func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r *http.Request) error {
-	contextWithTimeout, cancel := context.WithTimeout(r.Context(), HealthCheckContextTimeout)
+	contextWithTimeout, cancel := context.WithTimeout(r.Context(), LedgerKeyAccountContextTimeout)
 	defer cancel()
 	var ledgerKeyAccountList map[string]types.AccountInfo
 	var ledgerKeyAccountError LedgerKeyAccountError

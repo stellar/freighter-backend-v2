@@ -275,7 +275,7 @@ func createFreighterContainer(ctx context.Context, name string, tag string, test
 			"FUTURENET_RPC_URL":      "http://horizon-futurenet.stellar.org",
 		},
 		Networks:   []string{testNetwork.Name},
-		WaitingFor: wait.ForHTTP("/api/v1/ping?network=PUBLIC"),
+		WaitingFor: wait.ForHTTP("/api/v1/ping"),
 	}
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
