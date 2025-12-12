@@ -270,13 +270,12 @@ func createFreighterContainer(ctx context.Context, name string, tag string, test
 			"FREIGHTER_BACKEND_PORT": FreighterContainerPort,
 			"REDIS_HOST":             RedisContainerName,
 			"REDIS_PORT":             RedisContainerPort,
-			"RPC_URL":                "http://stellar-rpc:8000",
 			"PUBNET_RPC_URL":         "http://stellar-rpc:8000",
 			"TESTNET_RPC_URL":        "http://horizon-testnet.stellar.org",
 			"FUTURENET_RPC_URL":      "http://horizon-futurenet.stellar.org",
 		},
 		Networks:   []string{testNetwork.Name},
-		WaitingFor: wait.ForHTTP("/api/v1/ping"),
+		WaitingFor: wait.ForHTTP("/api/v1/ping?network=PUBLIC"),
 	}
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
