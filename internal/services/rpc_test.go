@@ -300,9 +300,7 @@ func TestRPCService_SimulateInvocation(t *testing.T) {
 		AccountID: account.Address(),
 		Sequence:  1,
 	}
-	var contractHash xdr.Hash
-	copy(contractHash[:], []byte("12345678901234567890123456789012"))
-
+	contractHash := xdr.ContractId{0x1, 0x2, 0x3}
 	contractId := xdr.ScAddress{
 		Type:       xdr.ScAddressTypeScAddressTypeContract,
 		ContractId: &contractHash,

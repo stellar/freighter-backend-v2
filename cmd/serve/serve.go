@@ -73,6 +73,12 @@ func (s *ServeCmd) Command() *cobra.Command {
 	// Coinbase Config
 	cmd.Flags().StringVar(&s.Cfg.CoinbaseConfig.CoinbaseAPIKey, "coinbase-api-key", "", "Coinbase API key")
 	cmd.Flags().StringVar(&s.Cfg.CoinbaseConfig.CoinbaseAPISecret, "coinbase-api-secret", "", "Coinbase API secret")
+
+	// Wallet Backend Config
+	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.PubnetUrl, "wallet-backend-pubnet-url", "", "Wallet backend pubnet URL")
+	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.TestnetUrl, "wallet-backend-testnet-url", "", "Wallet backend testnet URL")
+	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.PubnetSigningKey, "wallet-backend-pubnet-signing-key", "", "Wallet backend pubnet JWT signing key (Stellar secret key)")
+	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.TestnetSigningKey, "wallet-backend-testnet-signing-key", "", "Wallet backend testnet JWT signing key (Stellar secret key)")
 	return cmd
 }
 

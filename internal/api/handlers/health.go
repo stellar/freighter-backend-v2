@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	HealthCheckContextTimeout = 5 * time.Second
+	HealthCheckContextTimeout     = 5 * time.Second
 )
 
 // HealthResponse struct ensures the service status map is always present.
