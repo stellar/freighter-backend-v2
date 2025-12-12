@@ -61,7 +61,7 @@ func NewRPCService(rpcURL string, testnetRPCURL string, futurenetRPCURL string) 
 	}
 }
 
-func (r *rpcService) ConfigureNetworkClient(network string) *client.Client {
+func (r *rpcService) configureNetworkClient(network string) *client.Client {
 	switch network {
 	case types.TESTNET:
 		return r.testnetClient
@@ -78,7 +78,7 @@ func (r *rpcService) Name() string {
 }
 
 func (r *rpcService) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
-	networkclient := r.ConfigureNetworkClient(network)
+	networkclient := r.configureNetworkClient(network)
 	response, err := networkclient.GetHealth(ctx)
 	if err != nil {
 		return types.GetHealthResponse{Status: types.StatusError}, err
@@ -99,7 +99,7 @@ func (r *rpcService) SimulateTx(
 		return nil, fmt.Errorf("could not encode transaction: %w", err)
 	}
 
-	networkclient := r.ConfigureNetworkClient(network)
+	networkclient := r.configureNetworkClient(network)
 	resp, err := networkclient.SimulateTransaction(ctx, protocol.SimulateTransactionRequest{
 		Transaction: txeB64,
 	})
@@ -170,7 +170,7 @@ func (r *rpcService) SimulateInvocation(
 }
 
 func (r *rpcService) GetLedgerEntries(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
-	networkClient := r.ConfigureNetworkClient(network)
+	networkClient := r.configureNetworkClient(network)
 	response, err := networkClient.GetLedgerEntries(ctx, protocol.GetLedgerEntriesRequest{
 		Keys:   keys,
 		Format: "json",
