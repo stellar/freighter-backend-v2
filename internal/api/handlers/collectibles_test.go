@@ -8,10 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/txnbuild"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 func TestGetCollectibles(t *testing.T) {
@@ -65,7 +66,6 @@ func TestGetCollectibles(t *testing.T) {
 }
 
 func TestFetchCollection(t *testing.T) {
-
 	t.Run("returns collection when collectibles exist", func(t *testing.T) {
 		mockRPC := &utils.MockRPCService{}
 		handler := NewCollectiblesHandler(mockRPC, "", "", "", 10)

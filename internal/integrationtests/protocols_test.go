@@ -1,12 +1,11 @@
 package integrationtests
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-
-	"context"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -46,7 +45,7 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 		ctx,
 		"../../internal/integrationtests/infrastructure/testdata/protocols.json",
 		"/app/config/protocols.json",
-		0644,
+		0o644,
 	)
 	require.NoError(t, err)
 
@@ -86,7 +85,7 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns500StatusCodeForInvalidProto
 		ctx,
 		"../../internal/integrationtests/infrastructure/testdata/invalid_protocols.json",
 		"/app/config/protocols.json",
-		0644,
+		0o644,
 	)
 	require.NoError(t, err)
 
