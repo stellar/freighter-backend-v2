@@ -11,10 +11,11 @@ import (
 
 	set "github.com/deckarep/golang-set/v2"
 
+	"github.com/stellar/go/xdr"
+
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/types"
-	"github.com/stellar/go/xdr"
 )
 
 type LedgerKeyAccountHandler struct {

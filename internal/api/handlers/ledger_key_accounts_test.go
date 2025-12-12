@@ -7,10 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stellar/freighter-backend-v2/internal/types"
-	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 func TestGetLedgerKeyAccounts(t *testing.T) {
@@ -194,7 +195,6 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 		require.NotNil(t, e0)
 		assert.Equal(t, "asdff", e0.PublicKey)
 		assert.Equal(t, "base32 decode failed: illegal base32 data at input byte 5", e0.ErrorMessage)
-
 	})
 
 	t.Run("should dedupe public keys when requesting ledger key accounts", func(t *testing.T) {
@@ -355,5 +355,4 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 		require.Error(t, err)
 		assert.EqualError(t, err, "Invalid request - public keys are required: invalid JSON: EOF")
 	})
-
 }

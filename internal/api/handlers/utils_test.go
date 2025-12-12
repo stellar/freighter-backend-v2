@@ -9,9 +9,10 @@ import (
 	"testing"
 
 	"github.com/alitto/pond/v2"
-	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/txnbuild"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 func TestFetchCollection_Success(t *testing.T) {

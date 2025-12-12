@@ -106,7 +106,7 @@ func TestInitializeConfig(t *testing.T) {
 			if tc.configFileContent != "" {
 				tempDir := t.TempDir() // Creates a temp dir, cleaned up automatically
 				configFilePath := filepath.Join(tempDir, "testconfig.toml")
-				err := os.WriteFile(configFilePath, []byte(tc.configFileContent), 0600)
+				err := os.WriteFile(configFilePath, []byte(tc.configFileContent), 0o600)
 				require.NoError(t, err, "Failed to write temp config file")
 				// Add the config path flag ONLY if we created a file
 				tc.cliArgs = append(tc.cliArgs, "--config-path", configFilePath)

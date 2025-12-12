@@ -523,6 +523,5 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 
 		assert.Nil(t, response)
 		assert.Equal(t, "failed to get ledger entries: [-32603] Post \"http://localhost:8002\": dial tcp [::1]:8002: connect: connection refused", err.Error())
-
 	})
 }

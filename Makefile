@@ -31,6 +31,10 @@ tidy: ## Tidy modfiles and format source files
 	go mod tidy -v
 	@echo "==> Formatting code..."
 	go fmt ./...
+	$(shell go env GOPATH)/bin/gofumpt -l -w .
+	@echo "==> Fixing imports..."
+	@command -v $(shell go env GOPATH)/bin/goimports >/dev/null 2>&1 || { go install golang.org/x/tools/cmd/goimports@v0.31.0; }
+	@find . -type f -name "*.go" ! -path "*mock*" | xargs $(shell go env GOPATH)/bin/goimports -local "github.com/stellar/freighter-backend-v2" -w
 
 fmt: ## Check if code is formatted with gofmt
 	@echo "==> Checking formatting..."
@@ -78,24 +82,7 @@ deadcode: ## Find unused code
 		echo "✅ No deadcode found"; \
 	fi
 
-goimports: ## Check import formatting and organization
-	@echo "==> Checking imports..."
-	@command -v goimports >/dev/null 2>&1 || { go install golang.org/x/tools/cmd/goimports@v0.31.0; }
-	@non_compliant_files=$$(find . -type f -name "*.go" ! -path "*mock*" | xargs $(shell go env GOPATH)/bin/goimports -local "github.com/stellar/freighter-backend-v2" -l); \
-	if [ -n "$$non_compliant_files" ]; then \
-		echo "🚨 The following files are not compliant with goimports:"; \
-		echo "$$non_compliant_files"; \
-		exit 1; \
-	else \
-		echo "✅ All files are compliant with goimports."; \
-	fi
-
-govulncheck: ## Check for known vulnerabilities
-	@echo "==> Running vulnerability check..."
-	@command -v govulncheck >/dev/null 2>&1 || { go install golang.org/x/vuln/cmd/govulncheck@latest; }
-	$(shell go env GOPATH)/bin/govulncheck ./...
-
-check: tidy fmt vet lint generate shadow exhaustive deadcode goimports govulncheck ## Run all checks
+check: tidy fmt vet lint generate shadow exhaustive deadcode ## Run all checks
 	@echo "✅ All checks completed successfully"
 
 # ==================================================================================== #

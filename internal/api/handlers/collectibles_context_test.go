@@ -39,7 +39,6 @@ func TestGetCollectibles_ContextCancellation(t *testing.T) {
 
 	// Call handler - it should handle cancellation gracefully
 	err := handler.GetCollectibles(rr, req)
-
 	// Depending on timing, could get nil error if pool hasn't started or internal error
 	// The important thing is it doesn't panic or hang
 	if err != nil {
@@ -78,7 +77,6 @@ func TestGetCollectibles_RespectTimeout(t *testing.T) {
 
 	// Call handler - it should handle timeout gracefully
 	err := handler.GetCollectibles(rr, req)
-
 	// Should either get nil (fast path before timeout) or error
 	// The important verification is no goroutine leaks or hangs
 	if err != nil {

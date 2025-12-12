@@ -12,12 +12,13 @@ import (
 
 	"github.com/alitto/pond/v2"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/stellar/go/txnbuild"
+
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
-	"github.com/stellar/go/txnbuild"
 )
 
 const (
@@ -129,7 +130,6 @@ func (h *CollectiblesHandler) fetchCollection(
 	c contractDetails,
 	network string,
 ) (*Collection, *CollectionError) {
-
 	if !utils.IsValidContractID(c.ID) {
 		return nil, &CollectionError{
 			ErrorMessage:      fmt.Sprintf("invalid contract ID: %s", c.ID),
@@ -179,7 +179,6 @@ func (h *CollectiblesHandler) fetchCollectibles(
 	tokenIDs []string,
 	network string,
 ) ([]Collectible, []TokenError) {
-
 	var (
 		results   []Collectible
 		tokenErrs []TokenError

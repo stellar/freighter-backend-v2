@@ -7,13 +7,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/stellar/freighter-backend-v2/internal/types"
-	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/strkey"
 	"github.com/stellar/go/txnbuild"
 	"github.com/stellar/go/xdr"
 	"github.com/stellar/stellar-rpc/client"
 	"github.com/stellar/stellar-rpc/protocol"
+
+	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 const (
@@ -174,7 +175,6 @@ func (r *rpcService) GetLedgerEntries(ctx context.Context, keys []string, networ
 		Keys:   keys,
 		Format: "json",
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ledger entries: %w", err)
 	}
