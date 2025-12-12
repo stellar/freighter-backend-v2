@@ -8,10 +8,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/stellar/go/strkey"
+
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/types"
-	"github.com/stellar/go/strkey"
 )
 
 const (

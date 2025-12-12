@@ -3,10 +3,10 @@ package utils
 import (
 	"context"
 
+	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/go/txnbuild"
 	"github.com/stellar/go/xdr"
 	"github.com/stellar/stellar-rpc/client"
-	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
 type MockRPCService struct {
