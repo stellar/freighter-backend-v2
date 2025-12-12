@@ -15,12 +15,15 @@ import (
 
 const (
 	HealthCheckContextTimeout = 5 * time.Second
+	StatusHealthy             = "healthy"
+	StatusDegraded            = "degraded"
 )
 
-// HealthResponse struct ensures the service status map is always present.
-// The omitempty tag is removed for service_status if it should always be present.
+// HealthResponse includes overall status and per-service status.
+// Status will be "healthy" if all services are healthy, "degraded" otherwise.
 type HealthResponse struct {
-	ServiceStatus map[string]string `json:"service_status"` // Removed omitempty
+	Status        string            `json:"status"`
+	ServiceStatus map[string]string `json:"service_status"`
 }
 
 type HealthHandler struct {
@@ -82,17 +85,21 @@ func (h *HealthHandler) CheckHealth(w http.ResponseWriter, r *http.Request) erro
 		serviceStatus[result.serviceName] = result.response.Status
 	}
 
+	// Determine overall status for response
+	status := StatusHealthy
+	if !overallHealthy {
+		status = StatusDegraded
+		logger.Warn("Health check degraded", "service_status", serviceStatus)
+	}
+
 	resp := HealthResponse{
+		Status:        status,
 		ServiceStatus: serviceStatus,
 	}
 
-	// Determine status code based on health
-	statusCode := http.StatusOK
-	if !overallHealthy {
-		statusCode = http.StatusServiceUnavailable
-	}
-
-	if err := response.JSON(w, statusCode, resp); err != nil {
+	// Always return 200 for readiness probe (pod can serve some endpoints)
+	// Use status field and logging for monitoring degraded state
+	if err := response.JSON(w, http.StatusOK, resp); err != nil {
 		return httperror.InternalServerError("error writing health check response", err)
 	}
 	return nil

@@ -40,10 +40,11 @@ func TestHealthHandler_CheckHealth(t *testing.T) {
 		var response HealthResponse
 		err = json.Unmarshal(rr.Body.Bytes(), &response)
 		require.NoError(t, err)
+		assert.Equal(t, StatusHealthy, response.Status)
 		assert.Equal(t, "healthy", response.ServiceStatus["rpc"])
 	})
 
-	t.Run("should return 503 when RPC returns error", func(t *testing.T) {
+	t.Run("should return 200 with degraded status when RPC returns error", func(t *testing.T) {
 		t.Parallel()
 		mockRPC := &MockRPCService{
 			HealthError: errors.New("rpc connection failed"),
@@ -59,17 +60,18 @@ func TestHealthHandler_CheckHealth(t *testing.T) {
 		err := handler.CheckHealth(rr, req)
 		require.NoError(t, err)
 
-		// Check status code
-		assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
+		// Check status code - always 200 for readiness
+		assert.Equal(t, http.StatusOK, rr.Code)
 
-		// Parse and check response body
+		// Parse and check response body - status should be degraded
 		var response HealthResponse
 		err = json.Unmarshal(rr.Body.Bytes(), &response)
 		require.NoError(t, err)
+		assert.Equal(t, StatusDegraded, response.Status)
 		assert.Equal(t, types.StatusError, response.ServiceStatus["rpc"])
 	})
 
-	t.Run("should return 503 when RPC status is not healthy", func(t *testing.T) {
+	t.Run("should return 200 with degraded status when RPC status is not healthy", func(t *testing.T) {
 		t.Parallel()
 		mockRPC := &MockRPCService{
 			HealthResponse: types.GetHealthResponse{
@@ -84,13 +86,14 @@ func TestHealthHandler_CheckHealth(t *testing.T) {
 		err := handler.CheckHealth(rr, req)
 		require.NoError(t, err)
 
-		// Check status code
-		assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
+		// Check status code - always 200 for readiness
+		assert.Equal(t, http.StatusOK, rr.Code)
 
-		// Parse and check response body
+		// Parse and check response body - status should be degraded
 		var response HealthResponse
 		err = json.Unmarshal(rr.Body.Bytes(), &response)
 		require.NoError(t, err)
+		assert.Equal(t, StatusDegraded, response.Status)
 		assert.Equal(t, "unhealthy", response.ServiceStatus["rpc"])
 	})
 
