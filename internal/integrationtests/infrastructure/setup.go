@@ -137,12 +137,12 @@ func createRPCContainer(ctx context.Context, testNetwork *testcontainers.DockerN
 			{
 				HostFilePath:      filepath.Join(dir, "config", "captive-core.cfg"),
 				ContainerFilePath: "/config/captive-core.cfg",
-				FileMode:          0644,
+				FileMode:          0o644,
 			},
 			{
 				HostFilePath:      filepath.Join(dir, "config", "stellar_rpc_config.toml"),
 				ContainerFilePath: "/config/stellar_rpc_config.toml",
-				FileMode:          0644,
+				FileMode:          0o644,
 			},
 		},
 		Cmd:          []string{"--config-path", "/config/stellar_rpc_config.toml"},
@@ -213,12 +213,12 @@ func createStellarCoreContainer(ctx context.Context, testNetwork *testcontainers
 			{
 				HostFilePath:      filepath.Join(dir, "config", "standalone-core.cfg"),
 				ContainerFilePath: "/stellar-core.cfg",
-				FileMode:          0644,
+				FileMode:          0o644,
 			},
 			{
 				HostFilePath:      filepath.Join(dir, "config", "core-start.sh"),
 				ContainerFilePath: "/start",
-				FileMode:          0755,
+				FileMode:          0o755,
 			},
 		},
 		Entrypoint: []string{"/bin/bash"},
@@ -270,7 +270,6 @@ func createFreighterContainer(ctx context.Context, name string, tag string, test
 			"FREIGHTER_BACKEND_PORT": FreighterContainerPort,
 			"REDIS_HOST":             RedisContainerName,
 			"REDIS_PORT":             RedisContainerPort,
-			"RPC_URL":                "http://stellar-rpc:8000",
 			"PUBNET_RPC_URL":         "http://stellar-rpc:8000",
 			"TESTNET_RPC_URL":        "http://horizon-testnet.stellar.org",
 			"FUTURENET_RPC_URL":      "http://horizon-futurenet.stellar.org",

@@ -1,80 +1,36 @@
 package handlers
 
 import (
-	"context"
-	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
-	"github.com/stellar/freighter-backend-v2/internal/logger"
-	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
 const (
-	HealthCheckContextTimeout = 5 * time.Second
+	StatusHealthy = "healthy"
 )
 
-// HealthResponse struct ensures the service status map is always present.
-// The omitempty tag is removed for service_status if it should always be present.
+// HealthResponse contains the health status of the service.
 type HealthResponse struct {
-	ServiceStatus map[string]string `json:"service_status"` // Removed omitempty
+	Status string `json:"status"`
 }
 
-type HealthHandler struct {
-	services []types.Service
+type HealthHandler struct{}
+
+func NewHealthHandler() *HealthHandler {
+	return &HealthHandler{}
 }
 
-func NewHealthHandler(services ...types.Service) *HealthHandler {
-	return &HealthHandler{
-		services: services,
-	}
-}
-
-// CheckHealth handles health check requests, including RPC service health.
-// When used with buffered response middleware, this allows safe error handling
-// even after writing the response body.
+// CheckHealth handles health check requests.
 func (h *HealthHandler) CheckHealth(w http.ResponseWriter, r *http.Request) error {
-	ctx, cancel := context.WithTimeout(r.Context(), HealthCheckContextTimeout)
-	defer cancel()
-
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-	serviceStatus := make(map[string]string)
-	overallHealthy := true
-	network := r.URL.Query().Get("network")
-
-	if network != types.PUBLIC && network != types.TESTNET && network != types.FUTURENET {
-		// After clients have updated to use the network query param, we can remove this and return the error
-		network = types.PUBLIC
-		//return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
-	}
-	for _, service := range h.services {
-		serviceName := service.Name()
-		response, err := service.GetHealth(ctx, network)
-		if err != nil {
-			errStr := fmt.Sprintf("health check for service '%s' failed: %v", serviceName, err)
-			logger.ErrorWithContext(ctx, errStr)
-			overallHealthy = false
-		}
-
-		if response.Status != types.StatusHealthy {
-			overallHealthy = false
-		}
-		serviceStatus[serviceName] = response.Status
-	}
 
 	resp := HealthResponse{
-		ServiceStatus: serviceStatus,
+		Status: StatusHealthy,
 	}
 
-	// Determine status code based on health
-	statusCode := http.StatusOK
-	if !overallHealthy {
-		statusCode = http.StatusServiceUnavailable
-	}
-
-	if err := response.JSON(w, statusCode, resp); err != nil {
+	if err := response.JSON(w, http.StatusOK, resp); err != nil {
 		return httperror.InternalServerError("error writing health check response", err)
 	}
 	return nil

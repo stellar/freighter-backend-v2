@@ -5,10 +5,11 @@ import (
 	"strconv"
 
 	"github.com/alitto/pond/v2"
-	"github.com/stellar/freighter-backend-v2/internal/types"
-	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/go/txnbuild"
 	"github.com/stellar/go/xdr"
+
+	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 type collection struct {
@@ -105,7 +106,6 @@ func fetchCollectible(
 	network string,
 	rpcPool pond.Pool,
 ) (*Collectible, error) {
-
 	id, err := utils.ScAddressFromString(contractID)
 	if err != nil {
 		return nil, err
@@ -193,7 +193,6 @@ func fetchOwnerTokens(
 	owner string,
 	network string,
 ) ([]string, error) {
-
 	id, err := utils.ScAddressFromString(contractID)
 	if err != nil {
 		return nil, err

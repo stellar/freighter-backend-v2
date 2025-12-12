@@ -5,7 +5,6 @@ import (
 
 	"github.com/stellar/go/txnbuild"
 	"github.com/stellar/go/xdr"
-	"github.com/stellar/stellar-rpc/client"
 )
 
 const (
@@ -27,7 +26,6 @@ type Service interface {
 
 type RPCService interface {
 	Service
-	ConfigureNetworkClient(network string) *client.Client
 	SimulateTx(ctx context.Context, tx *txnbuild.Transaction, network string) (SimulateTransactionResponse, error)
 	SimulateInvocation(
 		ctx context.Context,
