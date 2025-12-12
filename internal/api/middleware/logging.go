@@ -31,12 +31,18 @@ func Logging() Middleware {
 					"error", err,
 					"bodySize", len(bw.Body()))
 			} else if status >= 400 {
+				body := bw.Body()
+				bodyStr := string(body)
+				if len(bodyStr) > 1024 {
+					bodyStr = bodyStr[:1024] + "... (truncated)"
+				}
 				logger.ErrorWithContext(r.Context(), "Request completed with error",
 					"status", status,
 					"method", r.Method,
 					"url", r.URL.String(),
 					"duration", duration,
-					"bodySize", len(bw.Body()))
+					"bodySize", len(body),
+					"body", bodyStr)
 			} else {
 				logger.InfoWithContext(r.Context(), "Request completed",
 					"status", status,
