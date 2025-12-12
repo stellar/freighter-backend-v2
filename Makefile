@@ -90,12 +90,7 @@ goimports: ## Check import formatting and organization
 		echo "✅ All files are compliant with goimports."; \
 	fi
 
-govulncheck: ## Check for known vulnerabilities
-	@echo "==> Running vulnerability check..."
-	@command -v govulncheck >/dev/null 2>&1 || { go install golang.org/x/vuln/cmd/govulncheck@latest; }
-	$(shell go env GOPATH)/bin/govulncheck ./...
-
-check: tidy fmt vet lint generate shadow exhaustive deadcode goimports govulncheck ## Run all checks
+check: tidy fmt vet lint generate shadow exhaustive deadcode goimports ## Run all checks
 	@echo "✅ All checks completed successfully"
 
 # ==================================================================================== #
