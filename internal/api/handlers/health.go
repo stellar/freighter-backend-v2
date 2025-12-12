@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -45,23 +46,40 @@ func (h *HealthHandler) CheckHealth(w http.ResponseWriter, r *http.Request) erro
 	network := r.URL.Query().Get("network")
 
 	if network != types.PUBLIC && network != types.TESTNET && network != types.FUTURENET {
-		// After clients have updated to use the network query param, we can remove this and return the error
-		network = types.PUBLIC
-		// return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
+		return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
 	}
+
+	type healthStatus struct {
+		serviceName string
+		response    types.GetHealthResponse
+		error       error
+	}
+
+	healthCheckChan := make(chan healthStatus, len(h.services))
 	for _, service := range h.services {
-		serviceName := service.Name()
-		response, err := service.GetHealth(ctx, network)
-		if err != nil {
-			errStr := fmt.Sprintf("health check for service '%s' failed: %v", serviceName, err)
+		go func(service types.Service) {
+			response, err := service.GetHealth(ctx, network)
+
+			healthCheckChan <- healthStatus{
+				serviceName: service.Name(),
+				response:    response,
+				error:       err,
+			}
+		}(service)
+	}
+
+	for range h.services {
+		result := <-healthCheckChan
+		if result.error != nil {
+			errStr := fmt.Sprintf("health check for service '%s' failed: %v", result.serviceName, result.error)
 			logger.ErrorWithContext(ctx, errStr)
 			overallHealthy = false
 		}
 
-		if response.Status != types.StatusHealthy {
+		if result.response.Status != types.StatusHealthy {
 			overallHealthy = false
 		}
-		serviceStatus[serviceName] = response.Status
+		serviceStatus[result.serviceName] = result.response.Status
 	}
 
 	resp := HealthResponse{
