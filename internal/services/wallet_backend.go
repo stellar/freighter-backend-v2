@@ -6,9 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/wallet-backend/pkg/wbclient"
 	"github.com/stellar/wallet-backend/pkg/wbclient/auth"
+
+	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
 const (
@@ -74,11 +75,28 @@ func (w *walletBackendService) Name() string {
 }
 
 func (w *walletBackendService) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
-	// Wallet backend doesn't have a health endpoint, so we just check if the client is configured
 	client := w.configureNetworkClient(network)
 	if client == nil {
 		return types.GetHealthResponse{Status: types.StatusError}, fmt.Errorf("wallet backend client not configured for network: %s", network)
 	}
+
+	// Make a GET request to the /health endpoint
+	healthURL := client.BaseURL + "/health"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+	if err != nil {
+		return types.GetHealthResponse{Status: types.StatusError}, fmt.Errorf("creating health request: %w", err)
+	}
+
+	resp, err := w.httpClient.Do(req)
+	if err != nil {
+		return types.GetHealthResponse{Status: types.StatusError}, fmt.Errorf("making health request: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode != http.StatusOK {
+		return types.GetHealthResponse{Status: types.StatusError}, fmt.Errorf("health endpoint returned status %d", resp.StatusCode)
+	}
+
 	return types.GetHealthResponse{Status: types.StatusHealthy}, nil
 }
 

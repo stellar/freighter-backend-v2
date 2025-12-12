@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	HealthCheckContextTimeout     = 5 * time.Second
+	HealthCheckContextTimeout = 5 * time.Second
 )
 
 // HealthResponse struct ensures the service status map is always present.
@@ -47,7 +47,7 @@ func (h *HealthHandler) CheckHealth(w http.ResponseWriter, r *http.Request) erro
 	if network != types.PUBLIC && network != types.TESTNET && network != types.FUTURENET {
 		// After clients have updated to use the network query param, we can remove this and return the error
 		network = types.PUBLIC
-		//return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
+		// return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
 	}
 	for _, service := range h.services {
 		serviceName := service.Name()
