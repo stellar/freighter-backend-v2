@@ -12,7 +12,7 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
 	github.com/stellar/go v0.0.0-20250903085211-00c0b06cd7cc
-	github.com/stellar/stellar-rpc v0.9.6-0.20250618231249-2d3e8ff69365
+	github.com/stellar/go-stellar-sdk v0.1.0
 	github.com/stellar/wallet-backend v0.0.0-20251211214243-a8047eccd6fe
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.37.0

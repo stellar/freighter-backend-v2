@@ -12,7 +12,7 @@ import (
 
 	"github.com/alitto/pond/v2"
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/stellar/go/txnbuild"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
