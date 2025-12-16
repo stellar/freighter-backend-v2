@@ -38,3 +38,8 @@ type RPCService interface {
 	) (SimulateTransactionResponse, error)
 	GetLedgerEntries(ctx context.Context, keys []string, network string) ([]LedgerEntryMap, error)
 }
+
+type WalletBackendService interface {
+	Service
+	GetBalancesByAccountAddresses(ctx context.Context, addresses []string, network string) (interface{}, error)
+}

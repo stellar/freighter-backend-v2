@@ -1,13 +1,14 @@
 package config
 
 type Config struct {
-	AppConfig      AppConfig
-	RpcConfig      RPCConfig
-	RedisConfig    RedisConfig
-	HorizonConfig  HorizonConfig
-	PricesConfig   PricesConfig
-	BlockaidConfig BlockaidConfig
-	CoinbaseConfig CoinbaseConfig
+	AppConfig           AppConfig
+	RpcConfig           RPCConfig
+	RedisConfig         RedisConfig
+	HorizonConfig       HorizonConfig
+	PricesConfig        PricesConfig
+	BlockaidConfig      BlockaidConfig
+	CoinbaseConfig      CoinbaseConfig
+	WalletBackendConfig WalletBackendConfig
 }
 
 type AppConfig struct {
@@ -19,6 +20,8 @@ type AppConfig struct {
 	MeridianPayTreasureHuntAddress string
 	MeridianPayTreasurePoapAddress string
 	MeridianPayStellarHouseAddress string
+	MaxRequestBodySize             int64
+	MaxBalanceAddresses            int
 }
 
 type RPCConfig struct {
@@ -62,4 +65,11 @@ type BlockaidConfig struct {
 type CoinbaseConfig struct {
 	CoinbaseAPIKey    string
 	CoinbaseAPISecret string
+}
+
+type WalletBackendConfig struct {
+	PubnetUrl         string
+	TestnetUrl        string
+	PubnetSigningKey  string
+	TestnetSigningKey string
 }

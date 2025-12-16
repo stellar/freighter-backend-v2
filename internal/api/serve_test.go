@@ -38,7 +38,7 @@ func TestApiServer_initHandlers(t *testing.T) {
 }
 
 func TestApiServer_initMiddleware(t *testing.T) {
-	s := &ApiServer{}
+	s := &ApiServer{cfg: &config.Config{}}
 	mux := http.NewServeMux()
 	h := s.initMiddleware(mux)
 	require.NotNil(t, h)

@@ -52,12 +52,12 @@ func ScAddressFromContractString(address string) (*xdr.ScAddress, error) {
 		return nil, fmt.Errorf("decoded contract ID should be 32 bytes, got %d", len(raw))
 	}
 
-	var hash xdr.Hash
-	copy(hash[:], raw)
+	var contractId xdr.ContractId
+	copy(contractId[:], raw)
 
 	return &xdr.ScAddress{
 		Type:       xdr.ScAddressTypeScAddressTypeContract,
-		ContractId: &hash,
+		ContractId: &contractId,
 	}, nil
 }
 

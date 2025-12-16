@@ -12,6 +12,10 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
+func isValidNetwork(network string) bool {
+	return network == types.PUBLIC || network == types.TESTNET || network == types.FUTURENET
+}
+
 type collection struct {
 	Name   string `json:"name"`
 	Symbol string `json:"symbol"`

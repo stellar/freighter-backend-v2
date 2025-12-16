@@ -44,6 +44,8 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.MeridianPayTreasureHuntAddress, "meridian-pay-treasure-hunt-address", "", "The Meridian Pay Treasure Hunt collection address")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.MeridianPayTreasurePoapAddress, "meridian-pay-poap-address", "", "The Meridian Pay Poap collection address")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.MeridianPayStellarHouseAddress, "meridian-pay-stellar-house-address", "", "The Meridian Pay Stellar House collection address")
+	cmd.Flags().Int64Var(&s.Cfg.AppConfig.MaxRequestBodySize, "max-request-body-size", 1<<20, "Maximum request body size in bytes (default: 1MB)")
+	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxBalanceAddresses, "max-balance-addresses", 100, "Maximum number of addresses allowed in account balances request")
 
 	// RPC Config
 	cmd.Flags().StringVar(&s.Cfg.RpcConfig.PubnetRpcUrl, "pubnet-rpc-url", "", "The Pubnet URL of the Pubnet RPC instance")
@@ -72,6 +74,12 @@ func (s *ServeCmd) Command() *cobra.Command {
 	// Coinbase Config
 	cmd.Flags().StringVar(&s.Cfg.CoinbaseConfig.CoinbaseAPIKey, "coinbase-api-key", "", "Coinbase API key")
 	cmd.Flags().StringVar(&s.Cfg.CoinbaseConfig.CoinbaseAPISecret, "coinbase-api-secret", "", "Coinbase API secret")
+
+	// Wallet Backend Config
+	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.PubnetUrl, "wallet-backend-pubnet-url", "", "Wallet backend pubnet URL")
+	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.TestnetUrl, "wallet-backend-testnet-url", "", "Wallet backend testnet URL")
+	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.PubnetSigningKey, "wallet-backend-pubnet-signing-key", "", "Wallet backend pubnet JWT signing key (Stellar secret key)")
+	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.TestnetSigningKey, "wallet-backend-testnet-signing-key", "", "Wallet backend testnet JWT signing key (Stellar secret key)")
 	return cmd
 }
 

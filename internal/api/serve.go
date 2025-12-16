@@ -26,9 +26,10 @@ const (
 )
 
 type ApiServer struct {
-	cfg        *config.Config
-	redis      *store.RedisStore
-	rpcService types.RPCService
+	cfg                  *config.Config
+	redis                *store.RedisStore
+	rpcService           types.RPCService
+	walletBackendService types.WalletBackendService
 }
 
 func NewApiServer(cfg *config.Config) *ApiServer {
@@ -50,6 +51,20 @@ func (s *ApiServer) Start() error {
 func (s *ApiServer) initServices() error {
 	s.redis = store.NewRedisStore(s.cfg.RedisConfig.Host, s.cfg.RedisConfig.Port, s.cfg.RedisConfig.Password)
 	s.rpcService = services.NewRPCService(s.cfg.RpcConfig.PubnetRpcUrl, s.cfg.RpcConfig.TestnetRpcUrl, s.cfg.RpcConfig.FuturenetRpcUrl)
+
+	// Initialize wallet backend service if configured
+	walletBackendService, err := services.NewWalletBackendService(
+		s.cfg.WalletBackendConfig.PubnetUrl,
+		s.cfg.WalletBackendConfig.TestnetUrl,
+		s.cfg.WalletBackendConfig.PubnetSigningKey,
+		s.cfg.WalletBackendConfig.TestnetSigningKey,
+	)
+	if err != nil {
+		logger.Error("Failed to initialize wallet backend service", "error", err)
+		return err
+	}
+	s.walletBackendService = walletBackendService
+
 	return nil
 }
 
@@ -72,6 +87,9 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 	featureFlagsHandler := handlers.NewFeatureFlagsHandler()
 	mux.HandleFunc("GET /api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags))
 
+	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
+	mux.HandleFunc("POST /api/v1/account-balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances))
+
 	return mux
 }
 
@@ -79,6 +97,7 @@ func (s *ApiServer) initMiddleware(mux *http.ServeMux) http.Handler {
 	middlewares := []middleware.Middleware{
 		middleware.Recover(),
 		middleware.ResponseHeader(),
+		middleware.BodySizeLimit(s.cfg.AppConfig.MaxRequestBodySize),
 		middleware.Logging(),
 	}
 
