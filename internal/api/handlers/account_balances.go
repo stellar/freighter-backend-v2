@@ -12,6 +12,7 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
+	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
@@ -72,7 +73,8 @@ func (h *AccountBalancesHandler) GetAccountBalances(w http.ResponseWriter, r *ht
 
 	balances, err := h.WalletBackendService.GetBalancesByAccountAddresses(contextWithTimeout, req.Addresses, network)
 	if err != nil {
-		return httperror.InternalServerError(fmt.Sprintf("Failed to get account balances: %s", err.Error()), err)
+		logger.ErrorWithContext(r.Context(), "getting account balances from wallet backend", "error", err)
+		return httperror.InternalServerError("Failed to get account balances", err)
 	}
 
 	responseData := HttpResponse{
