@@ -23,11 +23,13 @@ const (
 
 type AccountBalancesHandler struct {
 	WalletBackendService types.WalletBackendService
+	MaxAddresses         int
 }
 
-func NewAccountBalancesHandler(walletBackendService types.WalletBackendService) *AccountBalancesHandler {
+func NewAccountBalancesHandler(walletBackendService types.WalletBackendService, maxAddresses int) *AccountBalancesHandler {
 	return &AccountBalancesHandler{
 		WalletBackendService: walletBackendService,
+		MaxAddresses:         maxAddresses,
 	}
 }
 
@@ -35,7 +37,7 @@ type AccountBalancesRequest struct {
 	Addresses []string `json:"addresses"`
 }
 
-func validateAccountBalancesRequest(r *http.Request) (*AccountBalancesRequest, *httperror.HttpError) {
+func validateAccountBalancesRequest(r *http.Request, maxAddresses int) (*AccountBalancesRequest, *httperror.HttpError) {
 	var req AccountBalancesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		if middleware.IsMaxBytesError(err) {
@@ -46,6 +48,13 @@ func validateAccountBalancesRequest(r *http.Request) (*AccountBalancesRequest, *
 
 	if len(req.Addresses) == 0 {
 		return nil, httperror.BadRequest("addresses array cannot be empty", errors.New("addresses array cannot be empty"))
+	}
+
+	if maxAddresses > 0 && len(req.Addresses) > maxAddresses {
+		return nil, httperror.BadRequest(
+			fmt.Sprintf("too many addresses: maximum is %d, got %d", maxAddresses, len(req.Addresses)),
+			fmt.Errorf("too many addresses: maximum is %d, got %d", maxAddresses, len(req.Addresses)),
+		)
 	}
 
 	// Validate each address is a valid Stellar address
@@ -70,7 +79,7 @@ func (h *AccountBalancesHandler) GetAccountBalances(w http.ResponseWriter, r *ht
 		return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
 	}
 
-	req, validationErr := validateAccountBalancesRequest(r)
+	req, validationErr := validateAccountBalancesRequest(r, h.MaxAddresses)
 	if validationErr != nil {
 		return validationErr
 	}

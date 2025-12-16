@@ -20,6 +20,8 @@ type AppConfig struct {
 	MeridianPayTreasureHuntAddress string
 	MeridianPayTreasurePoapAddress string
 	MeridianPayStellarHouseAddress string
+	MaxRequestBodySize             int64
+	MaxBalanceAddresses            int
 }
 
 type RPCConfig struct {

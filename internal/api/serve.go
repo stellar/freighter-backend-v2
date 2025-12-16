@@ -87,7 +87,7 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 	featureFlagsHandler := handlers.NewFeatureFlagsHandler()
 	mux.HandleFunc("GET /api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags))
 
-	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService)
+	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
 	mux.HandleFunc("POST /api/v1/account-balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances))
 
 	return mux
@@ -97,7 +97,7 @@ func (s *ApiServer) initMiddleware(mux *http.ServeMux) http.Handler {
 	middlewares := []middleware.Middleware{
 		middleware.Recover(),
 		middleware.ResponseHeader(),
-		middleware.BodySizeLimit(0), // Uses default 1MB limit
+		middleware.BodySizeLimit(s.cfg.AppConfig.MaxRequestBodySize),
 		middleware.Logging(),
 	}
 
