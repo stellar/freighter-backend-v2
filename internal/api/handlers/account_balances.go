@@ -47,14 +47,13 @@ func validateAccountBalancesRequest(r *http.Request, maxAddresses int) (*Account
 	}
 
 	if len(req.Addresses) == 0 {
-		return nil, httperror.BadRequest("addresses array cannot be empty", errors.New("addresses array cannot be empty"))
+		errStr := "addresses array cannot be empty"
+		return nil, httperror.BadRequest(errStr, errors.New(errStr))
 	}
 
 	if maxAddresses > 0 && len(req.Addresses) > maxAddresses {
-		return nil, httperror.BadRequest(
-			fmt.Sprintf("too many addresses: maximum is %d, got %d", maxAddresses, len(req.Addresses)),
-			fmt.Errorf("too many addresses: maximum is %d, got %d", maxAddresses, len(req.Addresses)),
-		)
+		errStr := fmt.Sprintf("too many addresses: maximum is %d, got %d", maxAddresses, len(req.Addresses))
+		return nil, httperror.BadRequest(errStr, errors.New(errStr))
 	}
 
 	// Validate each address is a valid Stellar address
