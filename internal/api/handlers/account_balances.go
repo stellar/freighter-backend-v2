@@ -62,8 +62,8 @@ func (h *AccountBalancesHandler) GetAccountBalances(w http.ResponseWriter, r *ht
 	queryParams := r.URL.Query()
 	network := queryParams.Get("network")
 
-	if network != types.PUBLIC && network != types.TESTNET {
-		return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s or %s", types.PUBLIC, types.TESTNET), errors.New("invalid network"))
+	if !isValidNetwork(network) {
+		return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
 	}
 
 	req, err := validateAccountBalancesRequest(r)

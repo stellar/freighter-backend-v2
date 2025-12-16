@@ -116,7 +116,7 @@ func TestGetAccountBalances(t *testing.T) {
 
 		err := handler.GetAccountBalances(rr, req)
 		require.Error(t, err)
-		assert.EqualError(t, err, "invalid network: network must be PUBLIC or TESTNET")
+		assert.EqualError(t, err, "invalid network: network must be PUBLIC, TESTNET or FUTURENET")
 	})
 
 	t.Run("should return error for empty addresses array", func(t *testing.T) {
