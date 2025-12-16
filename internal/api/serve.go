@@ -97,6 +97,7 @@ func (s *ApiServer) initMiddleware(mux *http.ServeMux) http.Handler {
 	middlewares := []middleware.Middleware{
 		middleware.Recover(),
 		middleware.ResponseHeader(),
+		middleware.BodySizeLimit(0), // Uses default 1MB limit
 		middleware.Logging(),
 	}
 

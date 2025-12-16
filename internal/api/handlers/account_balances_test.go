@@ -133,7 +133,7 @@ func TestGetAccountBalances(t *testing.T) {
 
 		err := handler.GetAccountBalances(rr, req)
 		require.Error(t, err)
-		assert.EqualError(t, err, "Invalid request: addresses array cannot be empty")
+		assert.EqualError(t, err, "addresses array cannot be empty")
 	})
 
 	t.Run("should return error for invalid JSON", func(t *testing.T) {
@@ -148,7 +148,7 @@ func TestGetAccountBalances(t *testing.T) {
 
 		err := handler.GetAccountBalances(rr, req)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Invalid request: invalid JSON")
+		assert.Contains(t, err.Error(), "invalid JSON")
 	})
 
 	t.Run("should return error for invalid Stellar address", func(t *testing.T) {
@@ -165,7 +165,7 @@ func TestGetAccountBalances(t *testing.T) {
 
 		err := handler.GetAccountBalances(rr, req)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Invalid request: invalid Stellar address")
+		assert.Contains(t, err.Error(), "invalid Stellar address")
 	})
 
 	t.Run("should return error when wallet backend service fails", func(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
+	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
@@ -34,20 +35,23 @@ type AccountBalancesRequest struct {
 	Addresses []string `json:"addresses"`
 }
 
-func validateAccountBalancesRequest(r *http.Request) (*AccountBalancesRequest, error) {
+func validateAccountBalancesRequest(r *http.Request) (*AccountBalancesRequest, *httperror.HttpError) {
 	var req AccountBalancesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return nil, fmt.Errorf("invalid JSON: %w", err)
+		if middleware.IsMaxBytesError(err) {
+			return nil, httperror.RequestEntityTooLarge("Request body too large", err)
+		}
+		return nil, httperror.BadRequest(fmt.Sprintf("invalid JSON: %s", err.Error()), err)
 	}
 
 	if len(req.Addresses) == 0 {
-		return nil, errors.New("addresses array cannot be empty")
+		return nil, httperror.BadRequest("addresses array cannot be empty", errors.New("addresses array cannot be empty"))
 	}
 
 	// Validate each address is a valid Stellar address
 	for _, addr := range req.Addresses {
 		if _, err := strkey.Decode(strkey.VersionByteAccountID, addr); err != nil {
-			return nil, fmt.Errorf("invalid Stellar address %s: %w", addr, err)
+			return nil, httperror.BadRequest(fmt.Sprintf("invalid Stellar address %s: %s", addr, err.Error()), err)
 		}
 	}
 
@@ -66,9 +70,9 @@ func (h *AccountBalancesHandler) GetAccountBalances(w http.ResponseWriter, r *ht
 		return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
 	}
 
-	req, err := validateAccountBalancesRequest(r)
-	if err != nil {
-		return httperror.BadRequest(fmt.Sprintf("Invalid request: %s", err.Error()), err)
+	req, validationErr := validateAccountBalancesRequest(r)
+	if validationErr != nil {
+		return validationErr
 	}
 
 	balances, err := h.WalletBackendService.GetBalancesByAccountAddresses(contextWithTimeout, req.Addresses, network)

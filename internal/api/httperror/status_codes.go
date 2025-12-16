@@ -42,6 +42,11 @@ func Conflict(message string, err error) *HttpError {
 	return NewHttpError(message, err, http.StatusConflict, nil)
 }
 
+// RequestEntityTooLarge creates a 413 Request Entity Too Large error
+func RequestEntityTooLarge(message string, err error) *HttpError {
+	return NewHttpError(message, err, http.StatusRequestEntityTooLarge, nil)
+}
+
 // UnprocessableEntity creates a 422 Unprocessable Entity error
 func UnprocessableEntity(message string, err error) *HttpError {
 	return NewHttpError(message, err, http.StatusUnprocessableEntity, nil)
