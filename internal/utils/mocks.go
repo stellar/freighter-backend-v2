@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/stellar/freighter-backend-v2/internal/types"
-	"github.com/stellar/go/txnbuild"
-	"github.com/stellar/go/xdr"
-	"github.com/stellar/stellar-rpc/client"
+	"github.com/stellar/go-stellar-sdk/clients/rpcclient"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
+	"github.com/stellar/go-stellar-sdk/xdr"
 )
 
 type MockRPCService struct {
@@ -16,7 +16,7 @@ type MockRPCService struct {
 	GetLedgerEntryError    error
 }
 
-func (m *MockRPCService) ConfigureNetworkClient(network string) *client.Client {
+func (m *MockRPCService) ConfigureNetworkClient(network string) *rpcclient.Client {
 	return nil
 }
 

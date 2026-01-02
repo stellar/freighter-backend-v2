@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/stellar/go/keypair"
-	"github.com/stellar/go/txnbuild"
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/keypair"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -300,7 +300,9 @@ func TestRPCService_SimulateInvocation(t *testing.T) {
 		AccountID: account.Address(),
 		Sequence:  1,
 	}
-	contractHash := xdr.ContractId{0x1, 0x2, 0x3}
+	var contractHash xdr.ContractId
+	copy(contractHash[:], []byte("12345678901234567890123456789012"))
+
 	contractId := xdr.ScAddress{
 		Type:       xdr.ScAddressTypeScAddressTypeContract,
 		ContractId: &contractHash,

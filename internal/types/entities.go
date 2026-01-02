@@ -1,6 +1,6 @@
 package types
 
-import "github.com/stellar/go/xdr"
+import "github.com/stellar/go-stellar-sdk/xdr"
 
 type GetHealthResponse struct {
 	Status string `json:"status"`

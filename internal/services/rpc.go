@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/stellar/go/strkey"
-	"github.com/stellar/go/txnbuild"
-	"github.com/stellar/go/xdr"
-	"github.com/stellar/stellar-rpc/client"
-	"github.com/stellar/stellar-rpc/protocol"
+	"github.com/stellar/go-stellar-sdk/clients/rpcclient"
+	rpc "github.com/stellar/go-stellar-sdk/protocols/rpc"
+	"github.com/stellar/go-stellar-sdk/strkey"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
+	"github.com/stellar/go-stellar-sdk/xdr"
 
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
@@ -22,9 +22,9 @@ const (
 )
 
 type rpcService struct {
-	pubnetClient    *client.Client
-	testnetClient   *client.Client
-	futurenetClient *client.Client
+	pubnetClient    *rpcclient.Client
+	testnetClient   *rpcclient.Client
+	futurenetClient *rpcclient.Client
 	httpClient      *http.Client
 }
 
@@ -55,13 +55,13 @@ func NewRPCService(rpcURL string, testnetRPCURL string, futurenetRPCURL string) 
 
 	return &rpcService{
 		httpClient:      httpClient,
-		pubnetClient:    client.NewClient(rpcURL, httpClient),
-		testnetClient:   client.NewClient(testnetRPCURL, httpClient),
-		futurenetClient: client.NewClient(futurenetRPCURL, httpClient),
+		pubnetClient:    rpcclient.NewClient(rpcURL, httpClient),
+		testnetClient:   rpcclient.NewClient(testnetRPCURL, httpClient),
+		futurenetClient: rpcclient.NewClient(futurenetRPCURL, httpClient),
 	}
 }
 
-func (r *rpcService) configureNetworkClient(network string) *client.Client {
+func (r *rpcService) configureNetworkClient(network string) *rpcclient.Client {
 	switch network {
 	case types.TESTNET:
 		return r.testnetClient
@@ -100,7 +100,7 @@ func (r *rpcService) SimulateTx(
 	}
 
 	networkclient := r.configureNetworkClient(network)
-	resp, err := networkclient.SimulateTransaction(ctx, protocol.SimulateTransactionRequest{
+	resp, err := networkclient.SimulateTransaction(ctx, rpc.SimulateTransactionRequest{
 		Transaction: txeB64,
 	})
 	if err != nil {
@@ -171,7 +171,7 @@ func (r *rpcService) SimulateInvocation(
 
 func (r *rpcService) GetLedgerEntries(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
 	networkClient := r.configureNetworkClient(network)
-	response, err := networkClient.GetLedgerEntries(ctx, protocol.GetLedgerEntriesRequest{
+	response, err := networkClient.GetLedgerEntries(ctx, rpc.GetLedgerEntriesRequest{
 		Keys:   keys,
 		Format: "json",
 	})

@@ -12,7 +12,7 @@ import (
 
 	set "github.com/deckarep/golang-set/v2"
 
-	"github.com/stellar/go/xdr"
+	"github.com/stellar/go-stellar-sdk/xdr"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
