@@ -11,9 +11,8 @@ import (
 )
 
 const (
-	StatusHealthy   = "healthy"
-	StatusUnhealthy = "unhealthy"
-	healthTimeout   = 5 * time.Second
+	StatusHealthy = "healthy"
+	healthTimeout = 5 * time.Second
 )
 
 // HealthResponse contains the health status of the service.
@@ -22,7 +21,7 @@ type HealthResponse struct {
 	RPCHealth  types.GetHealthResponse `json:"rpc_health,omitempty"`
 }
 
-type HealthHandler struct{
+type HealthHandler struct {
 	rpcService types.RPCService
 }
 
@@ -52,7 +51,7 @@ func (h *HealthHandler) CheckHealth(w http.ResponseWriter, r *http.Request) erro
 
 	// Check RPC health for the requested network
 	rpcHealth := h.checkRPCHealth(ctx, network)
-	
+
 	// Overall status is always healthy, RPC health is informational
 	resp := HealthResponse{
 		Status:    StatusHealthy,
