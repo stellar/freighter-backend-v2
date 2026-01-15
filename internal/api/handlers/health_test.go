@@ -89,6 +89,30 @@ func TestHealthHandler_CheckHealth(t *testing.T) {
 		assert.Equal(t, types.StatusUnhealthy, response.RPCHealth.Status)
 	})
 
+	t.Run("should return error status in rpc_health when GetHealth returns error", func(t *testing.T) {
+		t.Parallel()
+		mockRPC := &MockErrorRPCService{}
+		handler := NewHealthHandler(mockRPC)
+
+		req, _ := http.NewRequest("GET", "/health", nil)
+		rr := httptest.NewRecorder()
+
+		err := handler.CheckHealth(rr, req)
+		require.NoError(t, err)
+
+		// Check status code - should still be 200 OK
+		assert.Equal(t, http.StatusOK, rr.Code)
+
+		// Parse and check response body
+		var response HealthResponse
+		err = json.Unmarshal(rr.Body.Bytes(), &response)
+		require.NoError(t, err)
+		// Overall status is always healthy
+		assert.Equal(t, StatusHealthy, response.Status)
+		// RPC health shows as error when GetHealth fails
+		assert.Equal(t, types.StatusError, response.RPCHealth.Status)
+	})
+
 	t.Run("should return error for invalid network", func(t *testing.T) {
 		t.Parallel()
 		mockRPC := &utils.MockRPCService{}
@@ -129,4 +153,13 @@ type MockUnhealthyRPCService struct {
 
 func (m *MockUnhealthyRPCService) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
 	return types.GetHealthResponse{Status: types.StatusUnhealthy}, nil
+}
+
+// MockErrorRPCService is a mock that returns an error from GetHealth
+type MockErrorRPCService struct {
+	utils.MockRPCService
+}
+
+func (m *MockErrorRPCService) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
+	return types.GetHealthResponse{}, assert.AnError
 }

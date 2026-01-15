@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 )
 
@@ -28,13 +27,15 @@ func TestApiServer_initServices_Error(t *testing.T) {
 func TestApiServer_initHandlers(t *testing.T) {
 	cfg := &config.Config{AppConfig: config.AppConfig{ProtocolsConfigPath: "testdata/protocols.json"}}
 	s := &ApiServer{cfg: cfg}
+	// Initialize services so rpcService is available for health handler
+	err := s.initServices()
+	require.NoError(t, err)
+	
 	mux := s.initHandlers()
 	require.NotNil(t, mux)
 	handler, pattern := mux.Handler(&http.Request{Method: "GET", URL: mustParseURL("/api/v1/ping")})
 	assert.NotNil(t, handler)
 	assert.Contains(t, pattern, "/api/v1/ping")
-	healthHandler := handlers.NewHealthHandler()
-	assert.IsType(t, handlers.CustomHandler(healthHandler.CheckHealth), handler, "returned handler should be the health check handler")
 }
 
 func TestApiServer_initMiddleware(t *testing.T) {
