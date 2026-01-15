@@ -72,7 +72,7 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// Initialize health check handler
-	healthHandler := handlers.NewHealthHandler()
+	healthHandler := handlers.NewHealthHandler(s.rpcService)
 	mux.HandleFunc("GET /api/v1/ping", handlers.CustomHandler(healthHandler.CheckHealth))
 
 	protocolsHandler := handlers.NewProtocolsHandler(s.cfg.AppConfig.ProtocolsConfigPath)
