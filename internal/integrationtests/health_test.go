@@ -39,12 +39,15 @@ func (s *HealthTestSuite) TestGetRPCHealthReturns200StatusCode() {
 
 	resp, err := http.Get(fmt.Sprintf("%s/api/v1/rpc-health", s.connectionString))
 	require.NoError(t, err)
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	// Verify the response body contains a status field
+	// Verify the response body contains a status field with a valid value
 	var body map[string]interface{}
 	err = json.NewDecoder(resp.Body).Decode(&body)
 	require.NoError(t, err)
 	require.Contains(t, body, "status")
-	require.NotEmpty(t, body["status"])
+	status, ok := body["status"].(string)
+	require.True(t, ok, "status should be a string")
+	require.Contains(t, []string{"healthy", "unhealthy"}, status, "status should be either 'healthy' or 'unhealthy'")
 }

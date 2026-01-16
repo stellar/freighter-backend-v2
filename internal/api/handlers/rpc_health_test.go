@@ -26,10 +26,11 @@ func TestRPCHealthHandler_CheckRPCHealth(t *testing.T) {
 		}
 		handler := NewRPCHealthHandler(mockRPC)
 
-		req, _ := http.NewRequest("GET", "/rpc-health", nil)
+		req, err := http.NewRequest("GET", "/rpc-health", nil)
+		require.NoError(t, err)
 		rr := httptest.NewRecorder()
 
-		err := handler.CheckRPCHealth(rr, req)
+		err = handler.CheckRPCHealth(rr, req)
 		require.NoError(t, err)
 
 		// Check status code
@@ -56,10 +57,11 @@ func TestRPCHealthHandler_CheckRPCHealth(t *testing.T) {
 		}
 		handler := NewRPCHealthHandler(mockRPC)
 
-		req, _ := http.NewRequest("GET", "/rpc-health?network=TESTNET", nil)
+		req, err := http.NewRequest("GET", "/rpc-health?network=TESTNET", nil)
+		require.NoError(t, err)
 		rr := httptest.NewRecorder()
 
-		err := handler.CheckRPCHealth(rr, req)
+		err = handler.CheckRPCHealth(rr, req)
 		require.NoError(t, err)
 		assert.Equal(t, "TESTNET", capturedNetwork)
 	})
@@ -75,10 +77,11 @@ func TestRPCHealthHandler_CheckRPCHealth(t *testing.T) {
 		}
 		handler := NewRPCHealthHandler(mockRPC)
 
-		req, _ := http.NewRequest("GET", "/rpc-health", nil)
+		req, err := http.NewRequest("GET", "/rpc-health", nil)
+		require.NoError(t, err)
 		rr := httptest.NewRecorder()
 
-		err := handler.CheckRPCHealth(rr, req)
+		err = handler.CheckRPCHealth(rr, req)
 		require.NoError(t, err)
 		assert.Equal(t, types.PUBLIC, capturedNetwork)
 	})
@@ -92,10 +95,11 @@ func TestRPCHealthHandler_CheckRPCHealth(t *testing.T) {
 		}
 		handler := NewRPCHealthHandler(mockRPC)
 
-		req, _ := http.NewRequest("GET", "/rpc-health", nil)
+		req, err := http.NewRequest("GET", "/rpc-health", nil)
+		require.NoError(t, err)
 		rr := httptest.NewRecorder()
 
-		err := handler.CheckRPCHealth(rr, req)
+		err = handler.CheckRPCHealth(rr, req)
 		require.NoError(t, err)
 
 		// Check status code is still 200 OK
@@ -117,10 +121,11 @@ func TestRPCHealthHandler_CheckRPCHealth(t *testing.T) {
 		}
 		handler := NewRPCHealthHandler(mockRPC)
 
-		req, _ := http.NewRequest("GET", "/rpc-health", nil)
+		req, err := http.NewRequest("GET", "/rpc-health", nil)
+		require.NoError(t, err)
 		w := utils.NewErrorResponseWriter(true)
 
-		err := handler.CheckRPCHealth(w, req)
+		err = handler.CheckRPCHealth(w, req)
 		require.Error(t, err)
 		httpErr, ok := err.(*httperror.HttpError)
 		require.True(t, ok, "error should be an HttpError")
