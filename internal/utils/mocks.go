@@ -14,6 +14,7 @@ type MockRPCService struct {
 	TokenURIOverride       string
 	GetLedgerEntryOverride []types.LedgerEntryMap
 	GetLedgerEntryError    error
+	GetHealthFunc          func(network string) (types.GetHealthResponse, error)
 }
 
 func (m *MockRPCService) ConfigureNetworkClient(network string) *rpcclient.Client {
@@ -25,6 +26,9 @@ func (m *MockRPCService) Name() string {
 }
 
 func (m *MockRPCService) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
+	if m.GetHealthFunc != nil {
+		return m.GetHealthFunc(network)
+	}
 	return types.GetHealthResponse{Status: types.StatusHealthy}, nil
 }
 
