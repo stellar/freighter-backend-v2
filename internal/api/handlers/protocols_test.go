@@ -35,6 +35,7 @@ func TestGetProtocols(t *testing.T) {
 		assert.Equal(t, []string{"Lending", "Borrowing"}, protocols[0].Tags)
 		assert.Equal(t, "https://mainnet.blend.capital/", protocols[0].URL)
 		assert.Equal(t, "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/blend.svg", protocols[0].IconURL)
+		assert.Equal(t, "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/blend.png", protocols[0].BackgroundURL)
 		assert.Equal(t, "Blend is a DeFi protocol that allows any entity to create or utilize an immutable lending market that fits its needs.", protocols[0].Description)
 		assert.Equal(t, false, protocols[0].IsBlacklisted)
 		assert.Equal(t, true, protocols[0].IsWalletConnectNotSupported)
@@ -42,6 +43,7 @@ func TestGetProtocols(t *testing.T) {
 		assert.Equal(t, true, protocols[1].IsBlacklisted)
 		assert.Equal(t, false, protocols[1].IsWalletConnectNotSupported)
 		assert.Equal(t, "Allbridge Core", protocols[2].Name)
+		assert.Empty(t, protocols[2].BackgroundURL)
 	})
 	t.Run("should return error if protocols file is not found", func(t *testing.T) {
 		t.Parallel()

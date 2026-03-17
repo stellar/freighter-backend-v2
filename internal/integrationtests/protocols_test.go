@@ -72,6 +72,7 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 	assert.Equal(t, []string{"Lending", "Borrowing"}, protocols[0].Tags)
 	assert.Equal(t, "https://mainnet.blend.capital/", protocols[0].URL)
 	assert.Equal(t, "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/blend.svg", protocols[0].IconURL)
+	assert.Equal(t, "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/blend.png", protocols[0].BackgroundURL)
 	assert.Equal(t, "Blend is a DeFi protocol that allows any entity to create or utilize an immutable lending market that fits its needs.", protocols[0].Description)
 	assert.Equal(t, false, protocols[0].IsBlacklisted)
 	assert.Equal(t, "Phoenix", protocols[1].Name)
