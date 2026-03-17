@@ -43,7 +43,19 @@ func TestGetProtocols(t *testing.T) {
 		assert.Equal(t, true, protocols[1].IsBlacklisted)
 		assert.Equal(t, false, protocols[1].IsWalletConnectNotSupported)
 		assert.Equal(t, "Allbridge Core", protocols[2].Name)
-		assert.Empty(t, protocols[2].BackgroundURL)
+
+		// Assert on raw JSON to verify omitempty: the key must be absent entirely
+		// for protocols that don't define a background_url.
+		type rawResponse struct {
+			Data struct {
+				Protocols []map[string]any `json:"protocols"`
+			} `json:"data"`
+		}
+		var raw rawResponse
+		err = json.Unmarshal(rr.Body.Bytes(), &raw)
+		require.NoError(t, err)
+		_, hasBackgroundURL := raw.Data.Protocols[2]["background_url"]
+		assert.False(t, hasBackgroundURL, "background_url key should be absent for protocols without a background image")
 	})
 	t.Run("should return error if protocols file is not found", func(t *testing.T) {
 		t.Parallel()
