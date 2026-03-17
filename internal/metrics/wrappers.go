@@ -27,7 +27,10 @@ func record(m *Service, service, method, network string, duration float64, err e
 	}
 }
 
-// InstrumentedRPCService wraps an RPCService with Prometheus metrics.
+// InstrumentedRPCService is a decorator that implements types.RPCService by
+// delegating to an inner service and recording Prometheus metrics (call count,
+// duration, errors) around each call. This keeps observability concerns out of
+// the service internals and lets us swap instrumentation in or out at wiring time.
 type InstrumentedRPCService struct {
 	inner   types.RPCService
 	metrics *Service
@@ -83,7 +86,9 @@ func (i *InstrumentedRPCService) GetLedgerEntries(ctx context.Context, keys []st
 	return result, err
 }
 
-// InstrumentedWalletBackendService wraps a WalletBackendService with Prometheus metrics.
+// InstrumentedWalletBackendService is a decorator that implements types.WalletBackendService
+// by delegating to an inner service and recording Prometheus metrics (call count,
+// duration, errors) around each call. Same rationale as InstrumentedRPCService.
 type InstrumentedWalletBackendService struct {
 	inner   types.WalletBackendService
 	metrics *Service
