@@ -5,11 +5,13 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/config"
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 )
 
 func TestNewApiServer(t *testing.T) {
@@ -20,14 +22,18 @@ func TestNewApiServer(t *testing.T) {
 }
 
 func TestApiServer_initServices_Error(t *testing.T) {
-	s := &ApiServer{cfg: &config.Config{RedisConfig: config.RedisConfig{Host: "", Port: 0}}}
+	s := &ApiServer{
+		cfg:        &config.Config{RedisConfig: config.RedisConfig{Host: "", Port: 0}},
+		appMetrics: metrics.NewMetrics(prometheus.NewRegistry()),
+	}
 	err := s.initServices()
 	assert.NoError(t, err)
 }
 
 func TestApiServer_initHandlers(t *testing.T) {
+	reg := prometheus.NewRegistry()
 	cfg := &config.Config{AppConfig: config.AppConfig{ProtocolsConfigPath: "testdata/protocols.json"}}
-	s := &ApiServer{cfg: cfg}
+	s := &ApiServer{cfg: cfg, registry: reg}
 	mux := s.initHandlers()
 	require.NotNil(t, mux)
 	handler, pattern := mux.Handler(&http.Request{Method: "GET", URL: mustParseURL("/api/v1/ping")})
@@ -38,7 +44,10 @@ func TestApiServer_initHandlers(t *testing.T) {
 }
 
 func TestApiServer_initMiddleware(t *testing.T) {
-	s := &ApiServer{cfg: &config.Config{}}
+	s := &ApiServer{
+		cfg:        &config.Config{},
+		appMetrics: metrics.NewMetrics(prometheus.NewRegistry()),
+	}
 	mux := http.NewServeMux()
 	h := s.initMiddleware(mux)
 	require.NotNil(t, h)
