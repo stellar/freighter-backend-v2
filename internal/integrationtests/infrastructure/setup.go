@@ -153,7 +153,7 @@ func createRPCContainer(ctx context.Context, testNetwork *testcontainers.DockerN
 			wait.ForExec([]string{"sh", "-c", `curl -s -X POST http://localhost:8000 -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"getHealth","id":1}' | grep -q '"result"'`}).
 				WithPollInterval(2*time.Second).
 				WithExitCodeMatcher(func(exitCode int) bool { return exitCode == 0 }),
-		).WithDeadline(3 * time.Minute).WithStartupTimeoutDefault(3 * time.Minute),
+		),
 	}
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
@@ -235,7 +235,7 @@ func createStellarCoreContainer(ctx context.Context, testNetwork *testcontainers
 				WithPort("11626/tcp").
 				WithPollInterval(2*time.Second),
 			wait.ForLog("Ledger close complete: 8"),
-		).WithDeadline(3 * time.Minute).WithStartupTimeoutDefault(3 * time.Minute),
+		),
 	}
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
