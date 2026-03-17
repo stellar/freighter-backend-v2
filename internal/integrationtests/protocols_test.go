@@ -77,6 +77,21 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 	assert.Equal(t, false, protocols[0].IsBlacklisted)
 	assert.Equal(t, "Phoenix", protocols[1].Name)
 	assert.Equal(t, "Allbridge Core", protocols[2].Name)
+
+	// Assert on raw JSON to verify omitempty: background_url must be absent
+	// entirely for protocols that don't define it.
+	type rawResponse struct {
+		Data struct {
+			Protocols []map[string]any `json:"protocols"`
+		} `json:"data"`
+	}
+	var raw rawResponse
+	err = json.Unmarshal(body, &raw)
+	require.NoError(t, err)
+	_, phoenixHasBackgroundURL := raw.Data.Protocols[1]["background_url"]
+	assert.False(t, phoenixHasBackgroundURL, "background_url key should be absent for protocols without a background image")
+	_, allbridgeHasBackgroundURL := raw.Data.Protocols[2]["background_url"]
+	assert.False(t, allbridgeHasBackgroundURL, "background_url key should be absent for protocols without a background image")
 }
 
 func (s *ProtocolsTestSuite) TestGetProtocolsReturns500StatusCodeForInvalidProtocols() {
