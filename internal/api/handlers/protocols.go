@@ -31,6 +31,7 @@ type Protocol struct {
 	Tags                        []string `json:"tags"`
 	URL                         string   `json:"website_url"`
 	IconURL                     string   `json:"icon_url"`
+	BackgroundURL               string   `json:"background_url,omitempty"`
 	Description                 string   `json:"description"`
 	IsBlacklisted               bool     `json:"is_blacklisted"`
 	IsWalletConnectNotSupported bool     `json:"is_wc_not_supported"`
