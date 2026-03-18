@@ -5,6 +5,7 @@ package infrastructure
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,7 +30,8 @@ const (
 	FreighterContainerTag   = "integration-test"
 	FreighterDockerfilePath = "deployments/Dockerfile"
 
-	RPCHealthTimeout = 120 * time.Second
+	RPCHealthTimeout       = 120 * time.Second
+	DefaultProtocolVersion = 24
 )
 
 // TestContainer wraps a testcontainer with convenience methods for host/port/connection info.
@@ -178,7 +180,7 @@ func createStellarCoreContainer(ctx context.Context, testNetwork *testcontainers
 
 	containerRequest := testcontainers.ContainerRequest{
 		Name:  "stellar-core",
-		Image: "stellar/stellar-core:22",
+		Image: "stellar/stellar-core:24",
 		Labels: map[string]string{
 			"org.testcontainers.session-id": "freighter-integration-tests",
 		},
@@ -222,23 +224,34 @@ func createStellarCoreContainer(ctx context.Context, testNetwork *testcontainers
 
 	tc := &TestContainer{Container: container, MappedPortStr: "11626"}
 
-	if err := triggerProtocolUpgrade(ctx, tc); err != nil {
+	if err := triggerProtocolUpgrade(ctx, tc, DefaultProtocolVersion); err != nil {
 		return nil, fmt.Errorf("triggering protocol upgrade: %w", err)
 	}
 
 	return tc, nil
 }
 
-// triggerProtocolUpgrade triggers a protocol upgrade on the Stellar Core container
-// to advance it to the latest protocol version.
-func triggerProtocolUpgrade(ctx context.Context, coreContainer *TestContainer) error {
-	_, _, err := coreContainer.Exec(ctx, []string{
-		"curl", "-s",
-		"http://localhost:11626/upgrades?mode=set&upgradetime=1970-01-01T00:00:00Z&protocolversion=22",
-	})
+// triggerProtocolUpgrade triggers a protocol upgrade on Stellar Core
+// by making an HTTP request to the container's mapped port from the test host.
+func triggerProtocolUpgrade(ctx context.Context, container *TestContainer, version int) error {
+	coreURL, err := container.GetConnectionString(ctx)
 	if err != nil {
-		return fmt.Errorf("executing protocol upgrade command: %w", err)
+		return fmt.Errorf("getting core connection string: %w", err)
 	}
+
+	upgradeURL := fmt.Sprintf("%s/upgrades?mode=set&upgradetime=1970-01-01T00:00:00Z&protocolversion=%d", coreURL, version)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(upgradeURL) //nolint:noctx
+	if err != nil {
+		return fmt.Errorf("triggering protocol upgrade: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("protocol upgrade failed with status code: %d", resp.StatusCode)
+	}
+
 	return nil
 }
 
@@ -249,7 +262,7 @@ func createRPCContainer(ctx context.Context, testNetwork *testcontainers.DockerN
 
 	containerRequest := testcontainers.ContainerRequest{
 		Name:  "stellar-rpc",
-		Image: "stellar/stellar-rpc:latest",
+		Image: "stellar/stellar-rpc:24.0.0",
 		Labels: map[string]string{
 			"org.testcontainers.session-id": "freighter-integration-tests",
 		},
