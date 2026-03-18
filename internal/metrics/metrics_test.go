@@ -5,8 +5,11 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
 	"testing"
 
+	"github.com/creachadair/jrpc2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -83,6 +86,7 @@ func TestClassifyError(t *testing.T) {
 		err      error
 		expected string
 	}{
+		// timeout: context deadline/canceled
 		{
 			name:     "deadline exceeded",
 			err:      context.DeadlineExceeded,
@@ -103,10 +107,50 @@ func TestClassifyError(t *testing.T) {
 			err:      fmt.Errorf("call failed: %w", context.Canceled),
 			expected: "timeout",
 		},
+		// connection: network-level failures
 		{
-			name:     "other error",
-			err:      fmt.Errorf("connection refused"),
-			expected: "other",
+			name: "net.OpError",
+			err: &net.OpError{
+				Op:  "dial",
+				Net: "tcp",
+				Err: fmt.Errorf("connection refused"),
+			},
+			expected: "connection",
+		},
+		{
+			name: "wrapped net.OpError",
+			err: fmt.Errorf("rpc failed: %w", &net.OpError{
+				Op:  "dial",
+				Net: "tcp",
+				Err: fmt.Errorf("connection refused"),
+			}),
+			expected: "connection",
+		},
+		{
+			name: "url.Error",
+			err: &url.Error{
+				Op:  "Post",
+				URL: "http://localhost:8000",
+				Err: fmt.Errorf("connection refused"),
+			},
+			expected: "connection",
+		},
+		// upstream: JSON-RPC errors from dependencies
+		{
+			name:     "jrpc2 error",
+			err:      jrpc2.Errorf(jrpc2.InternalError, "server error"),
+			expected: "upstream",
+		},
+		{
+			name:     "wrapped jrpc2 error",
+			err:      fmt.Errorf("rpc call failed: %w", jrpc2.Errorf(jrpc2.MethodNotFound, "not found")),
+			expected: "upstream",
+		},
+		// internal: encoding, validation, and other local failures
+		{
+			name:     "plain error maps to internal",
+			err:      fmt.Errorf("failed to decode XDR"),
+			expected: "internal",
 		},
 	}
 

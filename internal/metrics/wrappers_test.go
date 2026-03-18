@@ -5,9 +5,11 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"testing"
 
+	"github.com/creachadair/jrpc2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -41,7 +43,7 @@ func TestInstrumentedRPCService_GetHealth_RecordsMetrics(t *testing.T) {
 	require.NoError(t, testutil.CollectAndCompare(svc.CallsTotal, strings.NewReader(expected)))
 
 	// Verify no errors recorded
-	errCount := testutil.ToFloat64(svc.ErrorsTotal.WithLabelValues("rpc", "GetHealth", "TESTNET", "other"))
+	errCount := testutil.ToFloat64(svc.ErrorsTotal.WithLabelValues("rpc", "GetHealth", "TESTNET", "internal"))
 	assert.Equal(t, float64(0), errCount)
 }
 
@@ -49,7 +51,7 @@ func TestInstrumentedRPCService_GetHealth_RecordsErrorMetrics(t *testing.T) {
 	svc, _ := newTestService(t)
 	mock := &utils.MockRPCService{
 		GetHealthFunc: func(network string) (types.GetHealthResponse, error) {
-			return types.GetHealthResponse{}, fmt.Errorf("connection refused")
+			return types.GetHealthResponse{}, fmt.Errorf("failed to decode XDR")
 		},
 	}
 	instrumented := NewInstrumentedRPCService(mock, svc)
@@ -57,7 +59,39 @@ func TestInstrumentedRPCService_GetHealth_RecordsErrorMetrics(t *testing.T) {
 	_, err := instrumented.GetHealth(context.Background(), types.PUBLIC)
 	require.Error(t, err)
 
-	errCount := testutil.ToFloat64(svc.ErrorsTotal.WithLabelValues("rpc", "GetHealth", "PUBLIC", "other"))
+	errCount := testutil.ToFloat64(svc.ErrorsTotal.WithLabelValues("rpc", "GetHealth", "PUBLIC", "internal"))
+	assert.Equal(t, float64(1), errCount)
+}
+
+func TestInstrumentedRPCService_GetHealth_ConnectionError(t *testing.T) {
+	svc, _ := newTestService(t)
+	mock := &utils.MockRPCService{
+		GetHealthFunc: func(network string) (types.GetHealthResponse, error) {
+			return types.GetHealthResponse{}, &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused")}
+		},
+	}
+	instrumented := NewInstrumentedRPCService(mock, svc)
+
+	_, err := instrumented.GetHealth(context.Background(), types.PUBLIC)
+	require.Error(t, err)
+
+	errCount := testutil.ToFloat64(svc.ErrorsTotal.WithLabelValues("rpc", "GetHealth", "PUBLIC", "connection"))
+	assert.Equal(t, float64(1), errCount)
+}
+
+func TestInstrumentedRPCService_GetHealth_UpstreamError(t *testing.T) {
+	svc, _ := newTestService(t)
+	mock := &utils.MockRPCService{
+		GetHealthFunc: func(network string) (types.GetHealthResponse, error) {
+			return types.GetHealthResponse{}, jrpc2.Errorf(jrpc2.InternalError, "server error")
+		},
+	}
+	instrumented := NewInstrumentedRPCService(mock, svc)
+
+	_, err := instrumented.GetHealth(context.Background(), types.PUBLIC)
+	require.Error(t, err)
+
+	errCount := testutil.ToFloat64(svc.ErrorsTotal.WithLabelValues("rpc", "GetHealth", "PUBLIC", "upstream"))
 	assert.Equal(t, float64(1), errCount)
 }
 
@@ -105,7 +139,7 @@ func TestInstrumentedRPCService_GetLedgerEntries_ErrorPassesThrough(t *testing.T
 	require.ErrorIs(t, err, expectedErr)
 	assert.Nil(t, result)
 
-	errCount := testutil.ToFloat64(svc.ErrorsTotal.WithLabelValues("rpc", "GetLedgerEntries", "FUTURENET", "other"))
+	errCount := testutil.ToFloat64(svc.ErrorsTotal.WithLabelValues("rpc", "GetLedgerEntries", "FUTURENET", "internal"))
 	assert.Equal(t, float64(1), errCount)
 }
 
@@ -155,7 +189,7 @@ func TestInstrumentedWalletBackendService_GetBalances_ErrorRecordsMetrics(t *tes
 	_, err := instrumented.GetBalancesByAccountAddresses(context.Background(), []string{"addr1"}, types.PUBLIC)
 	require.Error(t, err)
 
-	errCount := testutil.ToFloat64(svc.ErrorsTotal.WithLabelValues("wallet-backend", "GetBalancesByAccountAddresses", "PUBLIC", "other"))
+	errCount := testutil.ToFloat64(svc.ErrorsTotal.WithLabelValues("wallet-backend", "GetBalancesByAccountAddresses", "PUBLIC", "internal"))
 	assert.Equal(t, float64(1), errCount)
 }
 

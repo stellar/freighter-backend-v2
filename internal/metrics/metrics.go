@@ -5,7 +5,10 @@ package metrics
 import (
 	"context"
 	"errors"
+	"net"
+	"net/url"
 
+	"github.com/creachadair/jrpc2"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -61,8 +64,9 @@ type Service struct {
 	CallsTotal *prometheus.CounterVec
 	// CallDuration observes service call latency in seconds as a histogram, with the same labels as CallsTotal.
 	CallDuration *prometheus.HistogramVec
-	// ErrorsTotal counts failed service calls, labeled by service name, method, network, and error_type
-	// (either "timeout" for context deadline/canceled or "other" for all other errors).
+	// ErrorsTotal counts failed service calls, labeled by service name, method, network, and error_type.
+	// Error types: "timeout" (context deadline/canceled), "connection" (network/dial failures),
+	// "upstream" (JSON-RPC or HTTP error responses from dependencies), "internal" (encoding/validation).
 	ErrorsTotal *prometheus.CounterVec
 }
 
@@ -87,10 +91,26 @@ func NewService(reg prometheus.Registerer) *Service {
 	return s
 }
 
-// ClassifyError returns "timeout" for context deadline/canceled, "other" otherwise.
+// ClassifyError categorizes a service call error for the error_type metric label.
+//   - "timeout":    context deadline exceeded or canceled
+//   - "connection": network-level failures (dial, DNS, connection refused)
+//   - "upstream":   the upstream service returned an error response (JSON-RPC error or HTTP non-2xx)
+//   - "internal":   local failures (encoding, decoding, validation)
 func ClassifyError(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return "timeout"
 	}
-	return "other"
+
+	var netErr *net.OpError
+	var urlErr *url.Error
+	if errors.As(err, &netErr) || errors.As(err, &urlErr) {
+		return "connection"
+	}
+
+	var rpcErr *jrpc2.Error
+	if errors.As(err, &rpcErr) {
+		return "upstream"
+	}
+
+	return "internal"
 }
