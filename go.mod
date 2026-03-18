@@ -8,6 +8,7 @@ require (
 	github.com/alitto/pond/v2 v2.5.0
 	github.com/creachadair/jrpc2 v1.2.0
 	github.com/deckarep/golang-set/v2 v2.8.0
+	github.com/docker/go-connections v0.5.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.16.0
 	github.com/spf13/cobra v1.9.1
@@ -38,7 +39,6 @@ require (
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/docker v28.0.4+incompatible // indirect
-	github.com/docker/go-connections v0.5.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/ebitengine/purego v0.8.2 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect

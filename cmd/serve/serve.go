@@ -5,7 +5,6 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/api"
 	"github.com/stellar/freighter-backend-v2/internal/config"
-	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
@@ -22,7 +21,6 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if err := utils.InitializeConfig(cmd); err != nil {
 				return err
 			}
-			logger.Info("Initializing server with config", "config", s.Cfg)
 			return nil
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
