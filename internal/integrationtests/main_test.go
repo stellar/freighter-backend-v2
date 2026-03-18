@@ -28,4 +28,9 @@ func TestIntegrationTests(t *testing.T) {
 			freighterContainer: containers.FreighterContainer,
 		})
 	})
+	t.Run("MetricsTestSuite", func(t *testing.T) {
+		suite.Run(t, &MetricsTestSuite{
+			freighterContainer: containers.FreighterContainer,
+		})
+	})
 }

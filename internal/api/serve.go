@@ -9,10 +9,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/services"
 	"github.com/stellar/freighter-backend-v2/internal/store"
 	"github.com/stellar/freighter-backend-v2/internal/types"
@@ -30,6 +35,8 @@ type ApiServer struct {
 	redis                *store.RedisStore
 	rpcService           types.RPCService
 	walletBackendService types.WalletBackendService
+	registry             *prometheus.Registry
+	appMetrics           *metrics.Metrics
 }
 
 func NewApiServer(cfg *config.Config) *ApiServer {
@@ -37,6 +44,12 @@ func NewApiServer(cfg *config.Config) *ApiServer {
 }
 
 func (s *ApiServer) Start() error {
+	s.registry = prometheus.NewRegistry()
+	s.registry.MustRegister(collectors.NewGoCollector())
+	s.registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	s.registry.MustRegister(collectors.NewBuildInfoCollector())
+	s.appMetrics = metrics.NewMetrics(s.registry)
+
 	if err := s.initServices(); err != nil {
 		logger.Error("Failed to initialize services", "error", err)
 		return err
@@ -50,7 +63,8 @@ func (s *ApiServer) Start() error {
 
 func (s *ApiServer) initServices() error {
 	s.redis = store.NewRedisStore(s.cfg.RedisConfig.Host, s.cfg.RedisConfig.Port, s.cfg.RedisConfig.Password)
-	s.rpcService = services.NewRPCService(s.cfg.RpcConfig.PubnetRpcUrl, s.cfg.RpcConfig.TestnetRpcUrl, s.cfg.RpcConfig.FuturenetRpcUrl)
+
+	s.rpcService = services.NewRPCService(s.cfg.RpcConfig.PubnetRpcUrl, s.cfg.RpcConfig.TestnetRpcUrl, s.cfg.RpcConfig.FuturenetRpcUrl, s.appMetrics.Service)
 
 	// Initialize wallet backend service if configured
 	walletBackendService, err := services.NewWalletBackendService(
@@ -58,6 +72,7 @@ func (s *ApiServer) initServices() error {
 		s.cfg.WalletBackendConfig.TestnetUrl,
 		s.cfg.WalletBackendConfig.PubnetSigningKey,
 		s.cfg.WalletBackendConfig.TestnetSigningKey,
+		s.appMetrics.Service,
 	)
 	if err != nil {
 		logger.Error("Failed to initialize wallet backend service", "error", err)
@@ -94,6 +109,8 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
 	mux.HandleFunc("POST /api/v1/account-balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances))
 
+	mux.Handle("GET /metrics", promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{Registry: s.registry}))
+
 	return mux
 }
 
@@ -103,6 +120,7 @@ func (s *ApiServer) initMiddleware(mux *http.ServeMux) http.Handler {
 		middleware.ResponseHeader(),
 		middleware.BodySizeLimit(s.cfg.AppConfig.MaxRequestBodySize),
 		middleware.Logging(),
+		middleware.Metrics(s.appMetrics.HTTP),
 	}
 
 	// Apply the middlewares to the mux

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,12 +14,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
 func TestNewRPCService(t *testing.T) {
 	rpcURL := "http://localhost:8000"
-	service := NewRPCService(rpcURL, "http://localhost:8001", "http://localhost:8002")
+	service := NewRPCService(rpcURL, "http://localhost:8001", "http://localhost:8002", nil)
 
 	require.NotNil(t, service)
 	assert.IsType(t, &rpcService{}, service)
@@ -31,7 +33,7 @@ func TestNewRPCService(t *testing.T) {
 }
 
 func TestRPCService_Name(t *testing.T) {
-	service := NewRPCService("http://localhost:8000", "http://localhost:8001", "http://localhost:8002")
+	service := NewRPCService("http://localhost:8000", "http://localhost:8001", "http://localhost:8002", nil)
 
 	name := service.Name()
 
@@ -53,7 +55,7 @@ func TestRPCService_GetHealth(t *testing.T) {
 		}))
 		defer server.Close()
 
-		service := NewRPCService(server.URL, "http://localhost:8001", "http://localhost:8002")
+		service := NewRPCService(server.URL, "http://localhost:8001", "http://localhost:8002", nil)
 
 		response, err := service.GetHealth(context.Background(), "PUBLIC")
 
@@ -68,7 +70,7 @@ func TestRPCService_GetHealth(t *testing.T) {
 		}))
 		defer server.Close()
 
-		service := NewRPCService(server.URL, "http://localhost:8001", "http://localhost:8002")
+		service := NewRPCService(server.URL, "http://localhost:8001", "http://localhost:8002", nil)
 
 		response, err := service.GetHealth(context.Background(), "PUBLIC")
 
@@ -78,7 +80,7 @@ func TestRPCService_GetHealth(t *testing.T) {
 
 	t.Run("returns error status on network failure", func(t *testing.T) {
 		// Use an invalid URL to simulate network error
-		service := NewRPCService("http://localhost:99999", "http://localhost:8001", "http://localhost:8002")
+		service := NewRPCService("http://localhost:99999", "http://localhost:8001", "http://localhost:8002", nil)
 
 		response, err := service.GetHealth(context.Background(), "PUBLIC")
 
@@ -117,7 +119,7 @@ func TestRPCService_SimulateTx(t *testing.T) {
 		}))
 		defer server.Close()
 
-		service := NewRPCService(server.URL, "http://localhost:8001", "http://localhost:8002")
+		service := NewRPCService(server.URL, "http://localhost:8001", "http://localhost:8002", nil)
 
 		destinationKP := keypair.MustRandom()
 		op := txnbuild.Payment{
@@ -166,7 +168,7 @@ func TestRPCService_SimulateTx(t *testing.T) {
 		}))
 		defer server.Close()
 
-		service := NewRPCService("http://localhost:8000", server.URL, "http://localhost:8002")
+		service := NewRPCService("http://localhost:8000", server.URL, "http://localhost:8002", nil)
 
 		destinationKP := keypair.MustRandom()
 		op := txnbuild.Payment{
@@ -216,7 +218,7 @@ func TestRPCService_SimulateTx(t *testing.T) {
 		}))
 		defer server.Close()
 
-		service := NewRPCService("http://localhost:8000", "http://localhost:8001", server.URL)
+		service := NewRPCService("http://localhost:8000", "http://localhost:8001", server.URL, nil)
 
 		destinationKP := keypair.MustRandom()
 		op := txnbuild.Payment{
@@ -266,7 +268,7 @@ func TestRPCService_SimulateTx(t *testing.T) {
 		}))
 		defer server.Close()
 
-		service := NewRPCService(server.URL, "http://localhost:8001", "http://localhost:8002")
+		service := NewRPCService(server.URL, "http://localhost:8001", "http://localhost:8002", nil)
 
 		destinationKP := keypair.MustRandom()
 		op := txnbuild.Payment{
@@ -291,6 +293,54 @@ func TestRPCService_SimulateTx(t *testing.T) {
 		scVal, err := service.SimulateTx(context.Background(), tx, "PUBLIC")
 		require.NotNil(t, err)
 		assert.Equal(t, (*xdr.ScVal)(nil), scVal)
+	})
+
+	t.Run("simulation error wraps as UpstreamError", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			response := `{
+				"jsonrpc":"2.0",
+				"id":1,
+				"result":{
+					"error":"transaction simulation failed",
+					"results":[]
+				}
+			}`
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, response)
+		}))
+		defer server.Close()
+
+		service := NewRPCService(server.URL, "http://localhost:8001", "http://localhost:8002", nil)
+
+		destinationKP := keypair.MustRandom()
+		op := txnbuild.Payment{
+			Destination: destinationKP.Address(),
+			Amount:      "10",
+			Asset:       txnbuild.NativeAsset{},
+		}
+
+		txParams := txnbuild.TransactionParams{
+			SourceAccount:        sourceAccount,
+			IncrementSequenceNum: true,
+			Operations:           []txnbuild.Operation{&op},
+			BaseFee:              txnbuild.MinBaseFee,
+			Preconditions: txnbuild.Preconditions{
+				TimeBounds: txnbuild.NewTimeout(300),
+			},
+		}
+
+		tx, err := txnbuild.NewTransaction(txParams)
+		require.NoError(t, err)
+
+		_, err = service.SimulateTx(context.Background(), tx, "PUBLIC")
+		require.Error(t, err)
+
+		var upErr *metrics.UpstreamError
+		require.True(t, errors.As(err, &upErr), "expected UpstreamError, got %T: %v", err, err)
+		assert.Equal(t, "simulation_error", upErr.Kind)
+		assert.Equal(t, 0, upErr.Code)
+		assert.Equal(t, "simulation_error", metrics.ClassifyError(err))
 	})
 }
 
@@ -340,7 +390,7 @@ func TestRPCService_SimulateInvocation(t *testing.T) {
 		}))
 		defer server.Close()
 
-		service := NewRPCService(server.URL, "http://localhost:8001", "http://localhost:8002")
+		service := NewRPCService(server.URL, "http://localhost:8001", "http://localhost:8002", nil)
 		resp, err := service.SimulateInvocation(context.Background(), contractId, sourceAccount, "get_metadata", []xdr.ScVal{}, timeout, "PUBLIC")
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
@@ -378,7 +428,7 @@ func TestRPCService_SimulateInvocation(t *testing.T) {
 		}))
 		defer server.Close()
 
-		service := NewRPCService("http://localhost:8000", server.URL, "http://localhost:8002")
+		service := NewRPCService("http://localhost:8000", server.URL, "http://localhost:8002", nil)
 		resp, err := service.SimulateInvocation(context.Background(), contractId, sourceAccount, "get_metadata", []xdr.ScVal{}, timeout, "TESTNET")
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
@@ -416,7 +466,7 @@ func TestRPCService_SimulateInvocation(t *testing.T) {
 		}))
 		defer server.Close()
 
-		service := NewRPCService("http://localhost:8000", "http://localhost:8001", server.URL)
+		service := NewRPCService("http://localhost:8000", "http://localhost:8001", server.URL, nil)
 		resp, err := service.SimulateInvocation(context.Background(), contractId, sourceAccount, "get_metadata", []xdr.ScVal{}, timeout, "FUTURENET")
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
@@ -439,7 +489,7 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 		}))
 		defer pubnetServer.Close()
 
-		service := NewRPCService(pubnetServer.URL, "http://localhost:8001", "http://localhost:8002")
+		service := NewRPCService(pubnetServer.URL, "http://localhost:8001", "http://localhost:8002", nil)
 		response, err := service.GetLedgerEntries(context.Background(), []string{"foo"}, types.PUBLIC)
 
 		require.NoError(t, err)
@@ -465,7 +515,7 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 		}))
 		defer testnetServer.Close()
 
-		service := NewRPCService("http://localhost:8000", testnetServer.URL, "http://localhost:8000")
+		service := NewRPCService("http://localhost:8000", testnetServer.URL, "http://localhost:8000", nil)
 		response, err := service.GetLedgerEntries(context.Background(), []string{"foo"}, types.TESTNET)
 
 		require.NoError(t, err)
@@ -491,7 +541,7 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 		}))
 		defer futurenetServer.Close()
 
-		service := NewRPCService("http://localhost:8000", "http://localhost:8001", futurenetServer.URL)
+		service := NewRPCService("http://localhost:8000", "http://localhost:8001", futurenetServer.URL, nil)
 		response, err := service.GetLedgerEntries(context.Background(), []string{"foo"}, types.FUTURENET)
 
 		require.NoError(t, err)
@@ -518,7 +568,7 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 		}))
 		defer futurenetServer.Close()
 
-		service := NewRPCService("http://localhost:8000", "http://localhost:8001", "http://localhost:8002")
+		service := NewRPCService("http://localhost:8000", "http://localhost:8001", "http://localhost:8002", nil)
 		response, err := service.GetLedgerEntries(context.Background(), []string{"foo"}, types.FUTURENET)
 
 		assert.Nil(t, response)
