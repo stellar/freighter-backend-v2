@@ -1,4 +1,4 @@
-// ABOUTME: Defines all Prometheus metric collectors for the Freighter backend.
+// ABOUTME: Defines all Prometheus metric collectors and the Record helper for the Freighter backend.
 // ABOUTME: Groups HTTP request metrics and external service call metrics into a single Metrics struct.
 package metrics
 
@@ -89,6 +89,19 @@ func NewService(reg prometheus.Registerer) *Service {
 	}
 	reg.MustRegister(s.CallsTotal, s.CallDuration, s.ErrorsTotal)
 	return s
+}
+
+// Record records call metrics for a service method invocation.
+// It is nil-safe: if m is nil, it is a no-op, allowing services to work without metrics in tests.
+func Record(m *Service, service, method, network string, duration float64, err error) {
+	if m == nil {
+		return
+	}
+	m.CallsTotal.WithLabelValues(service, method, network).Inc()
+	m.CallDuration.WithLabelValues(service, method, network).Observe(duration)
+	if err != nil {
+		m.ErrorsTotal.WithLabelValues(service, method, network, ClassifyError(err)).Inc()
+	}
 }
 
 // ClassifyError categorizes a service call error for the error_type metric label.

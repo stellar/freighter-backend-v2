@@ -9,6 +9,7 @@ import (
 	"github.com/stellar/wallet-backend/pkg/wbclient"
 	"github.com/stellar/wallet-backend/pkg/wbclient/auth"
 
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
@@ -20,9 +21,10 @@ type walletBackendService struct {
 	pubnetClient  *wbclient.Client
 	testnetClient *wbclient.Client
 	httpClient    *http.Client
+	svcMetrics    *metrics.Service
 }
 
-func NewWalletBackendService(pubnetUrl, testnetUrl, pubnetSigningKey, testnetSigningKey string) (types.WalletBackendService, error) {
+func NewWalletBackendService(pubnetUrl, testnetUrl, pubnetSigningKey, testnetSigningKey string, m *metrics.Service) (types.WalletBackendService, error) {
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
@@ -67,6 +69,7 @@ func NewWalletBackendService(pubnetUrl, testnetUrl, pubnetSigningKey, testnetSig
 		pubnetClient:  pubnetClient,
 		testnetClient: testnetClient,
 		httpClient:    httpClient,
+		svcMetrics:    m,
 	}, nil
 }
 
@@ -74,7 +77,12 @@ func (w *walletBackendService) Name() string {
 	return walletBackendServiceName
 }
 
-func (w *walletBackendService) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
+func (w *walletBackendService) GetHealth(ctx context.Context, network string) (_ types.GetHealthResponse, err error) {
+	start := time.Now()
+	defer func() {
+		metrics.Record(w.svcMetrics, walletBackendServiceName, "GetHealth", network, time.Since(start).Seconds(), err)
+	}()
+
 	client := w.configureNetworkClient(network)
 	if client == nil {
 		return types.GetHealthResponse{Status: types.StatusError}, fmt.Errorf("wallet backend client not configured for network: %s", network)
@@ -110,7 +118,12 @@ func (w *walletBackendService) configureNetworkClient(network string) *wbclient.
 	return w.pubnetClient
 }
 
-func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context, addresses []string, network string) (interface{}, error) {
+func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context, addresses []string, network string) (_ interface{}, err error) {
+	start := time.Now()
+	defer func() {
+		metrics.Record(w.svcMetrics, walletBackendServiceName, "GetBalancesByAccountAddresses", network, time.Since(start).Seconds(), err)
+	}()
+
 	client := w.configureNetworkClient(network)
 	if client == nil {
 		return nil, fmt.Errorf("wallet backend client not configured for network: %s", network)

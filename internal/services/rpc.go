@@ -13,6 +13,7 @@ import (
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
 
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
@@ -26,6 +27,7 @@ type rpcService struct {
 	testnetClient   *rpcclient.Client
 	futurenetClient *rpcclient.Client
 	httpClient      *http.Client
+	svcMetrics      *metrics.Service
 }
 
 func createDefaultClient() *http.Client {
@@ -50,7 +52,7 @@ func createDefaultClient() *http.Client {
 	}
 }
 
-func NewRPCService(rpcURL string, testnetRPCURL string, futurenetRPCURL string) types.RPCService {
+func NewRPCService(rpcURL string, testnetRPCURL string, futurenetRPCURL string, m *metrics.Service) types.RPCService {
 	httpClient := createDefaultClient()
 
 	return &rpcService{
@@ -58,6 +60,7 @@ func NewRPCService(rpcURL string, testnetRPCURL string, futurenetRPCURL string) 
 		pubnetClient:    rpcclient.NewClient(rpcURL, httpClient),
 		testnetClient:   rpcclient.NewClient(testnetRPCURL, httpClient),
 		futurenetClient: rpcclient.NewClient(futurenetRPCURL, httpClient),
+		svcMetrics:      m,
 	}
 }
 
@@ -77,7 +80,12 @@ func (r *rpcService) Name() string {
 	return serviceName
 }
 
-func (r *rpcService) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
+func (r *rpcService) GetHealth(ctx context.Context, network string) (_ types.GetHealthResponse, err error) {
+	start := time.Now()
+	defer func() {
+		metrics.Record(r.svcMetrics, serviceName, "GetHealth", network, time.Since(start).Seconds(), err)
+	}()
+
 	networkclient := r.configureNetworkClient(network)
 	response, err := networkclient.GetHealth(ctx)
 	if err != nil {
@@ -93,7 +101,12 @@ func (r *rpcService) SimulateTx(
 	ctx context.Context,
 	tx *txnbuild.Transaction,
 	network string,
-) (types.SimulateTransactionResponse, error) {
+) (_ types.SimulateTransactionResponse, err error) {
+	start := time.Now()
+	defer func() {
+		metrics.Record(r.svcMetrics, serviceName, "SimulateTx", network, time.Since(start).Seconds(), err)
+	}()
+
 	txeB64, err := tx.Base64()
 	if err != nil {
 		return nil, fmt.Errorf("could not encode transaction: %w", err)
@@ -118,7 +131,7 @@ func (r *rpcService) SimulateTx(
 	}
 
 	var retval xdr.ScVal
-	if err := xdr.SafeUnmarshalBase64(*resp.Results[0].ReturnValueXDR, &retval); err != nil {
+	if err = xdr.SafeUnmarshalBase64(*resp.Results[0].ReturnValueXDR, &retval); err != nil {
 		return nil, fmt.Errorf("failed to decode result XDR: %w", err)
 	}
 
@@ -133,7 +146,12 @@ func (r *rpcService) SimulateInvocation(
 	params []xdr.ScVal,
 	timeout txnbuild.TimeBounds,
 	network string,
-) (types.SimulateTransactionResponse, error) {
+) (_ types.SimulateTransactionResponse, err error) {
+	start := time.Now()
+	defer func() {
+		metrics.Record(r.svcMetrics, serviceName, "SimulateInvocation", network, time.Since(start).Seconds(), err)
+	}()
+
 	contractHash := contractId.ContractId
 	contractIdStr, err := strkey.Encode(strkey.VersionByteContract, contractHash[:])
 	if err != nil || !utils.IsValidContractID(contractIdStr) {
@@ -169,7 +187,12 @@ func (r *rpcService) SimulateInvocation(
 	return r.SimulateTx(ctx, tx, network)
 }
 
-func (r *rpcService) GetLedgerEntries(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
+func (r *rpcService) GetLedgerEntries(ctx context.Context, keys []string, network string) (_ []types.LedgerEntryMap, err error) {
+	start := time.Now()
+	defer func() {
+		metrics.Record(r.svcMetrics, serviceName, "GetLedgerEntries", network, time.Since(start).Seconds(), err)
+	}()
+
 	networkClient := r.configureNetworkClient(network)
 	response, err := networkClient.GetLedgerEntries(ctx, rpc.GetLedgerEntriesRequest{
 		Keys:   keys,

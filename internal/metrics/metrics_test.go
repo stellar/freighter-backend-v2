@@ -1,5 +1,5 @@
-// ABOUTME: Unit tests for Prometheus metric definitions and registration.
-// ABOUTME: Verifies metrics register without panic, pass lint, and classifyError works correctly.
+// ABOUTME: Unit tests for Prometheus metric definitions, registration, and the Record helper.
+// ABOUTME: Verifies metrics register without panic, pass lint, Record records correctly, and ClassifyError works.
 package metrics
 
 import (
@@ -78,6 +78,39 @@ func TestNewService_MetricCount(t *testing.T) {
 	// 3 metric families: calls_total, call_duration_seconds, errors_total
 	count := testutil.CollectAndCount(reg)
 	assert.Equal(t, 3, count)
+}
+
+func TestRecord_IncrementsCallsAndDuration(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	svc := NewService(reg)
+
+	Record(svc, "rpc", "GetHealth", "TESTNET", 0.5, nil)
+
+	callCount := testutil.ToFloat64(svc.CallsTotal.WithLabelValues("rpc", "GetHealth", "TESTNET"))
+	assert.Equal(t, float64(1), callCount)
+
+	// Verify no errors recorded on success
+	errCount := testutil.ToFloat64(svc.ErrorsTotal.WithLabelValues("rpc", "GetHealth", "TESTNET", "internal"))
+	assert.Equal(t, float64(0), errCount)
+}
+
+func TestRecord_IncrementsErrorsOnFailure(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	svc := NewService(reg)
+
+	Record(svc, "rpc", "GetHealth", "PUBLIC", 0.1, fmt.Errorf("something broke"))
+
+	callCount := testutil.ToFloat64(svc.CallsTotal.WithLabelValues("rpc", "GetHealth", "PUBLIC"))
+	assert.Equal(t, float64(1), callCount)
+
+	errCount := testutil.ToFloat64(svc.ErrorsTotal.WithLabelValues("rpc", "GetHealth", "PUBLIC", "internal"))
+	assert.Equal(t, float64(1), errCount)
+}
+
+func TestRecord_NilServiceDoesNotPanic(t *testing.T) {
+	require.NotPanics(t, func() {
+		Record(nil, "rpc", "GetHealth", "TESTNET", 0.1, nil)
+	})
 }
 
 func TestClassifyError(t *testing.T) {

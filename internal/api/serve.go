@@ -64,8 +64,7 @@ func (s *ApiServer) Start() error {
 func (s *ApiServer) initServices() error {
 	s.redis = store.NewRedisStore(s.cfg.RedisConfig.Host, s.cfg.RedisConfig.Port, s.cfg.RedisConfig.Password)
 
-	rpcService := services.NewRPCService(s.cfg.RpcConfig.PubnetRpcUrl, s.cfg.RpcConfig.TestnetRpcUrl, s.cfg.RpcConfig.FuturenetRpcUrl)
-	s.rpcService = metrics.NewInstrumentedRPCService(rpcService, s.appMetrics.Service)
+	s.rpcService = services.NewRPCService(s.cfg.RpcConfig.PubnetRpcUrl, s.cfg.RpcConfig.TestnetRpcUrl, s.cfg.RpcConfig.FuturenetRpcUrl, s.appMetrics.Service)
 
 	// Initialize wallet backend service if configured
 	walletBackendService, err := services.NewWalletBackendService(
@@ -73,12 +72,13 @@ func (s *ApiServer) initServices() error {
 		s.cfg.WalletBackendConfig.TestnetUrl,
 		s.cfg.WalletBackendConfig.PubnetSigningKey,
 		s.cfg.WalletBackendConfig.TestnetSigningKey,
+		s.appMetrics.Service,
 	)
 	if err != nil {
 		logger.Error("Failed to initialize wallet backend service", "error", err)
 		return err
 	}
-	s.walletBackendService = metrics.NewInstrumentedWalletBackendService(walletBackendService, s.appMetrics.Service)
+	s.walletBackendService = walletBackendService
 
 	return nil
 }
