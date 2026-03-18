@@ -25,8 +25,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 
 // HTTP holds HTTP request metrics.
 type HTTP struct {
-	RequestsTotal    *prometheus.CounterVec
-	RequestDuration  *prometheus.HistogramVec
+	// RequestsTotal counts completed HTTP requests, labeled by handler pattern, method, and status code.
+	RequestsTotal *prometheus.CounterVec
+	// RequestDuration observes request latency in seconds as a histogram, with the same labels as RequestsTotal.
+	RequestDuration *prometheus.HistogramVec
+	// InFlightRequests is a gauge tracking the number of HTTP requests currently being processed.
+	// It increments on request entry and decrements on response completion.
 	InFlightRequests prometheus.Gauge
 }
 
@@ -51,11 +55,15 @@ func NewHTTP(reg prometheus.Registerer) *HTTP {
 	return h
 }
 
-// Service holds external service call metrics.
+// Service holds external service call metrics (RPC, wallet-backend, etc.).
 type Service struct {
-	CallsTotal   *prometheus.CounterVec
+	// CallsTotal counts completed external service calls, labeled by service name, method, and network.
+	CallsTotal *prometheus.CounterVec
+	// CallDuration observes service call latency in seconds as a histogram, with the same labels as CallsTotal.
 	CallDuration *prometheus.HistogramVec
-	ErrorsTotal  *prometheus.CounterVec
+	// ErrorsTotal counts failed service calls, labeled by service name, method, network, and error_type
+	// (either "timeout" for context deadline/canceled or "other" for all other errors).
+	ErrorsTotal *prometheus.CounterVec
 }
 
 // NewService creates and registers service call metrics with the given registerer.
