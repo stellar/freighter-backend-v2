@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/stellar/wallet-backend/pkg/wbclient"
@@ -102,7 +103,11 @@ func (w *walletBackendService) GetHealth(ctx context.Context, network string) (_
 	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
-		return types.GetHealthResponse{Status: types.StatusError}, fmt.Errorf("health endpoint returned status %d", resp.StatusCode)
+		return types.GetHealthResponse{Status: types.StatusError}, &metrics.UpstreamError{
+			Kind: "http_error",
+			Code: resp.StatusCode,
+			Err:  fmt.Errorf("health endpoint returned status %d", resp.StatusCode),
+		}
 	}
 
 	return types.GetHealthResponse{Status: types.StatusHealthy}, nil
@@ -131,8 +136,21 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 
 	balances, err := client.GetBalancesByAccountAddresses(ctx, addresses)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get balances from wallet backend: %w", err)
+		return nil, fmt.Errorf("failed to get balances from wallet backend: %w", classifyWBError(err))
 	}
 
 	return balances, nil
+}
+
+// classifyWBError wraps wbclient errors with UpstreamError based on error message patterns.
+// wbclient uses fmt.Sprintf (not %w), so we match on string content.
+func classifyWBError(err error) error {
+	msg := err.Error()
+	if strings.Contains(msg, "GraphQL error:") {
+		return &metrics.UpstreamError{Kind: "graphql_error", Err: err}
+	}
+	if strings.Contains(msg, "unexpected statusCode=") {
+		return &metrics.UpstreamError{Kind: "http_error", Err: err}
+	}
+	return err
 }

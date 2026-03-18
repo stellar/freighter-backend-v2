@@ -113,6 +113,37 @@ func TestRecord_NilServiceDoesNotPanic(t *testing.T) {
 	})
 }
 
+func TestUpstreamError_Error(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *UpstreamError
+		expected string
+	}{
+		{
+			name:     "kind only",
+			err:      &UpstreamError{Kind: "simulation_error", Err: fmt.Errorf("sim failed")},
+			expected: "simulation_error: sim failed",
+		},
+		{
+			name:     "kind with code",
+			err:      &UpstreamError{Kind: "http_error", Code: 503, Err: fmt.Errorf("service unavailable")},
+			expected: "http_error (code 503): service unavailable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.err.Error())
+		})
+	}
+}
+
+func TestUpstreamError_Unwrap(t *testing.T) {
+	inner := fmt.Errorf("inner error")
+	upErr := &UpstreamError{Kind: "graphql_error", Err: inner}
+	assert.ErrorIs(t, upErr, inner)
+}
+
 func TestClassifyError(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -168,16 +199,61 @@ func TestClassifyError(t *testing.T) {
 			},
 			expected: "connection",
 		},
-		// upstream: JSON-RPC errors from dependencies
+		// UpstreamError: simulation, graphql, http errors
 		{
-			name:     "jrpc2 error",
-			err:      jrpc2.Errorf(jrpc2.InternalError, "server error"),
-			expected: "upstream",
+			name:     "simulation error",
+			err:      &UpstreamError{Kind: "simulation_error", Err: fmt.Errorf("simulateTransaction returned error: foo")},
+			expected: "simulation_error",
 		},
 		{
-			name:     "wrapped jrpc2 error",
+			name:     "graphql error",
+			err:      &UpstreamError{Kind: "graphql_error", Err: fmt.Errorf("GraphQL error: something")},
+			expected: "graphql_error",
+		},
+		{
+			name:     "http error with code 503",
+			err:      &UpstreamError{Kind: "http_error", Code: 503, Err: fmt.Errorf("health endpoint returned status 503")},
+			expected: "http_error:503",
+		},
+		{
+			name:     "http error with code 429",
+			err:      &UpstreamError{Kind: "http_error", Code: 429, Err: fmt.Errorf("rate limited")},
+			expected: "http_error:429",
+		},
+		{
+			name:     "http error without code",
+			err:      &UpstreamError{Kind: "http_error", Err: fmt.Errorf("unexpected statusCode=500")},
+			expected: "http_error",
+		},
+		{
+			name:     "wrapped UpstreamError preserves kind",
+			err:      fmt.Errorf("call failed: %w", &UpstreamError{Kind: "simulation_error", Err: fmt.Errorf("error")}),
+			expected: "simulation_error",
+		},
+		// Priority: timeout wins over UpstreamError
+		{
+			name:     "UpstreamError wrapping deadline exceeded classifies as timeout",
+			err:      &UpstreamError{Kind: "http_error", Code: 504, Err: context.DeadlineExceeded},
+			expected: "timeout",
+		},
+		// Priority: connection wins over UpstreamError
+		{
+			name: "UpstreamError wrapping net.OpError classifies as connection",
+			err: &UpstreamError{Kind: "http_error", Code: 503, Err: &net.OpError{
+				Op: "dial", Net: "tcp", Err: fmt.Errorf("connection refused"),
+			}},
+			expected: "connection",
+		},
+		// rpc_error: JSON-RPC errors with error code
+		{
+			name:     "jrpc2 internal error",
+			err:      jrpc2.Errorf(jrpc2.InternalError, "server error"),
+			expected: "rpc_error:-32603",
+		},
+		{
+			name:     "wrapped jrpc2 method not found",
 			err:      fmt.Errorf("rpc call failed: %w", jrpc2.Errorf(jrpc2.MethodNotFound, "not found")),
-			expected: "upstream",
+			expected: "rpc_error:-32601",
 		},
 		// internal: encoding, validation, and other local failures
 		{

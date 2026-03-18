@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
@@ -291,6 +293,54 @@ func TestRPCService_SimulateTx(t *testing.T) {
 		scVal, err := service.SimulateTx(context.Background(), tx, "PUBLIC")
 		require.NotNil(t, err)
 		assert.Equal(t, (*xdr.ScVal)(nil), scVal)
+	})
+
+	t.Run("simulation error wraps as UpstreamError", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			response := `{
+				"jsonrpc":"2.0",
+				"id":1,
+				"result":{
+					"error":"transaction simulation failed",
+					"results":[]
+				}
+			}`
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprint(w, response)
+		}))
+		defer server.Close()
+
+		service := NewRPCService(server.URL, "http://localhost:8001", "http://localhost:8002", nil)
+
+		destinationKP := keypair.MustRandom()
+		op := txnbuild.Payment{
+			Destination: destinationKP.Address(),
+			Amount:      "10",
+			Asset:       txnbuild.NativeAsset{},
+		}
+
+		txParams := txnbuild.TransactionParams{
+			SourceAccount:        sourceAccount,
+			IncrementSequenceNum: true,
+			Operations:           []txnbuild.Operation{&op},
+			BaseFee:              txnbuild.MinBaseFee,
+			Preconditions: txnbuild.Preconditions{
+				TimeBounds: txnbuild.NewTimeout(300),
+			},
+		}
+
+		tx, err := txnbuild.NewTransaction(txParams)
+		require.NoError(t, err)
+
+		_, err = service.SimulateTx(context.Background(), tx, "PUBLIC")
+		require.Error(t, err)
+
+		var upErr *metrics.UpstreamError
+		require.True(t, errors.As(err, &upErr), "expected UpstreamError, got %T: %v", err, err)
+		assert.Equal(t, "simulation_error", upErr.Kind)
+		assert.Equal(t, 0, upErr.Code)
+		assert.Equal(t, "simulation_error", metrics.ClassifyError(err))
 	})
 }
 

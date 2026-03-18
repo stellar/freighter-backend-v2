@@ -120,7 +120,10 @@ func (r *rpcService) SimulateTx(
 		return nil, fmt.Errorf("simulateTransaction RPC failed: %w", err)
 	}
 	if resp.Error != "" {
-		return nil, fmt.Errorf("simulateTransaction returned error: %s", resp.Error)
+		return nil, &metrics.UpstreamError{
+			Kind: "simulation_error",
+			Err:  fmt.Errorf("simulateTransaction returned error: %s", resp.Error),
+		}
 	}
 	if len(resp.Results) == 0 {
 		return nil, fmt.Errorf("no results in simulation")
