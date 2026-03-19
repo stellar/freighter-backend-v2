@@ -38,9 +38,12 @@ func TestGetProtocols(t *testing.T) {
 		assert.Equal(t, "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/blend.png", protocols[0].BackgroundURL)
 		assert.Equal(t, "Blend is a DeFi protocol that allows any entity to create or utilize an immutable lending market that fits its needs.", protocols[0].Description)
 		assert.Equal(t, false, protocols[0].IsBlacklisted)
+		require.NotNil(t, protocols[0].IsTrending)
+		assert.Equal(t, true, *protocols[0].IsTrending)
 		assert.Equal(t, true, protocols[0].IsWalletConnectNotSupported)
 		assert.Equal(t, "Phoenix", protocols[1].Name)
 		assert.Equal(t, true, protocols[1].IsBlacklisted)
+		assert.Nil(t, protocols[1].IsTrending)
 		assert.Equal(t, false, protocols[1].IsWalletConnectNotSupported)
 		assert.Equal(t, "Allbridge Core", protocols[2].Name)
 
@@ -56,6 +59,8 @@ func TestGetProtocols(t *testing.T) {
 		require.NoError(t, err)
 		_, hasBackgroundURL := raw.Data.Protocols[2]["background_url"]
 		assert.False(t, hasBackgroundURL, "background_url key should be absent for protocols without a background image")
+		_, hasTrending := raw.Data.Protocols[2]["is_trending"]
+		assert.False(t, hasTrending, "is_trending key should be absent for protocols without a trending flag")
 	})
 	t.Run("should return error if protocols file is not found", func(t *testing.T) {
 		t.Parallel()

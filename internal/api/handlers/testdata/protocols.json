@@ -6,6 +6,7 @@
       "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/blend.svg",
       "background_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/blend.png",
       "description": "Blend is a DeFi protocol that allows any entity to create or utilize an immutable lending market that fits its needs.",
+      "is_trending": true,
       "is_wc_not_supported": true
     },
     {

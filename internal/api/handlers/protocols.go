@@ -34,6 +34,7 @@ type Protocol struct {
 	BackgroundURL               string   `json:"background_url,omitempty"`
 	Description                 string   `json:"description"`
 	IsBlacklisted               bool     `json:"is_blacklisted"`
+	IsTrending                  *bool    `json:"is_trending,omitempty"`
 	IsWalletConnectNotSupported bool     `json:"is_wc_not_supported"`
 }
 
