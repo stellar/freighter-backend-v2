@@ -75,6 +75,8 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 	assert.Equal(t, "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/blend.png", protocols[0].BackgroundURL)
 	assert.Equal(t, "Blend is a DeFi protocol that allows any entity to create or utilize an immutable lending market that fits its needs.", protocols[0].Description)
 	assert.Equal(t, false, protocols[0].IsBlacklisted)
+	require.NotNil(t, protocols[0].IsTrending)
+	assert.Equal(t, true, *protocols[0].IsTrending)
 	assert.Equal(t, "Phoenix", protocols[1].Name)
 	assert.Equal(t, "Allbridge Core", protocols[2].Name)
 
@@ -92,6 +94,10 @@ func (s *ProtocolsTestSuite) TestGetProtocolsReturns200StatusCodeForValidProtoco
 	assert.False(t, phoenixHasBackgroundURL, "background_url key should be absent for protocols without a background image")
 	_, allbridgeHasBackgroundURL := raw.Data.Protocols[2]["background_url"]
 	assert.False(t, allbridgeHasBackgroundURL, "background_url key should be absent for protocols without a background image")
+	_, phoenixHasTrending := raw.Data.Protocols[1]["is_trending"]
+	assert.False(t, phoenixHasTrending, "is_trending key should be absent for protocols without a trending flag")
+	_, allbridgeHasTrending := raw.Data.Protocols[2]["is_trending"]
+	assert.False(t, allbridgeHasTrending, "is_trending key should be absent for protocols without a trending flag")
 }
 
 func (s *ProtocolsTestSuite) TestGetProtocolsReturns500StatusCodeForInvalidProtocols() {
