@@ -21,7 +21,11 @@ docker compose version 2>&1 || which docker-compose
 golangci-lint --version 2>&1 || which golangci-lint
 
 # Make
-make --version 2>&1 | head -1 || which make
+if command -v make >/dev/null 2>&1; then
+  make --version 2>&1 | head -1
+else
+  which make
+fi
 ```
 
 ## Step 2: Present results

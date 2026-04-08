@@ -84,7 +84,7 @@ See `Makefile` for the complete list.
 ## Code Conventions
 
 - **Formatting:** `gofmt` and `gofumpt`
-- **Linting:** `golangci-lint` (5m timeout)
+- **Linting:** `golangci-lint` (local: default timeout via `make lint`; CI: `--timeout=5m`)
 - **Import organization:** `goimports` with local prefix
   `github.com/stellar/freighter-backend-v2`
 - **Tests:** All changes must be covered. Coverage threshold: 80%.
