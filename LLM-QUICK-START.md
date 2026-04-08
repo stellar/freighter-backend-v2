@@ -79,7 +79,7 @@ docker compose -f deployments/docker-compose.yml up -d redis
 
 # Build and run
 make build
-make run
+./freighter-backend serve --config-path configs/.toml
 ```
 
 ## Step 6: Verify
@@ -100,5 +100,5 @@ Setup Complete
 
   Ready to run:
   1. docker compose -f deployments/docker-compose.yml up -d redis  (start Redis)
-  2. make run                                                       (start server)
+  2. ./freighter-backend serve --config-path configs/.toml           (start server)
 ```

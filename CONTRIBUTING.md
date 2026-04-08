@@ -15,6 +15,7 @@ For the Stellar organization's general contribution guidelines, see the
 | Docker Compose| Latest    | Included with Docker Desktop or install the [Compose plugin](https://docs.docker.com/compose/install/) |
 | Make          | Latest    | Pre-installed on macOS; `sudo apt install make` on Linux           |
 | golangci-lint | Latest    | `brew install golangci-lint` or [docs](https://golangci-lint.run/) |
+| gofumpt       | Latest    | `go install mvdan.cc/gofumpt@latest`                               |
 
 ## Getting Started
 
