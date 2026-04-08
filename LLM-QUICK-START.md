@@ -63,8 +63,9 @@ Set these for local development:
 | `FREIGHTER_BACKEND_PORT` | `3002`                                   |
 | `FREIGHTER_BACKEND_HOST` | `localhost`                              |
 | `MODE`                   | `development`                            |
-| `RPC_URL`                | `https://soroban-testnet.stellar.org`    |
 | `TESTNET_RPC_URL`        | `https://soroban-testnet.stellar.org`    |
+| `PUBNET_RPC_URL`         | `https://soroban.stellar.org` (or `not-set`) |
+| `FUTURENET_RPC_URL`      | `not-set` (unless testing futurenet)     |
 | `REDIS_HOST`             | `localhost`                              |
 | `REDIS_PORT`             | `6379`                                   |
 
@@ -74,7 +75,7 @@ Other variables can stay as `not-set` for local dev.
 
 ```bash
 # Start Redis
-docker compose -f deployments/docker-compose.yml up -d
+docker compose -f deployments/docker-compose.yml up -d redis
 
 # Build and run
 make build
@@ -84,8 +85,9 @@ make run
 ## Step 6: Verify
 
 ```bash
-make check        # All quality checks
-make unit-test    # Unit tests (80% coverage threshold)
+make check              # All quality checks
+make unit-test          # Unit tests
+make unit-test-coverage # Generate local coverage report (80% threshold enforced in CI)
 ```
 
 ## Step 7: Summary
@@ -97,9 +99,6 @@ Setup Complete
   Configured: configs/.toml from .toml-EXAMPLE
 
   Ready to run:
-  1. docker compose -f deployments/docker-compose.yml up -d  (start Redis)
-  2. make run                                                 (start server)
-
-  Manual action needed:
-  - [ ] Set RPC_URL to a Stellar RPC endpoint
+  1. docker compose -f deployments/docker-compose.yml up -d redis  (start Redis)
+  2. make run                                                       (start server)
 ```

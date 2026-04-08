@@ -12,6 +12,8 @@ For the Stellar organization's general contribution guidelines, see the
 | ------------- | --------- | ------------------------------------------------------------------ |
 | Go            | >= 1.24.0 | [go.dev/dl](https://go.dev/dl/) (toolchain 1.24.2)                |
 | Docker        | Latest    | [docker.com](https://docs.docker.com/get-docker/) (for Redis)     |
+| Docker Compose| Latest    | Included with Docker Desktop or install the [Compose plugin](https://docs.docker.com/compose/install/) |
+| Make          | Latest    | Pre-installed on macOS; `sudo apt install make` on Linux           |
 | golangci-lint | Latest    | `brew install golangci-lint` or [docs](https://golangci-lint.run/) |
 
 ## Getting Started
@@ -33,9 +35,9 @@ If you don't use an LLM assistant, follow the manual setup below.
 git clone https://github.com/stellar/freighter-backend-v2.git
 cd freighter-backend-v2
 cp configs/.toml-EXAMPLE configs/.toml    # Then fill in values (see below)
-docker compose -f deployments/docker-compose.yml up -d  # Start Redis
+docker compose -f deployments/docker-compose.yml up -d redis  # Start Redis only
 make build
-make run
+./freighter-backend serve --config-path configs/.toml
 ```
 
 ### Configuration
@@ -49,9 +51,9 @@ Copy `configs/.toml-EXAMPLE` to `configs/.toml`. For local development:
 | `FREIGHTER_BACKEND_PORT` | `3002`                                               |
 | `FREIGHTER_BACKEND_HOST` | `localhost`                                          |
 | `MODE`                   | `development`                                        |
-| `RPC_URL`                | A Stellar RPC endpoint (e.g., `https://soroban-testnet.stellar.org`) |
 | `TESTNET_RPC_URL`        | `https://soroban-testnet.stellar.org`                |
 | `PUBNET_RPC_URL`         | `https://soroban.stellar.org` (or leave as `not-set`) |
+| `FUTURENET_RPC_URL`      | Leave as `not-set` unless testing futurenet           |
 | `REDIS_HOST`             | `localhost`                                          |
 | `REDIS_PORT`             | `6379`                                               |
 
@@ -69,11 +71,11 @@ Copy `configs/.toml-EXAMPLE` to `configs/.toml`. For local development:
 ```bash
 make check              # All quality checks (lint, fmt, vet, shadow, etc.)
 make unit-test          # Unit tests
-make unit-test-coverage # Unit tests with 80% coverage threshold
+make unit-test-coverage # Generate coverage report (80% threshold enforced in CI)
 make integration-test   # Integration tests (uses testcontainers)
 make build              # Build binary
-make run                # Run the server
-make docker-up          # Docker Compose up
+./freighter-backend serve --config-path configs/.toml  # Run the server
+make docker-up          # Docker Compose up (all services)
 ```
 
 See `Makefile` for the complete list.
