@@ -1,4 +1,4 @@
-# Freighter Backend V2 — LLM Quick Start
+# Freighter Backend V2 — Quick Start Guide
 
 Evaluate the contributor's machine against all prerequisites for
 freighter-backend-v2 (Go), install what's missing, and run the initial setup.
