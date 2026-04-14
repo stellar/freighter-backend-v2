@@ -39,7 +39,7 @@ func (s *HealthTestSuite) TestGetRPCHealthReturns200StatusCode() {
 
 	resp, err := http.Get(fmt.Sprintf("%s/api/v1/rpc-health", s.connectionString))
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Verify the response body contains a status field with a valid value

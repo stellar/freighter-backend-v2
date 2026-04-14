@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stellar/go-stellar-sdk/txnbuild"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -174,6 +175,51 @@ func TestFetchMeridianPayCollectibles(t *testing.T) {
 		assert.NotNil(t, res.Error)
 		assert.Contains(t, res.Error.ErrorMessage, "no collectibles fetched")
 	}
+}
+
+func TestFetchMeridianPayCollectibles_PanicRecovery(t *testing.T) {
+	// Mock that panics during SimulateInvocation — previously this would crash the process
+	mockRPC := &utils.MockRPCService{
+		SimulatePanic: true,
+	}
+	handler := NewCollectiblesHandler(mockRPC, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "CDSN4MICK7U5XOP4DE6OIZQCRMYO3UTQ5VYZV7ZA7H63OICZPBLXYRGJ", "", 10)
+
+	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
+	ctx := context.Background()
+
+	// Should not panic — goroutines recover and return error results
+	results, err := handler.fetchMeridianPayCollectibles(ctx, account, account.AccountID, "PUBLIC")
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	for _, res := range results {
+		assert.Nil(t, res.Collection)
+		require.NotNil(t, res.Error)
+		assert.Contains(t, res.Error.ErrorMessage, "panic")
+	}
+}
+
+func TestFetchMeridianPayCollectibles_NonVecResponse(t *testing.T) {
+	// Simulate a contract returning a non-Vec type (e.g. on a different network)
+	nonVecResult := &xdr.ScVal{
+		Type: xdr.ScValTypeScvVoid,
+	}
+	mockRPC := &utils.MockRPCService{
+		SimulateResultOverride: nonVecResult,
+	}
+	handler := NewCollectiblesHandler(mockRPC, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "", "", 10)
+
+	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
+	ctx := context.Background()
+
+	results, err := handler.fetchMeridianPayCollectibles(ctx, account, account.AccountID, "TESTNET")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	// Should get an error result, not a panic
+	assert.Nil(t, results[0].Collection)
+	require.NotNil(t, results[0].Error)
+	assert.Contains(t, results[0].Error.ErrorMessage, "fetching owner tokens")
 }
 
 func TestGetCollectibles_WithMeridianPayAddresses(t *testing.T) {

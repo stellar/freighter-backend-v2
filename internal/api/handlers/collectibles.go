@@ -241,6 +241,16 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer func() {
+				if p := recover(); p != nil {
+					results[i] = CollectionResult{
+						Error: &CollectionError{
+							ErrorMessage:      fmt.Sprintf("panic: %v", p),
+							CollectionAddress: contract,
+						},
+					}
+				}
+			}()
 
 			// Check context before starting work
 			select {

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/alitto/pond/v2"
@@ -218,7 +219,12 @@ func fetchOwnerTokens(
 		return nil, err
 	}
 
-	tokenIDs, err := utils.ScVecToStrings(*res.Vec)
+	vec, ok := res.GetVec()
+	if !ok {
+		return nil, fmt.Errorf("expected SCV_VEC result, got %v", res.Type)
+	}
+
+	tokenIDs, err := utils.ScVecToStrings(vec)
 	if err != nil {
 		return nil, err
 	}
