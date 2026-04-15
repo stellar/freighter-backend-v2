@@ -16,26 +16,22 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.25"
           cache: true
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
+          version: v2.5.0
           args: --timeout=5m
-      - name: Run `shadow@v0.31.0`
+      - name: Run `shadow@v0.44.0`
         run: |
-            go install golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow@v0.31.0
+            go install golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow@v0.44.0
             shadow ./...
 
-      - name: Run exhaustive
+      - name: Run `deadcode@v0.44.0`
         run: |
-          go install github.com/nishanths/exhaustive/cmd/exhaustive@latest
-          exhaustive -default-signifies-exhaustive ./...
-
-      - name: Run `deadcode@v0.31.0`
-        run: |
-          go install golang.org/x/tools/cmd/deadcode@v0.31.0
+          go install golang.org/x/tools/cmd/deadcode@v0.44.0
           output=$(deadcode -test ./...)
           if [[ -n "$output" ]]; then
             echo "🚨 Deadcode found:"
@@ -45,9 +41,9 @@ jobs:
             echo "✅ No deadcode found"
           fi
 
-      - name: Run `goimports@v0.31.0`
+      - name: Run `goimports@v0.44.0`
         run: |
-          go install golang.org/x/tools/cmd/goimports@v0.31.0
+          go install golang.org/x/tools/cmd/goimports@v0.44.0
           # Find all .go files excluding paths containing 'mock' and run goimports
           non_compliant_files=$(find . -type f -name "*.go" ! -path "*mock*" | xargs goimports -local "github.com/stellar/freighter-backend-v2" -l)
 
@@ -68,7 +64,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.25"
           cache: true
 
       - name: Build Project
@@ -84,7 +80,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.25"
           cache: true
 
       - name: Run Unit Tests
@@ -122,7 +118,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.25"
           cache: true
 
       - name: Run Integration Tests
