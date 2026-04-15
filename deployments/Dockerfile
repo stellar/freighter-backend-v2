@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 ############### Build stage ###############
-FROM golang:1.24-bullseye AS builder
+FROM golang:1.25-bookworm AS builder
 
 WORKDIR /app/freighter-backend
 COPY go.mod go.sum ./
@@ -10,7 +10,7 @@ COPY . ./
 RUN go build -o /bin/freighter-backend
 
 ############### Final stage ###############
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 # Install tini and other runtime dependencies
 RUN apt-get update && apt-get install -y tini wget && \
