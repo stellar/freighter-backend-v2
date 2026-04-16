@@ -11,6 +11,8 @@ import (
 
 type MockRPCService struct {
 	SimulateError          error
+	SimulateResultOverride *xdr.ScVal
+	SimulatePanic          bool
 	TokenURIOverride       string
 	GetLedgerEntryOverride []types.LedgerEntryMap
 	GetLedgerEntryError    error
@@ -45,8 +47,16 @@ func (m *MockRPCService) SimulateInvocation(
 	timeout txnbuild.TimeBounds,
 	network string,
 ) (types.SimulateTransactionResponse, error) {
+	if m.SimulatePanic {
+		panic("simulated RPC panic")
+	}
+
 	if m.SimulateError != nil {
 		return nil, m.SimulateError
+	}
+
+	if m.SimulateResultOverride != nil {
+		return m.SimulateResultOverride, nil
 	}
 
 	fn := string(functionName)

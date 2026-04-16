@@ -10,6 +10,7 @@ import (
 
 	"github.com/alitto/pond/v2"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/stellar/freighter-backend-v2/internal/utils"
@@ -137,4 +138,21 @@ func TestFetchOwnerTokens_SimulateInvocationError(t *testing.T) {
 
 	_, err := fetchOwnerTokens(mockRPC, context.Background(), account, contractID, owner, "PUBLIC")
 	assert.Error(t, err)
+}
+
+func TestFetchOwnerTokens_NonVecResponse(t *testing.T) {
+	// Simulate a contract that returns a non-Vec type (e.g. SCV_VOID)
+	nonVecResult := &xdr.ScVal{
+		Type: xdr.ScValTypeScvVoid,
+	}
+	mockRPC := &utils.MockRPCService{
+		SimulateResultOverride: nonVecResult,
+	}
+	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
+	owner := "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
+	contractID := "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
+
+	_, err := fetchOwnerTokens(mockRPC, context.Background(), account, contractID, owner, "PUBLIC")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "expected SCV_VEC result")
 }
