@@ -21,10 +21,9 @@ import (
 const (
 	serviceName = "rpc"
 
-	// MaxLedgerEntryKeys caps the number of keys forwarded to the upstream Stellar RPC in a
-	// single GetLedgerEntries call. Independent of any handler-level cap: if a future caller
-	// passes an unbounded slice this acts as a last-line defense against upstream abuse and
-	// local CPU/memory blow-up during response decoding.
+	// MaxLedgerEntryKeys mirrors stellar-rpc's getLedgerEntriesMaxKeys: upstream rejects
+	// getLedgerEntries calls with more than 200 keys. Enforced here so a future caller that
+	// bypasses handler-level caps still fails fast locally instead of round-tripping to RPC.
 	MaxLedgerEntryKeys = 200
 )
 

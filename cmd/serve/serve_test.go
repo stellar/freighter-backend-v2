@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/freighter-backend-v2/internal/config"
+	"github.com/stellar/freighter-backend-v2/internal/services"
 )
 
 func TestServeCmd_Command(t *testing.T) {
@@ -83,4 +84,32 @@ func TestServeCmd_Execute(t *testing.T) {
 	assert.Contains(t, string(out), "freighter-backend-host=test_host")
 	assert.Contains(t, string(out), "mode=test_mode")
 	assert.True(t, configUsed)
+}
+
+func TestServeCmd_RejectsMaxLedgerKeyAddressesAboveUpstreamCeiling(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--max-ledger-key-addresses", fmt.Sprintf("%d", services.MaxLedgerEntryKeys+1)})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds upstream Stellar RPC ceiling")
+}
+
+func TestServeCmd_AcceptsMaxLedgerKeyAddressesAtUpstreamCeiling(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--max-ledger-key-addresses", fmt.Sprintf("%d", services.MaxLedgerEntryKeys)})
+
+	require.NoError(t, cmd.Execute())
 }

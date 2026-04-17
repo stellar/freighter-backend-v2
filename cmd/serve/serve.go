@@ -1,10 +1,13 @@
 package serve
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 
 	"github.com/stellar/freighter-backend-v2/internal/api"
 	"github.com/stellar/freighter-backend-v2/internal/config"
+	"github.com/stellar/freighter-backend-v2/internal/services"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
@@ -20,6 +23,9 @@ func (s *ServeCmd) Command() *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if err := utils.InitializeConfig(cmd); err != nil {
 				return err
+			}
+			if n := s.Cfg.AppConfig.MaxLedgerKeyAddresses; n > services.MaxLedgerEntryKeys {
+				return fmt.Errorf("--max-ledger-key-addresses=%d exceeds upstream Stellar RPC ceiling of %d keys per getLedgerEntries call", n, services.MaxLedgerEntryKeys)
 			}
 			return nil
 		},
