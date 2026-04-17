@@ -574,4 +574,25 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 		assert.Nil(t, response)
 		assert.Equal(t, "failed to get ledger entries: [-32603] Post \"http://localhost:8002\": dial tcp [::1]:8002: connect: connection refused", err.Error())
 	})
+
+	t.Run("rejects requests exceeding MaxLedgerEntryKeys without calling upstream", func(t *testing.T) {
+		called := false
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = true
+		}))
+		defer upstream.Close()
+
+		service := NewRPCService(upstream.URL, "http://localhost:8001", "http://localhost:8002", nil)
+		keys := make([]string, MaxLedgerEntryKeys+1)
+		for i := range keys {
+			keys[i] = "k"
+		}
+
+		response, err := service.GetLedgerEntries(context.Background(), keys, types.PUBLIC)
+
+		assert.Nil(t, response)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "too many ledger entry keys")
+		assert.False(t, called, "upstream RPC must not be called when key count exceeds cap")
+	})
 }

@@ -100,7 +100,7 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 	collectiblesHandler := handlers.NewCollectiblesHandler(s.rpcService, s.cfg.AppConfig.MeridianPayTreasureHuntAddress, s.cfg.AppConfig.MeridianPayTreasurePoapAddress, s.cfg.AppConfig.MeridianPayStellarHouseAddress, s.cfg.RpcConfig.MaxConcurrentRPCCalls)
 	mux.HandleFunc("POST /api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles))
 
-	ledgerKeyAccountsHandler := handlers.NewLedgerKeyAccountHandler(s.rpcService)
+	ledgerKeyAccountsHandler := handlers.NewLedgerKeyAccountHandler(s.rpcService, s.cfg.AppConfig.MaxLedgerKeyAddresses)
 	mux.HandleFunc("POST /api/v1/ledger-key/accounts", handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts))
 
 	featureFlagsHandler := handlers.NewFeatureFlagsHandler()

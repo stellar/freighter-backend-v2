@@ -44,6 +44,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.MeridianPayStellarHouseAddress, "meridian-pay-stellar-house-address", "", "The Meridian Pay Stellar House collection address")
 	cmd.Flags().Int64Var(&s.Cfg.AppConfig.MaxRequestBodySize, "max-request-body-size", 1<<20, "Maximum request body size in bytes (default: 1MB)")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxBalanceAddresses, "max-balance-addresses", 100, "Maximum number of addresses allowed in account balances request")
+	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxLedgerKeyAddresses, "max-ledger-key-addresses", 100, "Maximum number of public keys allowed in a ledger-key/accounts request")
 
 	// RPC Config
 	cmd.Flags().StringVar(&s.Cfg.RpcConfig.PubnetRpcUrl, "pubnet-rpc-url", "", "The Pubnet URL of the Pubnet RPC instance")

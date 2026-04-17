@@ -28,7 +28,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			GetLedgerEntryOverride: utils.MockLedgerEntryData.LedgerEntry,
 		}
 
-		handler := NewLedgerKeyAccountHandler(mockRPC)
+		handler := NewLedgerKeyAccountHandler(mockRPC, 100)
 
 		body := `{
 			"public_keys": [
@@ -80,7 +80,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			GetLedgerEntryOverride: utils.MockLedgerEntryData.LedgerEntry,
 		}
 
-		handler := NewLedgerKeyAccountHandler(mockRPC)
+		handler := NewLedgerKeyAccountHandler(mockRPC, 100)
 
 		body := `{
 			"public_keys": [
@@ -151,7 +151,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			GetLedgerEntryOverride: utils.MockLedgerEntryData.LedgerEntry,
 		}
 
-		handler := NewLedgerKeyAccountHandler(mockRPC)
+		handler := NewLedgerKeyAccountHandler(mockRPC, 100)
 
 		body := `{
 			"public_keys": [
@@ -210,7 +210,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			GetLedgerEntryOverride: utils.MockLedgerEntryData.LedgerEntry,
 		}
 
-		handler := NewLedgerKeyAccountHandler(mockRPC)
+		handler := NewLedgerKeyAccountHandler(mockRPC, 100)
 
 		body := `{
 			"public_keys": [
@@ -264,7 +264,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			GetLedgerEntryOverride: utils.MockLedgerEntryData.LedgerEntry,
 		}
 
-		handler := NewLedgerKeyAccountHandler(mockRPC)
+		handler := NewLedgerKeyAccountHandler(mockRPC, 100)
 
 		body := `{
 			"public_keys": [
@@ -315,7 +315,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			GetLedgerEntryOverride: utils.MockLedgerEntryData.LedgerEntry,
 		}
 
-		handler := NewLedgerKeyAccountHandler(mockRPC)
+		handler := NewLedgerKeyAccountHandler(mockRPC, 100)
 
 		body := `{
 			"public_keys": [
@@ -344,7 +344,7 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 			GetLedgerEntryOverride: utils.MockLedgerEntryData.LedgerEntry,
 		}
 
-		handler := NewLedgerKeyAccountHandler(mockRPC)
+		handler := NewLedgerKeyAccountHandler(mockRPC, 100)
 
 		body := ``
 
@@ -354,5 +354,134 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 		err := handler.GetLedgerKeyAccounts(rr, req)
 		require.Error(t, err)
 		assert.EqualError(t, err, "Invalid request - public keys are required: invalid JSON: EOF")
+	})
+
+	t.Run("should reject requests exceeding MaxPublicKeys with 400", func(t *testing.T) {
+		t.Parallel()
+
+		mockRPC := &utils.MockRPCService{
+			GetLedgerEntryOverride: utils.MockLedgerEntryData.LedgerEntry,
+		}
+
+		const maxKeys = 3
+		handler := NewLedgerKeyAccountHandler(mockRPC, maxKeys)
+
+		keys := []string{
+			"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+			"GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+			"GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKX",
+			"GAWYJTG6RQFXMSOEF7LHUOSDOUQLAHNQGJO5QULS6FTHCR3HCPZDXJKY",
+		}
+		bodyBytes, err := json.Marshal(LedgerKeyAccountRequest{PublicKeys: keys})
+		require.NoError(t, err)
+
+		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?network=PUBLIC", strings.NewReader(string(bodyBytes)))
+		rr := httptest.NewRecorder()
+
+		err = handler.GetLedgerKeyAccounts(rr, req)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "too many public keys")
+		assert.Contains(t, err.Error(), "maximum is 3")
+		assert.Contains(t, err.Error(), "got 4")
+	})
+
+	t.Run("should allow requests at exactly MaxPublicKeys", func(t *testing.T) {
+		t.Parallel()
+
+		mockRPC := &utils.MockRPCService{
+			GetLedgerEntryOverride: utils.MockLedgerEntryData.LedgerEntry,
+		}
+
+		handler := NewLedgerKeyAccountHandler(mockRPC, 2)
+
+		body := `{
+			"public_keys": [
+				"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+				"GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+			]
+		}`
+
+		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?network=PUBLIC", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		err := handler.GetLedgerKeyAccounts(rr, req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, rr.Code)
+	})
+
+	t.Run("should allow unlimited keys when MaxPublicKeys is 0", func(t *testing.T) {
+		t.Parallel()
+
+		mockRPC := &utils.MockRPCService{
+			GetLedgerEntryOverride: utils.MockLedgerEntryData.LedgerEntry,
+		}
+
+		handler := NewLedgerKeyAccountHandler(mockRPC, 0)
+
+		body := `{
+			"public_keys": [
+				"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+				"GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+			]
+		}`
+
+		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?network=PUBLIC", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		err := handler.GetLedgerKeyAccounts(rr, req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, rr.Code)
+	})
+}
+
+func TestProcessLedgerKeyAccountsEntries(t *testing.T) {
+	t.Parallel()
+
+	entries := []types.LedgerEntryMap{
+		{Account: types.AccountInfo{AccountId: "GA", Balance: "1"}},
+		{Account: types.AccountInfo{AccountId: "GB", Balance: "2"}},
+		{Account: types.AccountInfo{AccountId: "GC", Balance: "3"}},
+	}
+
+	t.Run("returns matches for keys that correspond to ledger entries", func(t *testing.T) {
+		t.Parallel()
+		result, errOut := processLedgerKeyAccountsEntries([]string{"GA", "GC"}, entries)
+		assert.Equal(t, "", errOut.ErrorMessage)
+		assert.Equal(t, LedgerKeyAccountMap{
+			"GA": {AccountId: "GA", Balance: "1"},
+			"GC": {AccountId: "GC", Balance: "3"},
+		}, result)
+	})
+
+	t.Run("omits keys that do not match any entry", func(t *testing.T) {
+		t.Parallel()
+		result, _ := processLedgerKeyAccountsEntries([]string{"GA", "G_MISSING"}, entries)
+		assert.Contains(t, result, "GA")
+		assert.NotContains(t, result, "G_MISSING")
+	})
+
+	t.Run("returns empty map when no entries are provided", func(t *testing.T) {
+		t.Parallel()
+		result, _ := processLedgerKeyAccountsEntries([]string{"GA", "GB"}, nil)
+		assert.Empty(t, result)
+	})
+
+	t.Run("matches old nested-loop behavior for mixed input", func(t *testing.T) {
+		t.Parallel()
+		keys := []string{"GA", "GB", "GC", "G_MISSING", "GA"}
+
+		newImpl, _ := processLedgerKeyAccountsEntries(keys, entries)
+
+		oldImpl := LedgerKeyAccountMap{}
+		for _, publicKey := range keys {
+			for _, entry := range entries {
+				if entry.Account.AccountId == publicKey {
+					oldImpl[publicKey] = entry.Account
+					break
+				}
+			}
+		}
+
+		assert.Equal(t, oldImpl, newImpl)
 	})
 }

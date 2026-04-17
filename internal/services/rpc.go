@@ -20,6 +20,12 @@ import (
 
 const (
 	serviceName = "rpc"
+
+	// MaxLedgerEntryKeys caps the number of keys forwarded to the upstream Stellar RPC in a
+	// single GetLedgerEntries call. Independent of any handler-level cap: if a future caller
+	// passes an unbounded slice this acts as a last-line defense against upstream abuse and
+	// local CPU/memory blow-up during response decoding.
+	MaxLedgerEntryKeys = 200
 )
 
 type rpcService struct {
@@ -195,6 +201,10 @@ func (r *rpcService) GetLedgerEntries(ctx context.Context, keys []string, networ
 	defer func() {
 		metrics.Record(r.svcMetrics, serviceName, "GetLedgerEntries", network, time.Since(start).Seconds(), err)
 	}()
+
+	if len(keys) > MaxLedgerEntryKeys {
+		return nil, fmt.Errorf("too many ledger entry keys: maximum is %d, got %d", MaxLedgerEntryKeys, len(keys))
+	}
 
 	networkClient := r.configureNetworkClient(network)
 	response, err := networkClient.GetLedgerEntries(ctx, rpc.GetLedgerEntriesRequest{

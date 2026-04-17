@@ -22,6 +22,7 @@ type AppConfig struct {
 	MeridianPayStellarHouseAddress string
 	MaxRequestBodySize             int64
 	MaxBalanceAddresses            int
+	MaxLedgerKeyAddresses          int
 }
 
 type RPCConfig struct {
