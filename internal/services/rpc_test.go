@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stellar/go-stellar-sdk/keypair"
@@ -576,9 +577,9 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 	})
 
 	t.Run("rejects requests exceeding MaxLedgerEntryKeys without calling upstream", func(t *testing.T) {
-		called := false
+		var called atomic.Bool
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			called = true
+			called.Store(true)
 		}))
 		defer upstream.Close()
 
@@ -593,6 +594,6 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 		assert.Nil(t, response)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "too many ledger entry keys")
-		assert.False(t, called, "upstream RPC must not be called when key count exceeds cap")
+		assert.False(t, called.Load(), "upstream RPC must not be called when key count exceeds cap")
 	})
 }
