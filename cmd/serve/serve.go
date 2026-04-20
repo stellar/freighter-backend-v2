@@ -1,10 +1,13 @@
 package serve
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 
 	"github.com/stellar/freighter-backend-v2/internal/api"
 	"github.com/stellar/freighter-backend-v2/internal/config"
+	"github.com/stellar/freighter-backend-v2/internal/services"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
@@ -20,6 +23,9 @@ func (s *ServeCmd) Command() *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if err := utils.InitializeConfig(cmd); err != nil {
 				return err
+			}
+			if n := s.Cfg.AppConfig.MaxLedgerKeyAddresses; n > services.MaxLedgerEntryKeys {
+				return fmt.Errorf("--max-ledger-key-addresses=%d exceeds upstream Stellar RPC ceiling of %d keys per getLedgerEntries call", n, services.MaxLedgerEntryKeys)
 			}
 			return nil
 		},
@@ -44,6 +50,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.MeridianPayStellarHouseAddress, "meridian-pay-stellar-house-address", "", "The Meridian Pay Stellar House collection address")
 	cmd.Flags().Int64Var(&s.Cfg.AppConfig.MaxRequestBodySize, "max-request-body-size", 1<<20, "Maximum request body size in bytes (default: 1MB)")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxBalanceAddresses, "max-balance-addresses", 100, "Maximum number of addresses allowed in account balances request")
+	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxLedgerKeyAddresses, "max-ledger-key-addresses", 100, "Maximum number of public keys allowed in a ledger-key/accounts request")
 
 	// RPC Config
 	cmd.Flags().StringVar(&s.Cfg.RpcConfig.PubnetRpcUrl, "pubnet-rpc-url", "", "The Pubnet URL of the Pubnet RPC instance")

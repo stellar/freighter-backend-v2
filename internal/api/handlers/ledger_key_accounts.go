@@ -24,14 +24,16 @@ const (
 )
 
 type LedgerKeyAccountHandler struct {
-	RpcService types.RPCService
+	RpcService    types.RPCService
+	MaxPublicKeys int
 }
 
 type LedgerKeyAccountMap map[string]types.AccountInfo
 
-func NewLedgerKeyAccountHandler(rpc types.RPCService) *LedgerKeyAccountHandler {
+func NewLedgerKeyAccountHandler(rpc types.RPCService, maxPublicKeys int) *LedgerKeyAccountHandler {
 	return &LedgerKeyAccountHandler{
-		RpcService: rpc,
+		RpcService:    rpc,
+		MaxPublicKeys: maxPublicKeys,
 	}
 }
 
@@ -68,12 +70,16 @@ func validateLedgerKeyAccountRequest(r *http.Request) (*LedgerKeyAccountRequest,
 	return &req, nil
 }
 
-func getLedgerKeyAccountKeys(publicKeys []string) (LedgerKeyAccountKeys, LedgerKeyAccountError) {
+func getLedgerKeyAccountKeys(ctx context.Context, publicKeys []string) (LedgerKeyAccountKeys, LedgerKeyAccountError) {
 	ledgerKeyAccountMap := LedgerKeyAccountMap{}
 	ledgerKeyAccountError := LedgerKeyAccountError{ErrorKeys: []PublicKeyError{}}
 	ledgerKeyAccountKeys := []string{}
 
 	for _, publicKey := range publicKeys {
+		if err := ctx.Err(); err != nil {
+			ledgerKeyAccountError.ErrorMessage = err.Error()
+			return LedgerKeyAccountKeys{LedgerKeys: ledgerKeyAccountKeys, LedgerKeyAccountMap: ledgerKeyAccountMap}, ledgerKeyAccountError
+		}
 		accountId, err := xdr.AddressToAccountId(publicKey)
 		if err != nil {
 			ledgerKeyAccountError.ErrorMessage = "error converting public key to account id"
@@ -115,12 +121,14 @@ func processLedgerKeyAccountsEntries(publicKeys []string, data []types.LedgerEnt
 	ledgerKeyAccountsMap := LedgerKeyAccountMap{}
 	ledgerKeyAccountsError := LedgerKeyAccountError{ErrorKeys: []PublicKeyError{}}
 
+	accountByID := make(map[string]types.AccountInfo, len(data))
+	for _, entry := range data {
+		accountByID[entry.Account.AccountId] = entry.Account
+	}
+
 	for _, publicKey := range publicKeys {
-		for _, entry := range data {
-			if entry.Account.AccountId == publicKey {
-				ledgerKeyAccountsMap[publicKey] = entry.Account
-				break
-			}
+		if account, ok := accountByID[publicKey]; ok {
+			ledgerKeyAccountsMap[publicKey] = account
 		}
 	}
 
@@ -147,9 +155,14 @@ func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r 
 		return httperror.BadRequest(fmt.Sprintf("%s: %s", "Invalid request - public keys are required", err.Error()), err)
 	}
 
+	if h.MaxPublicKeys > 0 && len(req.PublicKeys) > h.MaxPublicKeys {
+		errStr := fmt.Sprintf("too many public keys: maximum is %d, got %d", h.MaxPublicKeys, len(req.PublicKeys))
+		return httperror.BadRequest(errStr, errors.New(errStr))
+	}
+
 	deduplicatedPublicKeys := set.NewSet[string](req.PublicKeys...)
 
-	ledgerKeyAccountKeys, ledgerKeyAccountKeysError := getLedgerKeyAccountKeys(deduplicatedPublicKeys.ToSlice())
+	ledgerKeyAccountKeys, ledgerKeyAccountKeysError := getLedgerKeyAccountKeys(contextWithTimeout, deduplicatedPublicKeys.ToSlice())
 	if ledgerKeyAccountKeysError.ErrorMessage != "" {
 		ledgerKeyAccountError = ledgerKeyAccountKeysError
 	}
