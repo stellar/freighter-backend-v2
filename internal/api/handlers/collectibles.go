@@ -37,6 +37,16 @@ var (
 	}
 )
 
+// User-facing error messages. Internal details (network errors, IP addresses,
+// raw RPC failures) are logged but never returned to clients.
+const (
+	msgCollectionFetchFailed  = "Unable to fetch collection details."
+	msgCollectibleFetchFailed = "Unable to fetch collectible details."
+	msgOwnerTokensFetchFailed = "Unable to fetch tokens for this collection."
+	msgNoCollectiblesFetched  = "No collectibles available for this collection."
+	msgUnexpectedError        = "An unexpected error occurred while fetching collectibles."
+)
+
 type contractDetails struct {
 	ID       string   `json:"id"`
 	TokenIDs []string `json:"token_ids"`
@@ -139,8 +149,9 @@ func (h *CollectiblesHandler) fetchCollection(
 
 	details, err := FetchCollection(h.RpcService, ctx, account, c.ID, network, h.rpcPool)
 	if err != nil {
+		logger.ErrorWithContext(ctx, fmt.Sprintf("fetching collection %s: %v", c.ID, err))
 		return nil, &CollectionError{
-			ErrorMessage:      fmt.Sprintf("fetching collection: %v", err),
+			ErrorMessage:      msgCollectionFetchFailed,
 			CollectionAddress: c.ID,
 		}
 	}
@@ -150,7 +161,7 @@ func (h *CollectiblesHandler) fetchCollection(
 	if len(collectibles) == 0 {
 		// If no collectibles were fetched (either no tokens requested or all fetches failed), treat as collection-level failure
 		return nil, &CollectionError{
-			ErrorMessage:      fmt.Sprintf("no collectibles fetched for contract %s", c.ID),
+			ErrorMessage:      msgNoCollectiblesFetched,
 			CollectionAddress: c.ID,
 			Tokens:            tokenErrs,
 		}
@@ -195,9 +206,10 @@ func (h *CollectiblesHandler) fetchCollectibles(
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
+				logger.ErrorWithContext(ctx, fmt.Sprintf("fetching collectible %s/%s: %v", contractID, tokenID, err))
 				tokenErrs = append(tokenErrs, TokenError{
 					TokenID:      tokenID,
-					ErrorMessage: err.Error(),
+					ErrorMessage: msgCollectibleFetchFailed,
 				})
 				return
 			}
@@ -243,9 +255,10 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 			defer wg.Done()
 			defer func() {
 				if p := recover(); p != nil {
+					logger.ErrorWithContext(ctx, fmt.Sprintf("panic fetching meridian pay collectible %s: %v", contract, p))
 					results[i] = CollectionResult{
 						Error: &CollectionError{
-							ErrorMessage:      fmt.Sprintf("panic: %v", p),
+							ErrorMessage:      msgUnexpectedError,
 							CollectionAddress: contract,
 						},
 					}
@@ -255,9 +268,10 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 			// Check context before starting work
 			select {
 			case <-ctx.Done():
+				logger.ErrorWithContext(ctx, fmt.Sprintf("context done before fetching meridian pay collectible %s: %v", contract, ctx.Err()))
 				results[i] = CollectionResult{
 					Error: &CollectionError{
-						ErrorMessage:      ctx.Err().Error(),
+						ErrorMessage:      msgCollectionFetchFailed,
 						CollectionAddress: contract,
 					},
 				}
@@ -268,9 +282,10 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 
 			tokenIds, err := fetchOwnerTokens(h.RpcService, ctx, account, contract, owner, network)
 			if err != nil {
+				logger.ErrorWithContext(ctx, fmt.Sprintf("fetching owner tokens for %s: %v", contract, err))
 				results[i] = CollectionResult{
 					Error: &CollectionError{
-						ErrorMessage:      fmt.Sprintf("fetching owner tokens: %v", err),
+						ErrorMessage:      msgOwnerTokensFetchFailed,
 						CollectionAddress: contract,
 					},
 				}
