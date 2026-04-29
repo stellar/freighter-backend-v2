@@ -44,7 +44,6 @@ const (
 	msgCollectibleFetchFailed = "Unable to fetch collectible details."
 	msgOwnerTokensFetchFailed = "Unable to fetch tokens for this collection."
 	msgNoCollectiblesFetched  = "No collectibles available for this collection."
-	msgRequestTimeout         = "Request timed out while fetching collectibles."
 	msgUnexpectedError        = "An unexpected error occurred while fetching collectibles."
 )
 
@@ -272,7 +271,7 @@ func (h *CollectiblesHandler) fetchMeridianPayCollectibles(
 				logger.ErrorWithContext(ctx, fmt.Sprintf("context done before fetching meridian pay collectible %s: %v", contract, ctx.Err()))
 				results[i] = CollectionResult{
 					Error: &CollectionError{
-						ErrorMessage:      msgRequestTimeout,
+						ErrorMessage:      msgCollectionFetchFailed,
 						CollectionAddress: contract,
 					},
 				}
