@@ -12,6 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
@@ -57,8 +58,7 @@ func (s *ApiServer) Start() error {
 
 	apiHandler := s.initMiddleware(s.initHandlers())
 	metricsHandler := middleware.Chain(s.initMetricsHandler(), middleware.Recover())
-	s.startServers(apiHandler, metricsHandler)
-	return nil
+	return s.startServers(apiHandler, metricsHandler)
 }
 
 func (s *ApiServer) initServices() error {
@@ -132,7 +132,7 @@ func (s *ApiServer) initMiddleware(mux *http.ServeMux) http.Handler {
 	return handler
 }
 
-func (s *ApiServer) startServers(apiHandler http.Handler, metricsHandler http.Handler) {
+func (s *ApiServer) startServers(apiHandler http.Handler, metricsHandler http.Handler) error {
 	apiServer := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", s.cfg.AppConfig.FreighterBackendHost, s.cfg.AppConfig.FreighterBackendPort),
 		Handler:      apiHandler,
@@ -148,33 +148,47 @@ func (s *ApiServer) startServers(apiHandler http.Handler, metricsHandler http.Ha
 		IdleTimeout:  DefaultIdleTimeout,
 	}
 
-	go func() {
+	// errgroup: if either ListenAndServe returns an unexpected error, ctx is
+	// canceled so we tear down the surviving server and surface the failure.
+	g, ctx := errgroup.WithContext(context.Background())
+	g.Go(func() error {
 		logger.Info("Starting API server", "address", apiServer.Addr)
 		if err := apiServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("API server error", "error", err)
+			return fmt.Errorf("api server: %w", err)
 		}
-	}()
-	go func() {
+		return nil
+	})
+	g.Go(func() error {
 		logger.Info("Starting metrics server", "address", metricsServer.Addr)
 		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("Metrics server error", "error", err)
+			return fmt.Errorf("metrics server: %w", err)
 		}
-	}()
+		return nil
+	})
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
 
-	logger.Info("Shutting down servers...")
-	ctx, cancel := context.WithTimeout(context.Background(), ServerShutdownTimeout)
+	select {
+	case <-quit:
+		logger.Info("Shutting down servers...")
+	case <-ctx.Done():
+		logger.Error("Server exited unexpectedly; shutting down siblings")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), ServerShutdownTimeout)
 	defer cancel()
 
-	if err := apiServer.Shutdown(ctx); err != nil {
+	if err := apiServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("API server forced to shutdown", "error", err)
 	}
-	if err := metricsServer.Shutdown(ctx); err != nil {
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("Metrics server forced to shutdown", "error", err)
 	}
 
+	if err := g.Wait(); err != nil {
+		return err
+	}
 	logger.Info("Servers gracefully stopped")
+	return nil
 }
