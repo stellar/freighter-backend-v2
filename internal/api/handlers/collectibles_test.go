@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -104,7 +105,7 @@ func TestFetchCollection(t *testing.T) {
 		// Should return collection error
 		require.NotNil(t, err)
 		assert.Equal(t, contract.ID, err.CollectionAddress)
-		assert.Contains(t, err.ErrorMessage, "no collectibles fetched")
+		assert.Equal(t, msgNoCollectiblesFetched, err.ErrorMessage)
 
 		// Should include token errors
 		require.Len(t, err.Tokens, 2)
@@ -112,9 +113,9 @@ func TestFetchCollection(t *testing.T) {
 		tokenIDs := []string{err.Tokens[0].TokenID, err.Tokens[1].TokenID}
 		assert.Contains(t, tokenIDs, "invalid")
 		assert.Contains(t, tokenIDs, "bad-token")
-		// Both should have error messages
-		assert.NotEmpty(t, err.Tokens[0].ErrorMessage)
-		assert.NotEmpty(t, err.Tokens[1].ErrorMessage)
+		// Both should expose the sanitized user-facing message, not internal details
+		assert.Equal(t, msgCollectibleFetchFailed, err.Tokens[0].ErrorMessage)
+		assert.Equal(t, msgCollectibleFetchFailed, err.Tokens[1].ErrorMessage)
 	})
 
 	t.Run("returns collection-level error when token IDs is empty", func(t *testing.T) {
@@ -136,7 +137,7 @@ func TestFetchCollection(t *testing.T) {
 		// Should return collection error
 		require.NotNil(t, err)
 		assert.Equal(t, contract.ID, err.CollectionAddress)
-		assert.Contains(t, err.ErrorMessage, "no collectibles fetched")
+		assert.Equal(t, msgNoCollectiblesFetched, err.ErrorMessage)
 
 		// Should have empty token errors since no tokens were requested
 		assert.Empty(t, err.Tokens)
@@ -173,7 +174,7 @@ func TestFetchMeridianPayCollectibles(t *testing.T) {
 	for _, res := range results {
 		assert.Nil(t, res.Collection)
 		assert.NotNil(t, res.Error)
-		assert.Contains(t, res.Error.ErrorMessage, "no collectibles fetched")
+		assert.Equal(t, msgNoCollectiblesFetched, res.Error.ErrorMessage)
 	}
 }
 
@@ -195,7 +196,7 @@ func TestFetchMeridianPayCollectibles_PanicRecovery(t *testing.T) {
 	for _, res := range results {
 		assert.Nil(t, res.Collection)
 		require.NotNil(t, res.Error)
-		assert.Contains(t, res.Error.ErrorMessage, "panic")
+		assert.Equal(t, msgUnexpectedError, res.Error.ErrorMessage)
 	}
 }
 
@@ -219,7 +220,7 @@ func TestFetchMeridianPayCollectibles_NonVecResponse(t *testing.T) {
 	// Should get an error result, not a panic
 	assert.Nil(t, results[0].Collection)
 	require.NotNil(t, results[0].Error)
-	assert.Contains(t, results[0].Error.ErrorMessage, "fetching owner tokens")
+	assert.Equal(t, msgOwnerTokensFetchFailed, results[0].Error.ErrorMessage)
 }
 
 func TestGetCollectibles_WithMeridianPayAddresses(t *testing.T) {
@@ -258,8 +259,53 @@ func TestGetCollectibles_WithMeridianPayAddresses(t *testing.T) {
 		// Mock returns empty token IDs, so expect collection-level errors
 		assert.Nil(t, col.Collection)
 		assert.NotNil(t, col.Error)
-		assert.Contains(t, col.Error.ErrorMessage, "no collectibles fetched")
+		assert.Equal(t, msgNoCollectiblesFetched, col.Error.ErrorMessage)
 	}
+}
+
+// Regression test for https://github.com/stellar/freighter-backend-v2/issues/84
+// Internal RPC errors (containing IPs, hostnames, low-level transport details) must
+// not be exposed in the user-facing error_message field.
+func TestGetCollectibles_DoesNotLeakInternalErrorDetails(t *testing.T) {
+	internalErr := errors.New("dial tcp 10.0.42.17:443: connect: connection refused")
+	mockRPC := &utils.MockRPCService{
+		SimulateError: internalErr,
+	}
+	handler := NewCollectiblesHandler(mockRPC, "", "", "", 10)
+
+	body := `{
+		"owner": "GB7RQNG6ROYGLFKR3IDAABKI2Y2UAQKEO6BSJVR5IYS7UYQ743O7TOXE",
+		"contracts": [
+			{
+				"id": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+				"token_ids": ["0","1","2"]
+			}
+		]
+	}`
+
+	req, _ := http.NewRequest("POST", "/api/v1/collectibles?network=FUTURENET", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	err := handler.GetCollectibles(rr, req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// Walk the entire response body — internal details must not appear anywhere.
+	respBody := rr.Body.String()
+	assert.NotContains(t, respBody, "dial tcp")
+	assert.NotContains(t, respBody, "10.0.42.17")
+	assert.NotContains(t, respBody, "connection refused")
+
+	type expectedResponse struct {
+		Data GetCollectiblesPayload `json:"data"`
+	}
+	var response expectedResponse
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &response))
+
+	require.Len(t, response.Data.Collections, 1)
+	col := response.Data.Collections[0]
+	require.NotNil(t, col.Error)
+	assert.Equal(t, msgCollectionFetchFailed, col.Error.ErrorMessage)
 }
 
 func TestGetCollectibles_Empty(t *testing.T) {
@@ -292,6 +338,6 @@ func TestGetCollectibles_Empty(t *testing.T) {
 		// Mock returns empty token IDs, so expect collection-level errors
 		assert.Nil(t, col.Collection)
 		assert.NotNil(t, col.Error)
-		assert.Contains(t, col.Error.ErrorMessage, "no collectibles fetched")
+		assert.Equal(t, msgNoCollectiblesFetched, col.Error.ErrorMessage)
 	}
 }
