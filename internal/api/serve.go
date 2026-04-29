@@ -55,9 +55,9 @@ func (s *ApiServer) Start() error {
 		return err
 	}
 
-	mux := s.initHandlers()
-	handler := s.initMiddleware(mux)
-	s.startServer(handler)
+	apiHandler := s.initMiddleware(s.initHandlers())
+	metricsHandler := middleware.Chain(s.initMetricsHandler(), middleware.Recover())
+	s.startServers(apiHandler, metricsHandler)
 	return nil
 }
 
@@ -109,8 +109,12 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
 	mux.HandleFunc("POST /api/v1/account-balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances))
 
-	mux.Handle("GET /metrics", promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{Registry: s.registry}))
+	return mux
+}
 
+func (s *ApiServer) initMetricsHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{Registry: s.registry}))
 	return mux
 }
 
@@ -128,36 +132,49 @@ func (s *ApiServer) initMiddleware(mux *http.ServeMux) http.Handler {
 	return handler
 }
 
-func (s *ApiServer) startServer(handler http.Handler) {
-	server := &http.Server{
+func (s *ApiServer) startServers(apiHandler http.Handler, metricsHandler http.Handler) {
+	apiServer := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", s.cfg.AppConfig.FreighterBackendHost, s.cfg.AppConfig.FreighterBackendPort),
-		Handler:      handler,
+		Handler:      apiHandler,
+		ReadTimeout:  DefaultReadTimeout,
+		WriteTimeout: DefaultWriteTimeout,
+		IdleTimeout:  DefaultIdleTimeout,
+	}
+	metricsServer := &http.Server{
+		Addr:         fmt.Sprintf("%s:%d", s.cfg.AppConfig.MetricsHost, s.cfg.AppConfig.MetricsPort),
+		Handler:      metricsHandler,
 		ReadTimeout:  DefaultReadTimeout,
 		WriteTimeout: DefaultWriteTimeout,
 		IdleTimeout:  DefaultIdleTimeout,
 	}
 
-	// Start the server in a goroutine
 	go func() {
-		logger.Info("Starting HTTP server", "address", server.Addr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("HTTP server error", "error", err)
+		logger.Info("Starting API server", "address", apiServer.Addr)
+		if err := apiServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("API server error", "error", err)
+		}
+	}()
+	go func() {
+		logger.Info("Starting metrics server", "address", metricsServer.Addr)
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("Metrics server error", "error", err)
 		}
 	}()
 
-	// Wait for termination signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	// Graceful shutdown
-	logger.Info("Shutting down server...")
+	logger.Info("Shutting down servers...")
 	ctx, cancel := context.WithTimeout(context.Background(), ServerShutdownTimeout)
 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
-		logger.Error("Server forced to shutdown", "error", err)
+	if err := apiServer.Shutdown(ctx); err != nil {
+		logger.Error("API server forced to shutdown", "error", err)
+	}
+	if err := metricsServer.Shutdown(ctx); err != nil {
+		logger.Error("Metrics server forced to shutdown", "error", err)
 	}
 
-	logger.Info("Server gracefully stopped")
+	logger.Info("Servers gracefully stopped")
 }

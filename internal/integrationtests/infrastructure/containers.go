@@ -27,6 +27,8 @@ const (
 	FreighterContainerName  = "freighter"
 	FreighterContainerHost  = "0.0.0.0"
 	FreighterContainerPort  = "3002"
+	FreighterMetricsHost    = "0.0.0.0"
+	FreighterMetricsPort    = "9090"
 	FreighterContainerTag   = "integration-test"
 	FreighterDockerfilePath = "deployments/Dockerfile"
 
@@ -70,8 +72,24 @@ func (c *TestContainer) GetPort(ctx context.Context) (string, error) {
 }
 
 // FreighterBackendContainer wraps a TestContainer for the freighter backend service.
+// The API listens on FreighterContainerPort and Prometheus metrics on FreighterMetricsPort.
 type FreighterBackendContainer struct {
 	*TestContainer
+}
+
+// GetMetricsConnectionString returns the HTTP connection string for the internal metrics server.
+func (c *FreighterBackendContainer) GetMetricsConnectionString(ctx context.Context) (string, error) {
+	host, err := c.GetHost(ctx)
+	if err != nil {
+		return "", fmt.Errorf("getting host: %w", err)
+	}
+
+	port, err := c.MappedPort(ctx, nat.Port(FreighterMetricsPort))
+	if err != nil {
+		return "", fmt.Errorf("getting metrics port: %w", err)
+	}
+
+	return fmt.Sprintf("http://%s:%s", host, port.Port()), nil
 }
 
 // getGitCommitHash returns the current git commit hash (short form).
@@ -310,11 +328,16 @@ func createFreighterContainer(ctx context.Context, name string, imageName string
 		Labels: map[string]string{
 			"org.testcontainers.session-id": "freighter-integration-tests",
 		},
-		Cmd:          []string{"./freighter-backend", "serve"},
-		ExposedPorts: []string{fmt.Sprintf("%s/tcp", FreighterContainerPort)},
+		Cmd: []string{"./freighter-backend", "serve"},
+		ExposedPorts: []string{
+			fmt.Sprintf("%s/tcp", FreighterContainerPort),
+			fmt.Sprintf("%s/tcp", FreighterMetricsPort),
+		},
 		Env: map[string]string{
 			"FREIGHTER_BACKEND_HOST": FreighterContainerHost,
 			"FREIGHTER_BACKEND_PORT": FreighterContainerPort,
+			"METRICS_HOST":           FreighterMetricsHost,
+			"METRICS_PORT":           FreighterMetricsPort,
 			"REDIS_HOST":             RedisContainerName,
 			"REDIS_PORT":             RedisContainerPort,
 			"PUBNET_RPC_URL":         "http://stellar-rpc:8000",

@@ -1,5 +1,5 @@
 // ABOUTME: HTTP middleware that records Prometheus metrics for each request.
-// ABOUTME: Reads final status from BufferedResponseWriter after handler completes, skips /metrics endpoint.
+// ABOUTME: Reads final status from BufferedResponseWriter after handler completes.
 package middleware
 
 import (
@@ -14,11 +14,6 @@ import (
 func Metrics(h *metrics.HTTP) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/metrics" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
 			h.InFlightRequests.Inc()
 			defer h.InFlightRequests.Dec()
 

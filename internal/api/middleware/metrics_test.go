@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for the Prometheus metrics middleware.
-// ABOUTME: Verifies request counting, duration recording, in-flight gauge, /metrics exclusion, and unknown handler label.
+// ABOUTME: Verifies request counting, duration recording, in-flight gauge, and unknown handler label.
 package middleware
 
 import (
@@ -61,28 +61,6 @@ func TestMetricsMiddleware_RecordsDuration(t *testing.T) {
 
 	count := testutil.CollectAndCount(reg, "freighter_http_request_duration_seconds")
 	assert.Equal(t, 1, count)
-}
-
-func TestMetricsMiddleware_SkipsMetricsEndpoint(t *testing.T) {
-	h, _ := newTestHTTPMetrics(t)
-
-	called := false
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusOK)
-	})
-
-	mw := Metrics(h)(inner)
-
-	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-	rec := httptest.NewRecorder()
-	mw.ServeHTTP(rec, req)
-
-	assert.True(t, called, "inner handler should be called")
-
-	// No metrics should be recorded for /metrics itself
-	count := testutil.ToFloat64(h.RequestsTotal.WithLabelValues("unknown", "GET", "200"))
-	assert.Equal(t, float64(0), count)
 }
 
 func TestMetricsMiddleware_InFlightGauge(t *testing.T) {
