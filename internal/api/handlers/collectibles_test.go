@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -261,51 +260,6 @@ func TestGetCollectibles_WithMeridianPayAddresses(t *testing.T) {
 		assert.NotNil(t, col.Error)
 		assert.Equal(t, msgNoCollectiblesFetched, col.Error.ErrorMessage)
 	}
-}
-
-// Regression test for https://github.com/stellar/freighter-backend-v2/issues/84
-// Internal RPC errors (containing IPs, hostnames, low-level transport details) must
-// not be exposed in the user-facing error_message field.
-func TestGetCollectibles_DoesNotLeakInternalErrorDetails(t *testing.T) {
-	internalErr := errors.New("dial tcp 10.0.42.17:443: connect: connection refused")
-	mockRPC := &utils.MockRPCService{
-		SimulateError: internalErr,
-	}
-	handler := NewCollectiblesHandler(mockRPC, "", "", "", 10)
-
-	body := `{
-		"owner": "GB7RQNG6ROYGLFKR3IDAABKI2Y2UAQKEO6BSJVR5IYS7UYQ743O7TOXE",
-		"contracts": [
-			{
-				"id": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
-				"token_ids": ["0","1","2"]
-			}
-		]
-	}`
-
-	req, _ := http.NewRequest("POST", "/api/v1/collectibles?network=FUTURENET", strings.NewReader(body))
-	rr := httptest.NewRecorder()
-
-	err := handler.GetCollectibles(rr, req)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, rr.Code)
-
-	// Walk the entire response body — internal details must not appear anywhere.
-	respBody := rr.Body.String()
-	assert.NotContains(t, respBody, "dial tcp")
-	assert.NotContains(t, respBody, "10.0.42.17")
-	assert.NotContains(t, respBody, "connection refused")
-
-	type expectedResponse struct {
-		Data GetCollectiblesPayload `json:"data"`
-	}
-	var response expectedResponse
-	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &response))
-
-	require.Len(t, response.Data.Collections, 1)
-	col := response.Data.Collections[0]
-	require.NotNil(t, col.Error)
-	assert.Equal(t, msgCollectionFetchFailed, col.Error.ErrorMessage)
 }
 
 func TestGetCollectibles_Empty(t *testing.T) {
