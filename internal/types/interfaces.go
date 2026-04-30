@@ -43,3 +43,28 @@ type WalletBackendService interface {
 	Service
 	GetBalancesByAccountAddresses(ctx context.Context, addresses []string, network string) (interface{}, error)
 }
+
+// StellarExpertAsset is the subset of the Stellar Expert /asset/{id} response
+// we care about for pricing.
+type StellarExpertAsset struct {
+	Price   float64      `json:"price"`
+	Price7d [][2]float64 `json:"price7d"`
+}
+
+type StellarExpertService interface {
+	Service
+	GetAsset(ctx context.Context, network, assetID string) (*StellarExpertAsset, error)
+}
+
+// PriceEntry is the per-token shape returned to the client. Numeric fields
+// are JSON strings to match the legacy v1 BigNumber output;
+// PercentagePriceChange24h is nullable when 24h history is unavailable.
+type PriceEntry struct {
+	CurrentPrice             string  `json:"currentPrice"`
+	PercentagePriceChange24h *string `json:"percentagePriceChange24h"`
+}
+
+type PricesService interface {
+	Service
+	GetPrices(ctx context.Context, tokens []string, network string) (map[string]*PriceEntry, error)
+}

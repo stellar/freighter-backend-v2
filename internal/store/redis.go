@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 
@@ -41,4 +44,64 @@ func (r *RedisStore) GetHealth(ctx context.Context, network string) (types.GetHe
 	return types.GetHealthResponse{
 		Status: types.StatusHealthy,
 	}, nil
+}
+
+// GetJSON fetches a JSON-encoded value at key into dest. Returns (true, nil)
+// on a cache hit, (false, nil) on a miss, and (false, err) on transport or
+// decode failure.
+func (r *RedisStore) GetJSON(ctx context.Context, key string, dest any) (bool, error) {
+	raw, err := r.redis.Get(ctx, key).Bytes()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return false, nil
+		}
+		return false, fmt.Errorf("redis GET %s: %w", key, err)
+	}
+	if err := json.Unmarshal(raw, dest); err != nil {
+		return false, fmt.Errorf("redis decode %s: %w", key, err)
+	}
+	return true, nil
+}
+
+// MGetJSON fetches multiple JSON-encoded values in a single round trip.
+// makeDest must return a fresh pointer for each hit; the resulting map is
+// keyed by the requested key. Misses are absent from the map. Decode errors
+// are skipped (logged by callers if desired) so a single bad entry does not
+// fail the batch.
+func (r *RedisStore) MGetJSON(ctx context.Context, keys []string, makeDest func() any) (map[string]any, error) {
+	out := make(map[string]any, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	values, err := r.redis.MGet(ctx, keys...).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redis MGET: %w", err)
+	}
+	for i, v := range values {
+		if v == nil {
+			continue
+		}
+		raw, ok := v.(string)
+		if !ok {
+			continue
+		}
+		dest := makeDest()
+		if err := json.Unmarshal([]byte(raw), dest); err != nil {
+			continue
+		}
+		out[keys[i]] = dest
+	}
+	return out, nil
+}
+
+// SetJSON stores a JSON-encoded value at key with the given TTL.
+func (r *RedisStore) SetJSON(ctx context.Context, key string, value any, ttl time.Duration) error {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("redis encode %s: %w", key, err)
+	}
+	if err := r.redis.Set(ctx, key, encoded, ttl).Err(); err != nil {
+		return fmt.Errorf("redis SET %s: %w", key, err)
+	}
+	return nil
 }

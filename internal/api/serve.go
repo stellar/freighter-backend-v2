@@ -35,6 +35,7 @@ type ApiServer struct {
 	redis                *store.RedisStore
 	rpcService           types.RPCService
 	walletBackendService types.WalletBackendService
+	pricesService        types.PricesService
 	registry             *prometheus.Registry
 	appMetrics           *metrics.Metrics
 }
@@ -80,6 +81,16 @@ func (s *ApiServer) initServices() error {
 	}
 	s.walletBackendService = walletBackendService
 
+	stellarExpert := services.NewStellarExpertService(
+		s.cfg.PricesConfig.StellarExpertPubnetURL,
+		s.cfg.PricesConfig.StellarExpertTestnetURL,
+		s.appMetrics.Service,
+	)
+	s.pricesService = services.NewPricesService(stellarExpert, s.redis, services.PricesServiceConfig{
+		CacheTTL:      time.Duration(s.cfg.PricesConfig.PriceCacheTTLSeconds) * time.Second,
+		MaxConcurrent: s.cfg.PricesConfig.MaxConcurrentPriceFetches,
+	}, s.appMetrics.Service)
+
 	return nil
 }
 
@@ -108,6 +119,11 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 
 	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
 	mux.HandleFunc("POST /api/v1/account-balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances))
+
+	if !s.cfg.PricesConfig.DisableTokenPrices {
+		tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest)
+		mux.HandleFunc("POST /api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices))
+	}
 
 	mux.Handle("GET /metrics", promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{Registry: s.registry}))
 

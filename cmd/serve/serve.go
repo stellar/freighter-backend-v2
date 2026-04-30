@@ -85,6 +85,14 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.TestnetUrl, "wallet-backend-testnet-url", "", "Wallet backend testnet URL")
 	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.PubnetSigningKey, "wallet-backend-pubnet-signing-key", "", "Wallet backend pubnet JWT signing key (Stellar secret key)")
 	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.TestnetSigningKey, "wallet-backend-testnet-signing-key", "", "Wallet backend testnet JWT signing key (Stellar secret key)")
+
+	// Token Prices Config
+	cmd.Flags().BoolVar(&s.Cfg.PricesConfig.DisableTokenPrices, "disable-token-prices", false, "Disable the token prices endpoint")
+	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertPubnetURL, "stellar-expert-pubnet-url", "https://api.stellar.expert/explorer/public", "Stellar Expert base URL for pubnet")
+	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertTestnetURL, "stellar-expert-testnet-url", "https://api.stellar.expert/explorer/testnet", "Stellar Expert base URL for testnet")
+	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceCacheTTLSeconds, "price-cache-ttl-seconds", 60, "TTL for cached token prices in Redis (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxTokensPerRequest, "max-tokens-per-request", 1000, "Maximum tokens accepted in a single token-prices request")
+	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxConcurrentPriceFetches, "max-concurrent-price-fetches", 25, "Per-request concurrency cap for upstream price fetches")
 	return cmd
 }
 

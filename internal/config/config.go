@@ -45,13 +45,12 @@ type HorizonConfig struct {
 }
 
 type PricesConfig struct {
-	HorizonURL                     string
-	DisableTokenPrices             bool
-	BatchUpdateDelayMilliseconds   int
-	CalculationTimeoutMilliseconds int
-	UpdateIntervalMilliseconds     int
-	UpdateBatchSize                int
-	StalenessThreshold             int
+	DisableTokenPrices        bool
+	StellarExpertPubnetURL    string
+	StellarExpertTestnetURL   string
+	PriceCacheTTLSeconds      int
+	MaxTokensPerRequest       int
+	MaxConcurrentPriceFetches int
 }
 
 type BlockaidConfig struct {
