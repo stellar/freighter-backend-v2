@@ -14,6 +14,8 @@ type Config struct {
 type AppConfig struct {
 	FreighterBackendHost           string
 	FreighterBackendPort           int
+	MetricsHost                    string
+	MetricsPort                    int
 	Mode                           string
 	SentryKey                      string
 	ProtocolsConfigPath            string
