@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -142,6 +143,34 @@ func TestTokenPrices_ServiceError(t *testing.T) {
 	err := handler.GetPrices(rr, req)
 	require.Error(t, err)
 	assert.Equal(t, http.StatusInternalServerError, unwrapHttpStatus(t, err))
+}
+
+func TestTokenPrices_ContextErrorReturns503(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"deadline exceeded", context.DeadlineExceeded},
+		{"canceled", context.Canceled},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			mock := &utils.MockPricesService{GetPricesError: tc.err}
+			handler := NewTokenPricesHandler(mock, 1000)
+
+			body := `{"tokens":["XLM"]}`
+			req, _ := http.NewRequest(http.MethodPost, "/api/v1/token-prices?network=PUBLIC", strings.NewReader(body))
+			rr := httptest.NewRecorder()
+
+			err := handler.GetPrices(rr, req)
+			require.Error(t, err)
+			assert.Equal(t, http.StatusServiceUnavailable, unwrapHttpStatus(t, err))
+		})
+	}
 }
 
 func unwrapHttpStatus(t *testing.T, err error) int {

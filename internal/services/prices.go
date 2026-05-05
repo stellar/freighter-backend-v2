@@ -141,9 +141,11 @@ func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network 
 		})
 	}
 
-	if err := g.Wait(); err != nil {
-		// Group only returns ctx cancellation since per-token errors are
-		// swallowed; surface partial result alongside the error.
+	g.Wait()
+	// Per-goroutine errors are swallowed (logged + nil entry), so g.Wait()
+	// itself never returns. Surface ctx cancellation / deadline-exceeded
+	// explicitly so the handler can map it to 503 instead of 500.
+	if err := ctx.Err(); err != nil {
 		return result, err
 	}
 	return result, nil

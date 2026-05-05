@@ -97,6 +97,9 @@ func (h *TokenPricesHandler) GetPrices(w http.ResponseWriter, r *http.Request) e
 	prices, err := h.PricesService.GetPrices(ctx, req.canonicalIDs, network)
 	if err != nil {
 		logger.ErrorWithContext(r.Context(), "getting token prices", "error", err)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return httperror.ServiceUnavailable("token prices temporarily unavailable", err)
+		}
 		return httperror.InternalServerError("Failed to get token prices", err)
 	}
 
