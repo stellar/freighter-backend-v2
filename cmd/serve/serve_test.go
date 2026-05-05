@@ -113,3 +113,31 @@ func TestServeCmd_AcceptsMaxLedgerKeyAddressesAtUpstreamCeiling(t *testing.T) {
 
 	require.NoError(t, cmd.Execute())
 }
+
+func TestServeCmd_RejectsMaxTokensPerRequestAboveCeiling(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--max-tokens-per-request", fmt.Sprintf("%d", services.MaxTokensPerPriceRequest+1)})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds price service ceiling")
+}
+
+func TestServeCmd_AcceptsMaxTokensPerRequestAtCeiling(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--max-tokens-per-request", fmt.Sprintf("%d", services.MaxTokensPerPriceRequest)})
+
+	require.NoError(t, cmd.Execute())
+}

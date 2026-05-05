@@ -26,6 +26,12 @@ const (
 	defaultCacheTTL      = 30 * time.Second
 
 	cacheKeyPrefix = "prices:v1"
+
+	// MaxTokensPerPriceRequest is the hard ceiling for --max-tokens-per-request.
+	// One request fans out one upstream Stellar Expert call per cache miss, so
+	// the cap bounds the per-request amplification factor regardless of how
+	// the operator sets the runtime flag.
+	MaxTokensPerPriceRequest = 1000
 )
 
 // PricesServiceConfig tunes the orchestrator. Zero values fall back to safe

@@ -27,6 +27,9 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.AppConfig.MaxLedgerKeyAddresses; n > services.MaxLedgerEntryKeys {
 				return fmt.Errorf("--max-ledger-key-addresses=%d exceeds upstream Stellar RPC ceiling of %d keys per getLedgerEntries call", n, services.MaxLedgerEntryKeys)
 			}
+			if n := s.Cfg.PricesConfig.MaxTokensPerRequest; n > services.MaxTokensPerPriceRequest {
+				return fmt.Errorf("--max-tokens-per-request=%d exceeds price service ceiling of %d tokens per request", n, services.MaxTokensPerPriceRequest)
+			}
 			return nil
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
