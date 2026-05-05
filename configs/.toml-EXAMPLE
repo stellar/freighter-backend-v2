@@ -33,10 +33,9 @@ COINBASE_API_KEY = "not-set"
 COINBASE_API_SECRET = "not-set"
 
 # Token Prices
-DISABLE_TOKEN_PRICES = "not-set"
 STELLAR_EXPERT_PUBNET_URL = "not-set"
 STELLAR_EXPERT_TESTNET_URL = "not-set"
-# Required when DISABLE_TOKEN_PRICES is unset/false. Server refuses to start without it.
+# Required. Server refuses to start without it.
 STELLAR_EXPERT_API_KEY = "not-set"
 PRICE_CACHE_TTL_SECONDS = "not-set"
 MAX_TOKENS_PER_REQUEST = "not-set"

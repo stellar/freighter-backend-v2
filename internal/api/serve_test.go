@@ -21,19 +21,7 @@ func TestNewApiServer(t *testing.T) {
 	assert.Equal(t, cfg, s.cfg)
 }
 
-func TestApiServer_initServices_Error(t *testing.T) {
-	s := &ApiServer{
-		cfg: &config.Config{
-			RedisConfig:  config.RedisConfig{Host: "", Port: 0},
-			PricesConfig: config.PricesConfig{DisableTokenPrices: true},
-		},
-		appMetrics: metrics.NewMetrics(prometheus.NewRegistry()),
-	}
-	err := s.initServices()
-	assert.NoError(t, err)
-}
-
-func TestApiServer_initServices_RequiresAPIKeyWhenPricesEnabled(t *testing.T) {
+func TestApiServer_initServices_RequiresAPIKey(t *testing.T) {
 	s := &ApiServer{
 		cfg:        &config.Config{},
 		appMetrics: metrics.NewMetrics(prometheus.NewRegistry()),

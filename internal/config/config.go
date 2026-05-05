@@ -45,7 +45,6 @@ type HorizonConfig struct {
 }
 
 type PricesConfig struct {
-	DisableTokenPrices        bool
 	StellarExpertPubnetURL    string
 	StellarExpertTestnetURL   string
 	StellarExpertAPIKey       string

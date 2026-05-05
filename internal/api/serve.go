@@ -63,8 +63,8 @@ func (s *ApiServer) Start() error {
 }
 
 func (s *ApiServer) initServices() error {
-	if !s.cfg.PricesConfig.DisableTokenPrices && s.cfg.PricesConfig.StellarExpertAPIKey == "" {
-		return fmt.Errorf("STELLAR_EXPERT_API_KEY is required when token prices are enabled (set --disable-token-prices to skip)")
+	if s.cfg.PricesConfig.StellarExpertAPIKey == "" {
+		return fmt.Errorf("STELLAR_EXPERT_API_KEY is required")
 	}
 
 	s.redis = store.NewRedisStore(s.cfg.RedisConfig.Host, s.cfg.RedisConfig.Port, s.cfg.RedisConfig.Password)
@@ -125,10 +125,8 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
 	mux.HandleFunc("POST /api/v1/account-balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances))
 
-	if !s.cfg.PricesConfig.DisableTokenPrices {
-		tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest)
-		mux.HandleFunc("POST /api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices))
-	}
+	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest)
+	mux.HandleFunc("POST /api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices))
 
 	mux.Handle("GET /metrics", promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{Registry: s.registry}))
 
