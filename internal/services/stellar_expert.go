@@ -39,14 +39,16 @@ var (
 type stellarExpertService struct {
 	pubnetBaseURL  string
 	testnetBaseURL string
+	apiKey         string
 	httpClient     *http.Client
 	svcMetrics     *metrics.Service
 }
 
 // NewStellarExpertService constructs a thin HTTP client for the Stellar
 // Expert /asset endpoint. The base URLs should already include the network
-// segment (e.g. https://api.stellar.expert/explorer/public).
-func NewStellarExpertService(pubnetURL, testnetURL string, m *metrics.Service) types.StellarExpertService {
+// segment (e.g. https://api.stellar.expert/explorer/public). apiKey, when
+// non-empty, is sent as `Authorization: Bearer <apiKey>` on every request.
+func NewStellarExpertService(pubnetURL, testnetURL, apiKey string, m *metrics.Service) types.StellarExpertService {
 	httpClient := &http.Client{
 		Timeout: stellarExpertHTTPTimeout,
 		Transport: &http.Transport{
@@ -62,6 +64,7 @@ func NewStellarExpertService(pubnetURL, testnetURL string, m *metrics.Service) t
 	return &stellarExpertService{
 		pubnetBaseURL:  pubnetURL,
 		testnetBaseURL: testnetURL,
+		apiKey:         apiKey,
 		httpClient:     httpClient,
 		svcMetrics:     m,
 	}
@@ -104,6 +107,9 @@ func (s *stellarExpertService) GetAsset(ctx context.Context, network, assetID st
 		return nil, fmt.Errorf("building stellar expert request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	if s.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+s.apiKey)
+	}
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {

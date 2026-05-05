@@ -23,7 +23,31 @@ func TestNewApiServer(t *testing.T) {
 
 func TestApiServer_initServices_Error(t *testing.T) {
 	s := &ApiServer{
-		cfg:        &config.Config{RedisConfig: config.RedisConfig{Host: "", Port: 0}},
+		cfg: &config.Config{
+			RedisConfig:  config.RedisConfig{Host: "", Port: 0},
+			PricesConfig: config.PricesConfig{DisableTokenPrices: true},
+		},
+		appMetrics: metrics.NewMetrics(prometheus.NewRegistry()),
+	}
+	err := s.initServices()
+	assert.NoError(t, err)
+}
+
+func TestApiServer_initServices_RequiresAPIKeyWhenPricesEnabled(t *testing.T) {
+	s := &ApiServer{
+		cfg:        &config.Config{},
+		appMetrics: metrics.NewMetrics(prometheus.NewRegistry()),
+	}
+	err := s.initServices()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "STELLAR_EXPERT_API_KEY")
+}
+
+func TestApiServer_initServices_AcceptsAPIKey(t *testing.T) {
+	s := &ApiServer{
+		cfg: &config.Config{
+			PricesConfig: config.PricesConfig{StellarExpertAPIKey: "test-key"},
+		},
 		appMetrics: metrics.NewMetrics(prometheus.NewRegistry()),
 	}
 	err := s.initServices()

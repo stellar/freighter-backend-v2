@@ -48,6 +48,7 @@ type PricesConfig struct {
 	DisableTokenPrices        bool
 	StellarExpertPubnetURL    string
 	StellarExpertTestnetURL   string
+	StellarExpertAPIKey       string
 	PriceCacheTTLSeconds      int
 	MaxTokensPerRequest       int
 	MaxConcurrentPriceFetches int

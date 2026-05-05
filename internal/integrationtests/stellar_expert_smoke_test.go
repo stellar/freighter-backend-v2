@@ -21,10 +21,15 @@ func TestStellarExpertSmoke(t *testing.T) {
 	if os.Getenv("RUN_STELLAR_EXPERT_SMOKE") != "1" {
 		t.Skip("set RUN_STELLAR_EXPERT_SMOKE=1 to run the Stellar Expert smoke test")
 	}
+	apiKey := os.Getenv("STELLAR_EXPERT_API_KEY")
+	if apiKey == "" {
+		t.Skip("set STELLAR_EXPERT_API_KEY to run the Stellar Expert smoke test")
+	}
 
 	svc := services.NewStellarExpertService(
 		"https://api.stellar.expert/explorer/public",
 		"https://api.stellar.expert/explorer/testnet",
+		apiKey,
 		nil,
 	)
 

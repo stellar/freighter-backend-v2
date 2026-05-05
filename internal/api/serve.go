@@ -63,6 +63,10 @@ func (s *ApiServer) Start() error {
 }
 
 func (s *ApiServer) initServices() error {
+	if !s.cfg.PricesConfig.DisableTokenPrices && s.cfg.PricesConfig.StellarExpertAPIKey == "" {
+		return fmt.Errorf("STELLAR_EXPERT_API_KEY is required when token prices are enabled (set --disable-token-prices to skip)")
+	}
+
 	s.redis = store.NewRedisStore(s.cfg.RedisConfig.Host, s.cfg.RedisConfig.Port, s.cfg.RedisConfig.Password)
 
 	s.rpcService = services.NewRPCService(s.cfg.RpcConfig.PubnetRpcUrl, s.cfg.RpcConfig.TestnetRpcUrl, s.cfg.RpcConfig.FuturenetRpcUrl, s.appMetrics.Service)
@@ -84,6 +88,7 @@ func (s *ApiServer) initServices() error {
 	stellarExpert := services.NewStellarExpertService(
 		s.cfg.PricesConfig.StellarExpertPubnetURL,
 		s.cfg.PricesConfig.StellarExpertTestnetURL,
+		s.cfg.PricesConfig.StellarExpertAPIKey,
 		s.appMetrics.Service,
 	)
 	s.pricesService = services.NewPricesService(stellarExpert, s.redis, services.PricesServiceConfig{

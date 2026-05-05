@@ -23,7 +23,7 @@ const (
 	pricesServiceName = "prices"
 
 	defaultMaxConcurrent = 25
-	defaultCacheTTL      = 60 * time.Second
+	defaultCacheTTL      = 30 * time.Second
 
 	cacheKeyPrefix = "prices:v1"
 )
