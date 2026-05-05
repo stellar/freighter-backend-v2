@@ -45,7 +45,7 @@ func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedToken
 		if middleware.IsMaxBytesError(err) {
 			return nil, httperror.RequestEntityTooLarge("Request body too large", err)
 		}
-		return nil, httperror.BadRequest(fmt.Sprintf("invalid JSON: %s", err.Error()), err)
+		return nil, httperror.BadRequest("invalid request body", err)
 	}
 	if len(req.Tokens) == 0 {
 		errStr := "tokens array cannot be empty"
@@ -61,7 +61,7 @@ func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedToken
 	for _, t := range req.Tokens {
 		canonical, err := assetid.Normalize(t)
 		if err != nil {
-			return nil, httperror.BadRequest(fmt.Sprintf("invalid token %q: %s", t, err.Error()), err)
+			return nil, httperror.BadRequest("invalid token id", err)
 		}
 		if _, dup := originalByCanonical[canonical]; !dup {
 			canonicalIDs = append(canonicalIDs, canonical)

@@ -60,10 +60,10 @@ func (p *pricesService) GetHealth(ctx context.Context, network string) (types.Ge
 	return p.expert.GetHealth(ctx, network)
 }
 
-// cachedPriceEntry is the on-disk shape in Redis. NotFound encodes negative
-// caching so a misspelled asset id doesn't repeatedly hammer Stellar Expert.
+// cachedPriceEntry is the on-disk shape in Redis. Only positive results are
+// cached; unknown / malformed assets are returned as nil per request and
+// re-fetched on the next call so freshly-listed assets surface quickly.
 type cachedPriceEntry struct {
-	NotFound                 bool    `json:"notFound,omitempty"`
 	CurrentPrice             string  `json:"currentPrice,omitempty"`
 	PercentagePriceChange24h *string `json:"percentagePriceChange24h,omitempty"`
 }
@@ -104,14 +104,9 @@ func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network 
 			if !ok {
 				continue
 			}
-			tok := keyToken[k]
-			if entry.NotFound {
-				result[tok] = nil
-			} else {
-				result[tok] = &types.PriceEntry{
-					CurrentPrice:             entry.CurrentPrice,
-					PercentagePriceChange24h: entry.PercentagePriceChange24h,
-				}
+			result[keyToken[k]] = &types.PriceEntry{
+				CurrentPrice:             entry.CurrentPrice,
+				PercentagePriceChange24h: entry.PercentagePriceChange24h,
 			}
 		}
 	}
@@ -148,15 +143,15 @@ func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network 
 	return result, nil
 }
 
-// fetchAndCache hits Stellar Expert for one canonical asset id, writes the
-// result (positive or negative) to Redis, and returns the response entry.
-// Per-token failures map to nil; nothing here propagates to the caller.
+// fetchAndCache hits Stellar Expert for one canonical asset id, writes a
+// successful result to Redis, and returns the response entry. Per-token
+// failures (not found, malformed, transient upstream error) map to nil and
+// are not cached; nothing here propagates to the caller.
 func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, canonical string) *types.PriceEntry {
 	expertID := assetid.ToStellarExpert(canonical)
 	asset, err := p.expert.GetAsset(ctx, network, expertID)
 	if err != nil {
 		if errors.Is(err, ErrAssetNotFound) || errors.Is(err, ErrAssetMalformed) {
-			p.cacheNegative(ctx, cacheNet, canonical)
 			return nil
 		}
 		logger.Warn("prices: upstream fetch failed", "asset", canonical, "error", err)
@@ -181,16 +176,6 @@ func (p *pricesService) cachePositive(ctx context.Context, cacheNet, canonical s
 	}
 	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), value, p.cfg.CacheTTL); err != nil {
 		logger.Warn("prices: redis SET failed", "asset", canonical, "error", err)
-	}
-}
-
-func (p *pricesService) cacheNegative(ctx context.Context, cacheNet, canonical string) {
-	if p.redis == nil {
-		return
-	}
-	value := cachedPriceEntry{NotFound: true}
-	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), value, p.cfg.CacheTTL); err != nil {
-		logger.Warn("prices: redis SET (negative) failed", "asset", canonical, "error", err)
 	}
 }
 
