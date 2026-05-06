@@ -36,8 +36,16 @@ const (
 	// candlesWindow / candlesResolutionSec define the rolling 24h window used
 	// to compute percentagePriceChange24h from /asset/{id}/candles. Hourly
 	// resolution yields ~25 records, well under Stellar Expert's 200-record cap.
-	candlesWindow         = 24 * time.Hour
-	candlesResolutionSec  = 3600
+	candlesWindow        = 24 * time.Hour
+	candlesResolutionSec = 3600
+
+	// maxPrice7dFallbackAge bounds how stale the last price7d daily candle
+	// may be before we suppress the fallback 24h change. Daily candles align
+	// to ~24h UTC boundaries, so the last entry is at most ~24h old in
+	// normal operation; 26h adds a 2h cushion for upstream lag and clock
+	// skew. Beyond that, the daily bucket has rolled over without a new
+	// entry — the asset has stopped trading or upstream is stale.
+	maxPrice7dFallbackAge = 26 * time.Hour
 )
 
 // PricesServiceConfig tunes the orchestrator. Zero values fall back to safe
@@ -239,7 +247,9 @@ func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, ca
 	if change24h == nil {
 		// Fallback for native XLM (candles are empty) and for transient
 		// /candles failures: derive from the daily price7d on /asset/{id}.
-		change24h = compute24hChange(asset.Price, asset.Price7d)
+		// Suppressed if the daily-candle data is too stale to defensibly
+		// approximate a 24h window.
+		change24h = compute24hChange(asset.Price, asset.Price7d, time.Now().UTC())
 	}
 
 	entry := &types.PriceEntry{
@@ -312,9 +322,15 @@ func formatPrice(v float64) string {
 
 // compute24hChange returns the percentage delta between the latest reported
 // price and the candle one day prior. Returns nil when there is insufficient
-// history or the prior price is zero (avoids divide-by-zero).
-func compute24hChange(currentPrice float64, dailyCandles [][2]float64) *string {
+// history, the prior price is zero (avoids divide-by-zero), or the most
+// recent daily candle is older than maxPrice7dFallbackAge — in which case
+// the result would no longer credibly approximate a 24h change.
+func compute24hChange(currentPrice float64, dailyCandles [][2]float64, now time.Time) *string {
 	if len(dailyCandles) < 2 {
+		return nil
+	}
+	lastTs := dailyCandles[len(dailyCandles)-1][0]
+	if now.Sub(time.Unix(int64(lastTs), 0)) > maxPrice7dFallbackAge {
 		return nil
 	}
 	priorPrice := dailyCandles[len(dailyCandles)-2][1]

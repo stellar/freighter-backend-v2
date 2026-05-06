@@ -16,6 +16,19 @@ import (
 
 const testIssuer = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
 
+// recentDailyCandles builds a [ts, close] price7d-shaped slice whose last
+// entry's timestamp is `now` and whose entries step back 24h each. Closes
+// are passed oldest-first. Used so tests aren't tied to wall-clock dates.
+func recentDailyCandles(now time.Time, closes ...float64) [][2]float64 {
+	out := make([][2]float64, len(closes))
+	latest := now.Unix()
+	for i, c := range closes {
+		ts := latest - int64(len(closes)-1-i)*86400
+		out[i] = [2]float64{float64(ts), c}
+	}
+	return out
+}
+
 // fakeStellarExpert is a programmable stub for the StellarExpertService
 // interface. Tests configure assets via Set and inspect call counts via Calls.
 type fakeStellarExpert struct {
@@ -151,26 +164,15 @@ func (f *fakeStellarExpert) CandleCallCount(assetID string) int {
 func TestPrices_HappyPath_NoCache(t *testing.T) {
 	t.Parallel()
 
+	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
 	stellarExpert.Set("XLM", &types.StellarExpertAsset{
-		Price: 0.16,
-		Price7d: [][2]float64{
-			{1776902400, 0.18},
-			{1776988800, 0.17},
-			{1777075200, 0.169},
-			{1777161600, 0.17},
-			{1777248000, 0.165},
-			{1777334400, 0.161},
-			{1777420800, 0.158}, // -2 candle (~24h ago)
-			{1777507200, 0.159}, // last
-		},
+		Price:   0.16,
+		Price7d: recentDailyCandles(now, 0.18, 0.17, 0.169, 0.17, 0.165, 0.161, 0.158, 0.159),
 	})
 	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
-		Price: 1.0,
-		Price7d: [][2]float64{
-			{1, 1.0},
-			{2, 1.0},
-		},
+		Price:   1.0,
+		Price7d: recentDailyCandles(now, 1.0, 1.0),
 	})
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
@@ -194,11 +196,12 @@ func TestPrices_HappyPath_NoCache(t *testing.T) {
 func TestPrices_UsesCandlesWhenAvailable(t *testing.T) {
 	t.Parallel()
 
+	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
 	// price7d would yield 1% if used. Candles yield -10% — verify candles win.
 	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
 		Price:   1.10,
-		Price7d: [][2]float64{{1, 1.0}, {2, 1.089}}, // 1.01% if computed from price7d
+		Price7d: recentDailyCandles(now, 1.0, 1.089), // 1.01% if computed from price7d
 	})
 	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", []types.StellarExpertCandle{
 		// [ts, open, low, high, close, qvol, bvol, trades]; oldest open=1.222 → (1.10-1.222)/1.222*100 ≈ -9.98 → -9.98
@@ -221,11 +224,12 @@ func TestPrices_UsesCandlesWhenAvailable(t *testing.T) {
 func TestPrices_CandlesEmptyFallsBackToPrice7d(t *testing.T) {
 	t.Parallel()
 
+	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
 	// XLM has no candles upstream; expect price7d fallback to drive the 24h change.
 	stellarExpert.Set("XLM", &types.StellarExpertAsset{
 		Price:   0.16,
-		Price7d: [][2]float64{{1, 0.158}, {2, 0.16}},
+		Price7d: recentDailyCandles(now, 0.158, 0.16),
 	})
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
@@ -243,12 +247,13 @@ func TestPrices_CandlesEmptyFallsBackToPrice7d(t *testing.T) {
 func TestPrices_CandlesErrorFallsBackToPrice7d(t *testing.T) {
 	t.Parallel()
 
+	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
 	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
 		Price: 1.0,
 		// compute24hChange reads price7d[len-2], i.e. 0.95 here:
 		// (1.0 - 0.95) / 0.95 * 100 ≈ 5.26
-		Price7d: [][2]float64{{1, 0.95}, {2, 0.97}},
+		Price7d: recentDailyCandles(now, 0.95, 0.97),
 	})
 	stellarExpert.SetCandleErr("USDC-"+testIssuer+"-1", errors.New("transient candles boom"))
 
@@ -260,6 +265,29 @@ func TestPrices_CandlesErrorFallsBackToPrice7d(t *testing.T) {
 	require.NotNil(t, usdc)
 	require.NotNil(t, usdc.PercentagePriceChange24h)
 	assert.Equal(t, "5.26", *usdc.PercentagePriceChange24h)
+}
+
+// When /candles is empty AND price7d's last daily candle is older than
+// maxPrice7dFallbackAge, the entry is still returned with a real price but
+// percentagePriceChange24h is suppressed rather than computed off stale data.
+func TestPrices_StalePrice7d_SuppressesFallbackChange(t *testing.T) {
+	t.Parallel()
+
+	stalePast := time.Now().UTC().Add(-3 * 24 * time.Hour)
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
+		Price:   1.0,
+		Price7d: recentDailyCandles(stalePast, 0.95, 0.97),
+	})
+
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
+	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
+	require.NoError(t, err)
+
+	usdc := got["USDC:"+testIssuer]
+	require.NotNil(t, usdc)
+	assert.Equal(t, "1", usdc.CurrentPrice)
+	assert.Nil(t, usdc.PercentagePriceChange24h, "stale price7d must not produce a 24h change")
 }
 
 func TestPrices_NotFound_ReturnsNull(t *testing.T) {
@@ -426,6 +454,9 @@ func TestCompleteMissingResultsUsesStaleFallback(t *testing.T) {
 func TestCompute24hChange(t *testing.T) {
 	t.Parallel()
 
+	now := time.Now().UTC()
+	fresh := func(closes ...float64) [][2]float64 { return recentDailyCandles(now, closes...) }
+
 	cases := []struct {
 		name    string
 		current float64
@@ -433,20 +464,20 @@ func TestCompute24hChange(t *testing.T) {
 		want    *string
 	}{
 		{"no candles", 1.0, nil, nil},
-		{"single candle", 1.0, [][2]float64{{1, 1}}, nil},
-		{"zero prior denom", 1.0, [][2]float64{{1, 0}, {2, 0.5}}, nil},
-		{"+10% rise vs prior", 1.10, [][2]float64{{1, 1.0}, {2, 1.05}}, ptrStr("10")},
-		{"-25% drop vs prior", 0.90, [][2]float64{{1, 1.2}, {2, 1.0}}, ptrStr("-25")},
-		{"8 candles uses index len-2", 0.16, [][2]float64{{1, 0.18}, {2, 0.17}, {3, 0.169}, {4, 0.17}, {5, 0.165}, {6, 0.161}, {7, 0.158}, {8, 0.159}}, ptrStr("1.27")},
-		{"rounding to 2 decimals", 1.0001, [][2]float64{{1, 1.0}, {2, 0.999}}, ptrStr("0.01")},
-		{"negative zero collapses to 0", 0.999999, [][2]float64{{1, 1.0}, {2, 1.0}}, ptrStr("0")},
+		{"single candle", 1.0, fresh(1), nil},
+		{"zero prior denom", 1.0, fresh(0, 0.5), nil},
+		{"+10% rise vs prior", 1.10, fresh(1.0, 1.05), ptrStr("10")},
+		{"-25% drop vs prior", 0.90, fresh(1.2, 1.0), ptrStr("-25")},
+		{"8 candles uses index len-2", 0.16, fresh(0.18, 0.17, 0.169, 0.17, 0.165, 0.161, 0.158, 0.159), ptrStr("1.27")},
+		{"rounding to 2 decimals", 1.0001, fresh(1.0, 0.999), ptrStr("0.01")},
+		{"negative zero collapses to 0", 0.999999, fresh(1.0, 1.0), ptrStr("0")},
 	}
 
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := compute24hChange(tc.current, tc.candles)
+			got := compute24hChange(tc.current, tc.candles, now)
 			if tc.want == nil {
 				assert.Nil(t, got)
 				return
@@ -455,6 +486,27 @@ func TestCompute24hChange(t *testing.T) {
 			assert.Equal(t, *tc.want, *got)
 		})
 	}
+}
+
+func TestCompute24hChange_StalePrice7d_ReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	// Last candle is 48h old — beyond the 26h freshness threshold.
+	stale := recentDailyCandles(now.Add(-48*time.Hour), 0.95, 0.97)
+	assert.Nil(t, compute24hChange(1.0, stale, now))
+}
+
+func TestCompute24hChange_FreshPrice7d_ComputesChange(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	// Last candle 12h old — well within the 26h threshold.
+	fresh := recentDailyCandles(now.Add(-12*time.Hour), 0.95, 0.97)
+	got := compute24hChange(1.0, fresh, now)
+	require.NotNil(t, got)
+	// (1.0 - 0.95) / 0.95 * 100 ≈ 5.26
+	assert.Equal(t, "5.26", *got)
 }
 
 func TestFormatPrice(t *testing.T) {
