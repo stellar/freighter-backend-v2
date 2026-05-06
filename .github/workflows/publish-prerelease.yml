@@ -80,3 +80,15 @@ jobs:
           make docker-build-tag TAG="$TAG" VERSION="$VERSION"
           echo "Pushing $TAG"
           make docker-push TAG="$TAG"
+
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          COMMIT_SHA: ${{ steps.resolve_sha.outputs.sha }}
+        run: |
+          gh release create "$VERSION" \
+            --prerelease \
+            --target "$COMMIT_SHA" \
+            --title "$VERSION" \
+            --generate-notes
