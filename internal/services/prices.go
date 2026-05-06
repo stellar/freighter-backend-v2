@@ -50,15 +50,15 @@ type PricesServiceConfig struct {
 }
 
 type pricesService struct {
-	expert     types.StellarExpertService
-	redis      *store.RedisStore
-	cfg        PricesServiceConfig
-	svcMetrics *metrics.Service
+	stellarExpert types.StellarExpertService
+	redis         *store.RedisStore
+	cfg           PricesServiceConfig
+	svcMetrics    *metrics.Service
 }
 
 // NewPricesService wires the orchestrator. redis may be nil; if so, every
 // request bypasses the cache and hits Stellar Expert.
-func NewPricesService(expert types.StellarExpertService, redis *store.RedisStore, cfg PricesServiceConfig, m *metrics.Service) types.PricesService {
+func NewPricesService(stellarExpert types.StellarExpertService, redis *store.RedisStore, cfg PricesServiceConfig, metricsService *metrics.Service) types.PricesService {
 	if cfg.MaxConcurrent <= 0 {
 		cfg.MaxConcurrent = defaultMaxConcurrent
 	}
@@ -74,13 +74,13 @@ func NewPricesService(expert types.StellarExpertService, redis *store.RedisStore
 	if cfg.MissFetchTimeout <= 0 {
 		cfg.MissFetchTimeout = defaultMissFetchTTL
 	}
-	return &pricesService{expert: expert, redis: redis, cfg: cfg, svcMetrics: m}
+	return &pricesService{stellarExpert: stellarExpert, redis: redis, cfg: cfg, svcMetrics: metricsService}
 }
 
 func (p *pricesService) Name() string { return pricesServiceName }
 
 func (p *pricesService) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
-	return p.expert.GetHealth(ctx, network)
+	return p.stellarExpert.GetHealth(ctx, network)
 }
 
 // cachedPriceEntry is the on-disk shape in Redis. Only positive results are
@@ -111,14 +111,14 @@ func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network 
 	result := make(map[string]*types.PriceEntry, len(canonical))
 	var resultMu sync.Mutex
 
-	keys := make([]string, len(canonical))
-	keyToken := make(map[string]string, len(canonical))
+	cacheKeys := make([]string, len(canonical))
+	tokenByCacheKey := make(map[string]string, len(canonical))
 	for i, c := range canonical {
-		keys[i] = cacheKey(cacheNet, c)
-		keyToken[keys[i]] = c
+		cacheKeys[i] = cacheKey(cacheNet, c)
+		tokenByCacheKey[cacheKeys[i]] = c
 	}
 
-	freshHits, staleFallback := p.loadCachedPrices(ctx, keys, keyToken, start)
+	freshHits, staleFallback := p.loadCachedPrices(ctx, cacheKeys, tokenByCacheKey, start)
 	for token, entry := range freshHits {
 		result[token] = entry
 	}
@@ -143,14 +143,14 @@ func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network 
 	return result, nil
 }
 
-func (p *pricesService) loadCachedPrices(ctx context.Context, keys []string, keyToken map[string]string, now time.Time) (map[string]*types.PriceEntry, map[string]*types.PriceEntry) {
-	fresh := make(map[string]*types.PriceEntry, len(keys))
-	stale := make(map[string]*types.PriceEntry, len(keys))
+func (p *pricesService) loadCachedPrices(ctx context.Context, cacheKeys []string, tokenByCacheKey map[string]string, now time.Time) (map[string]*types.PriceEntry, map[string]*types.PriceEntry) {
+	fresh := make(map[string]*types.PriceEntry, len(cacheKeys))
+	stale := make(map[string]*types.PriceEntry, len(cacheKeys))
 	if p.redis == nil {
 		return fresh, stale
 	}
 
-	hits, mgetErr := p.redis.MGetJSON(ctx, keys, func() any { return new(cachedPriceEntry) })
+	hits, mgetErr := p.redis.MGetJSON(ctx, cacheKeys, func() any { return new(cachedPriceEntry) })
 	if mgetErr != nil {
 		logger.Warn("prices: redis MGet failed; bypassing cache", "error", mgetErr)
 		return fresh, stale
@@ -164,9 +164,9 @@ func (p *pricesService) loadCachedPrices(ctx context.Context, keys []string, key
 		priceEntry := entry.toPriceEntry()
 		switch entry.freshness(now, p.cfg.CacheTTL, p.cfg.StaleCacheTTL) {
 		case cacheFresh:
-			fresh[keyToken[k]] = priceEntry
+			fresh[tokenByCacheKey[k]] = priceEntry
 		case cacheStale:
-			stale[keyToken[k]] = priceEntry
+			stale[tokenByCacheKey[k]] = priceEntry
 		}
 	}
 	return fresh, stale
@@ -223,8 +223,8 @@ func (p *pricesService) resolveMisses(ctx context.Context, network, cacheNet str
 // not-found/malformed assets resolve to nil; transient failures and budget
 // exhaustion leave the token eligible for stale fallback.
 func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, canonical string) (_ *types.PriceEntry, resolved bool) {
-	expertID := assetid.ToStellarExpert(canonical)
-	asset, err := p.expert.GetAsset(ctx, network, expertID)
+	stellarExpertID := assetid.ToStellarExpert(canonical)
+	asset, err := p.stellarExpert.GetAsset(ctx, network, stellarExpertID)
 	if err != nil {
 		if errors.Is(err, ErrAssetNotFound) || errors.Is(err, ErrAssetMalformed) {
 			return nil, true
@@ -236,16 +236,16 @@ func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, ca
 		return nil, false
 	}
 
-	change := p.compute24hChangeFromCandles(ctx, network, expertID, asset.Price)
-	if change == nil {
+	change24h := p.compute24hChangeFromCandles(ctx, network, stellarExpertID, asset.Price)
+	if change24h == nil {
 		// Fallback for native XLM (candles are empty) and for transient
 		// /candles failures: derive from the daily price7d on /asset/{id}.
-		change = compute24hChange(asset.Price, asset.Price7d)
+		change24h = compute24hChange(asset.Price, asset.Price7d)
 	}
 
 	entry := &types.PriceEntry{
 		CurrentPrice:             formatPrice(asset.Price),
-		PercentagePriceChange24h: change,
+		PercentagePriceChange24h: change24h,
 	}
 	p.cachePositive(ctx, cacheNet, canonical, entry)
 	return entry, true
@@ -255,32 +255,32 @@ func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, ca
 // returns the percentage delta between the current price and the open of the
 // oldest candle. Returns nil when the upstream is empty (e.g. native XLM has
 // no candles), the request fails, or the open is zero.
-func (p *pricesService) compute24hChangeFromCandles(ctx context.Context, network, expertID string, current float64) *string {
+func (p *pricesService) compute24hChangeFromCandles(ctx context.Context, network, stellarExpertID string, currentPrice float64) *string {
 	to := time.Now().UTC()
 	from := to.Add(-candlesWindow)
-	rows, err := p.expert.GetAssetCandles(ctx, network, expertID, from, to, candlesResolutionSec)
+	candles, err := p.stellarExpert.GetAssetCandles(ctx, network, stellarExpertID, from, to, candlesResolutionSec)
 	if err != nil {
 		if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) &&
 			!errors.Is(err, ErrAssetNotFound) && !errors.Is(err, ErrAssetMalformed) {
-			logger.Warn("prices: candles fetch failed; falling back to price7d", "asset", expertID, "error", err)
+			logger.Warn("prices: candles fetch failed; falling back to price7d", "asset", stellarExpertID, "error", err)
 		}
 		return nil
 	}
-	if len(rows) == 0 {
+	if len(candles) == 0 {
 		return nil
 	}
-	open := rows[0].Open()
-	if open == 0 {
+	openPrice := candles[0].Open()
+	if openPrice == 0 {
 		return nil
 	}
-	pct := (current - open) / open * 100
-	rounded := math.Round(pct*100) / 100
+	percentChange := (currentPrice - openPrice) / openPrice * 100
+	rounded := math.Round(percentChange*100) / 100
 	if rounded == 0 {
 		// Collapse negative zero to "0" so the JSON is byte-stable.
 		rounded = 0
 	}
-	s := strconv.FormatFloat(rounded, 'f', -1, 64)
-	return &s
+	formatted := strconv.FormatFloat(rounded, 'f', -1, 64)
+	return &formatted
 }
 
 func (p *pricesService) cachePositive(ctx context.Context, cacheNet, canonical string, entry *types.PriceEntry) {
@@ -314,23 +314,23 @@ func formatPrice(v float64) string {
 // compute24hChange returns the percentage delta between the latest reported
 // price and the candle one day prior. Returns nil when there is insufficient
 // history or the prior price is zero (avoids divide-by-zero).
-func compute24hChange(current float64, candles [][2]float64) *string {
-	if len(candles) < 2 {
+func compute24hChange(currentPrice float64, dailyCandles [][2]float64) *string {
+	if len(dailyCandles) < 2 {
 		return nil
 	}
-	prior := candles[len(candles)-2][1]
-	if prior == 0 {
+	priorPrice := dailyCandles[len(dailyCandles)-2][1]
+	if priorPrice == 0 {
 		return nil
 	}
-	pct := (current - prior) / prior * 100
-	rounded := math.Round(pct*100) / 100
+	percentChange := (currentPrice - priorPrice) / priorPrice * 100
+	rounded := math.Round(percentChange*100) / 100
 	if rounded == 0 {
 		// Collapse negative zero to "0" so the JSON is byte-stable for tiny
 		// downward drifts ("-0" surprises clients that string-compare).
 		rounded = 0
 	}
-	s := strconv.FormatFloat(rounded, 'f', -1, 64)
-	return &s
+	formatted := strconv.FormatFloat(rounded, 'f', -1, 64)
+	return &formatted
 }
 
 type cacheFreshness int

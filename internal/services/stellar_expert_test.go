@@ -151,9 +151,9 @@ func TestStellarExpert_GetAssetCandles_Success(t *testing.T) {
 
 	from := time.Unix(1739707200, 0).UTC()
 	to := time.Unix(1739710800, 0).UTC()
-	rows, err := svc.GetAssetCandles(context.Background(), types.PUBLIC, "USDC-G..-1", from, to, 3600)
+	candles, err := svc.GetAssetCandles(context.Background(), types.PUBLIC, "USDC-G..-1", from, to, 3600)
 	require.NoError(t, err)
-	require.Len(t, rows, 2)
+	require.Len(t, candles, 2)
 
 	assert.Equal(t, "/explorer/public/asset/USDC-G..-1/candles", gotPath)
 	assert.Contains(t, gotQuery, "from=1739707200")
@@ -161,9 +161,9 @@ func TestStellarExpert_GetAssetCandles_Success(t *testing.T) {
 	assert.Contains(t, gotQuery, "resolution=3600")
 	assert.Contains(t, gotQuery, "order=asc")
 	assert.Equal(t, "https://stellar.expert", gotOrigin)
-	assert.InDelta(t, 0.001, rows[0].Open(), 1e-9)
-	assert.InDelta(t, 0.00106, rows[1].Close(), 1e-9)
-	assert.Equal(t, int64(1739707200), rows[0].TS())
+	assert.InDelta(t, 0.001, candles[0].Open(), 1e-9)
+	assert.InDelta(t, 0.00106, candles[1].Close(), 1e-9)
+	assert.Equal(t, int64(1739707200), candles[0].TS())
 }
 
 func TestStellarExpert_GetAssetCandles_EmptyForNativeXLM(t *testing.T) {
@@ -174,9 +174,9 @@ func TestStellarExpert_GetAssetCandles_EmptyForNativeXLM(t *testing.T) {
 		_, _ = w.Write([]byte(`[]`))
 	}))
 
-	rows, err := svc.GetAssetCandles(context.Background(), types.PUBLIC, "XLM", time.Now().Add(-time.Hour), time.Now(), 3600)
+	candles, err := svc.GetAssetCandles(context.Background(), types.PUBLIC, "XLM", time.Now().Add(-time.Hour), time.Now(), 3600)
 	require.NoError(t, err)
-	assert.Empty(t, rows)
+	assert.Empty(t, candles)
 }
 
 func TestStellarExpert_GetAssetCandles_NotFound(t *testing.T) {

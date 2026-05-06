@@ -56,7 +56,7 @@ type stellarExpertService struct {
 // Expert /asset endpoint. The base URLs should already include the network
 // segment (e.g. https://api.stellar.expert/explorer/public). apiKey, when
 // non-empty, is sent as `Authorization: Bearer <apiKey>` on every request.
-func NewStellarExpertService(pubnetURL, testnetURL, apiKey string, m *metrics.Service) types.StellarExpertService {
+func NewStellarExpertService(pubnetURL, testnetURL, apiKey string, metricsService *metrics.Service) types.StellarExpertService {
 	httpClient := &http.Client{
 		Timeout: stellarExpertHTTPTimeout,
 		Transport: &http.Transport{
@@ -74,7 +74,7 @@ func NewStellarExpertService(pubnetURL, testnetURL, apiKey string, m *metrics.Se
 		testnetBaseURL: testnetURL,
 		apiKey:         apiKey,
 		httpClient:     httpClient,
-		svcMetrics:     m,
+		svcMetrics:     metricsService,
 	}
 }
 
@@ -155,12 +155,12 @@ func (s *stellarExpertService) GetAssetCandles(ctx context.Context, network, ass
 		return nil, err
 	}
 
-	q := url.Values{}
-	q.Set("from", strconv.FormatInt(from.Unix(), 10))
-	q.Set("to", strconv.FormatInt(to.Unix(), 10))
-	q.Set("resolution", strconv.Itoa(resolutionSec))
-	q.Set("order", "asc")
-	reqURL := fmt.Sprintf("%s/asset/%s/candles?%s", baseURL, assetID, q.Encode())
+	query := url.Values{}
+	query.Set("from", strconv.FormatInt(from.Unix(), 10))
+	query.Set("to", strconv.FormatInt(to.Unix(), 10))
+	query.Set("resolution", strconv.Itoa(resolutionSec))
+	query.Set("order", "asc")
+	reqURL := fmt.Sprintf("%s/asset/%s/candles?%s", baseURL, assetID, query.Encode())
 
 	req, err := s.newRequest(ctx, reqURL)
 	if err != nil {
@@ -175,11 +175,11 @@ func (s *stellarExpertService) GetAssetCandles(ctx context.Context, network, ass
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		var rows []types.StellarExpertCandle
-		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
+		var candles []types.StellarExpertCandle
+		if err := json.NewDecoder(resp.Body).Decode(&candles); err != nil {
 			return nil, fmt.Errorf("decoding stellar expert candles response: %w", err)
 		}
-		return rows, nil
+		return candles, nil
 	case http.StatusNotFound:
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil, ErrAssetNotFound

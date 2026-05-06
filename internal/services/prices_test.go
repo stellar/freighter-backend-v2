@@ -155,8 +155,8 @@ func (f *fakeStellarExpert) CandleCallCount(assetID string) int {
 func TestPrices_HappyPath_NoCache(t *testing.T) {
 	t.Parallel()
 
-	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{
 		Price: 0.16,
 		Price7d: [][2]float64{
 			{1776902400, 0.18},
@@ -169,7 +169,7 @@ func TestPrices_HappyPath_NoCache(t *testing.T) {
 			{1777507200, 0.159}, // last
 		},
 	})
-	expert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
+	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
 		Price: 1.0,
 		Price7d: [][2]float64{
 			{1, 1.0},
@@ -177,7 +177,7 @@ func TestPrices_HappyPath_NoCache(t *testing.T) {
 		},
 	})
 
-	svc := NewPricesService(expert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"XLM", "USDC:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
 
@@ -198,19 +198,19 @@ func TestPrices_HappyPath_NoCache(t *testing.T) {
 func TestPrices_UsesCandlesWhenAvailable(t *testing.T) {
 	t.Parallel()
 
-	expert := newFakeStellarExpert()
+	stellarExpert := newFakeStellarExpert()
 	// price7d would yield 1% if used. Candles yield -10% — verify candles win.
-	expert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
+	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
 		Price:   1.10,
 		Price7d: [][2]float64{{1, 1.0}, {2, 1.089}}, // 1.01% if computed from price7d
 	})
-	expert.SetCandles("USDC-"+testIssuer+"-1", []types.StellarExpertCandle{
+	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", []types.StellarExpertCandle{
 		// [ts, open, low, high, close, qvol, bvol, trades]; oldest open=1.222 → (1.10-1.222)/1.222*100 ≈ -9.98 → -9.98
 		{1, 1.222, 1.2, 1.23, 1.21, 0, 0, 0},
 		{2, 1.21, 1.10, 1.21, 1.10, 0, 0, 0},
 	})
 
-	svc := NewPricesService(expert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
 
@@ -219,20 +219,20 @@ func TestPrices_UsesCandlesWhenAvailable(t *testing.T) {
 	assert.Equal(t, "1.1", usdc.CurrentPrice)
 	require.NotNil(t, usdc.PercentagePriceChange24h)
 	assert.Equal(t, "-9.98", *usdc.PercentagePriceChange24h)
-	assert.Equal(t, 1, expert.CandleCallCount("USDC-"+testIssuer+"-1"))
+	assert.Equal(t, 1, stellarExpert.CandleCallCount("USDC-"+testIssuer+"-1"))
 }
 
 func TestPrices_CandlesEmptyFallsBackToPrice7d(t *testing.T) {
 	t.Parallel()
 
-	expert := newFakeStellarExpert()
+	stellarExpert := newFakeStellarExpert()
 	// XLM has no candles upstream; expect price7d fallback to drive the 24h change.
-	expert.Set("XLM", &types.StellarExpertAsset{
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{
 		Price:   0.16,
 		Price7d: [][2]float64{{1, 0.158}, {2, 0.16}},
 	})
 
-	svc := NewPricesService(expert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
 	require.NoError(t, err)
 
@@ -241,22 +241,22 @@ func TestPrices_CandlesEmptyFallsBackToPrice7d(t *testing.T) {
 	assert.Equal(t, "0.16", xlm.CurrentPrice)
 	require.NotNil(t, xlm.PercentagePriceChange24h)
 	assert.Equal(t, "1.27", *xlm.PercentagePriceChange24h)
-	assert.Equal(t, 1, expert.CandleCallCount("XLM"), "candles still attempted once before fallback")
+	assert.Equal(t, 1, stellarExpert.CandleCallCount("XLM"), "candles still attempted once before fallback")
 }
 
 func TestPrices_CandlesErrorFallsBackToPrice7d(t *testing.T) {
 	t.Parallel()
 
-	expert := newFakeStellarExpert()
-	expert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
 		Price: 1.0,
 		// compute24hChange reads price7d[len-2], i.e. 0.95 here:
 		// (1.0 - 0.95) / 0.95 * 100 ≈ 5.26
 		Price7d: [][2]float64{{1, 0.95}, {2, 0.97}},
 	})
-	expert.SetCandleErr("USDC-"+testIssuer+"-1", errors.New("transient candles boom"))
+	stellarExpert.SetCandleErr("USDC-"+testIssuer+"-1", errors.New("transient candles boom"))
 
-	svc := NewPricesService(expert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
 
@@ -269,10 +269,10 @@ func TestPrices_CandlesErrorFallsBackToPrice7d(t *testing.T) {
 func TestPrices_NotFound_ReturnsNull(t *testing.T) {
 	t.Parallel()
 
-	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
 
-	svc := NewPricesService(expert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"XLM", "BOGUS:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
 	assert.NotNil(t, got["XLM"])
@@ -284,10 +284,10 @@ func TestPrices_NotFound_ReturnsNull(t *testing.T) {
 func TestPrices_Malformed_ReturnsNull(t *testing.T) {
 	t.Parallel()
 
-	expert := newFakeStellarExpert()
-	expert.SetErr("BAD-"+testIssuer+"-1", ErrAssetMalformed)
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.SetErr("BAD-"+testIssuer+"-1", ErrAssetMalformed)
 
-	svc := NewPricesService(expert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"BAD:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
 	assert.Nil(t, got["BAD:"+testIssuer])
@@ -296,10 +296,10 @@ func TestPrices_Malformed_ReturnsNull(t *testing.T) {
 func TestPrices_UpstreamError_ReturnsNull(t *testing.T) {
 	t.Parallel()
 
-	expert := newFakeStellarExpert()
-	expert.SetErr("XLM", errors.New("transport boom"))
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.SetErr("XLM", errors.New("transport boom"))
 
-	svc := NewPricesService(expert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
 	require.NoError(t, err)
 	xlm, ok := got["XLM"]
@@ -310,20 +310,20 @@ func TestPrices_UpstreamError_ReturnsNull(t *testing.T) {
 func TestPrices_DedupesDuplicateTokens(t *testing.T) {
 	t.Parallel()
 
-	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
 
-	svc := NewPricesService(expert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
 	_, err := svc.GetPrices(context.Background(), []string{"XLM", "XLM", "XLM"}, types.PUBLIC)
 	require.NoError(t, err)
-	assert.Equal(t, 1, expert.CallCount("XLM"))
+	assert.Equal(t, 1, stellarExpert.CallCount("XLM"))
 }
 
 func TestPrices_RejectsUnsupportedNetwork(t *testing.T) {
 	t.Parallel()
 
-	expert := newFakeStellarExpert()
-	svc := NewPricesService(expert, nil, PricesServiceConfig{}, nil)
+	stellarExpert := newFakeStellarExpert()
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
 	_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.FUTURENET)
 	require.Error(t, err)
 }
@@ -331,33 +331,33 @@ func TestPrices_RejectsUnsupportedNetwork(t *testing.T) {
 func TestPrices_ConcurrencyCapHonored(t *testing.T) {
 	t.Parallel()
 
-	expert := newFakeStellarExpert()
-	expert.delay = 50 * time.Millisecond
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.delay = 50 * time.Millisecond
 	tokens := make([]string, 20)
 	for i := range tokens {
 		// Use distinct codes (4 chars) so each canonical id is unique.
 		code := []byte{'A', 'A', 'A', byte('A' + i)}
-		expertID := string(code) + "-" + testIssuer + "-1"
-		expert.Set(expertID, &types.StellarExpertAsset{Price: 1.0, Price7d: [][2]float64{{1, 1}, {2, 1}}})
+		stellarExpertID := string(code) + "-" + testIssuer + "-1"
+		stellarExpert.Set(stellarExpertID, &types.StellarExpertAsset{Price: 1.0, Price7d: [][2]float64{{1, 1}, {2, 1}}})
 		tokens[i] = string(code) + ":" + testIssuer
 	}
 
-	svc := NewPricesService(expert, nil, PricesServiceConfig{MaxConcurrent: 4}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{MaxConcurrent: 4}, nil)
 	got, err := svc.GetPrices(context.Background(), tokens, types.PUBLIC)
 	require.NoError(t, err)
 	assert.Len(t, got, 20)
-	assert.LessOrEqual(t, expert.maxConcurrent.Load(), int64(4),
-		"expected at most 4 concurrent upstream calls, observed %d", expert.maxConcurrent.Load())
+	assert.LessOrEqual(t, stellarExpert.maxConcurrent.Load(), int64(4),
+		"expected at most 4 concurrent upstream calls, observed %d", stellarExpert.maxConcurrent.Load())
 }
 
 func TestPrices_MissFetchTimeoutReturnsBestEffortWithoutError(t *testing.T) {
 	t.Parallel()
 
-	expert := newFakeStellarExpert()
-	expert.delay = 100 * time.Millisecond
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.delay = 100 * time.Millisecond
 	tokens := []string{"XLM", "USDC:" + testIssuer}
 
-	svc := NewPricesService(expert, nil, PricesServiceConfig{
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{
 		MaxConcurrent:    1,
 		MissFetchTimeout: 10 * time.Millisecond,
 	}, nil)
@@ -371,14 +371,14 @@ func TestPrices_MissFetchTimeoutReturnsBestEffortWithoutError(t *testing.T) {
 func TestPrices_PreservesPartialOnContextCancel(t *testing.T) {
 	t.Parallel()
 
-	expert := newFakeStellarExpert()
-	expert.delay = 100 * time.Millisecond
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.delay = 100 * time.Millisecond
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	svc := NewPricesService(expert, nil, PricesServiceConfig{MaxConcurrent: 1}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{MaxConcurrent: 1}, nil)
 	got, err := svc.GetPrices(ctx, []string{"XLM"}, types.PUBLIC)
 	// errgroup surfaces ctx.Err() but we still receive the (possibly empty)
 	// partial result map.
