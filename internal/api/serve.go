@@ -92,8 +92,10 @@ func (s *ApiServer) initServices() error {
 		s.appMetrics.Service,
 	)
 	s.pricesService = services.NewPricesService(stellarExpert, s.redis, services.PricesServiceConfig{
-		CacheTTL:      time.Duration(s.cfg.PricesConfig.PriceCacheTTLSeconds) * time.Second,
-		MaxConcurrent: s.cfg.PricesConfig.MaxConcurrentPriceFetches,
+		CacheTTL:         time.Duration(s.cfg.PricesConfig.PriceCacheTTLSeconds) * time.Second,
+		StaleCacheTTL:    time.Duration(s.cfg.PricesConfig.PriceStaleCacheTTLSeconds) * time.Second,
+		MissFetchTimeout: time.Duration(s.cfg.PricesConfig.PriceFetchTimeoutSeconds) * time.Second,
+		MaxConcurrent:    s.cfg.PricesConfig.MaxConcurrentPriceFetches,
 	}, s.appMetrics.Service)
 
 	return nil

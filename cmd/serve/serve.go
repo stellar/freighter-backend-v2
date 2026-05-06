@@ -30,6 +30,12 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.PricesConfig.MaxTokensPerRequest; n > services.MaxTokensPerPriceRequest {
 				return fmt.Errorf("--max-tokens-per-request=%d exceeds price service ceiling of %d tokens per request", n, services.MaxTokensPerPriceRequest)
 			}
+			if n := s.Cfg.PricesConfig.PriceFetchTimeoutSeconds; n < 0 {
+				return fmt.Errorf("--price-fetch-timeout-seconds=%d must be >= 0", n)
+			}
+			if fresh, stale := s.Cfg.PricesConfig.PriceCacheTTLSeconds, s.Cfg.PricesConfig.PriceStaleCacheTTLSeconds; fresh > 0 && stale > 0 && stale < fresh {
+				return fmt.Errorf("--price-stale-cache-ttl-seconds=%d must be >= --price-cache-ttl-seconds=%d", stale, fresh)
+			}
 			return nil
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -94,6 +100,8 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertTestnetURL, "stellar-expert-testnet-url", "https://api.stellar.expert/explorer/testnet", "Stellar Expert base URL for testnet")
 	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertAPIKey, "stellar-expert-api-key", "", "Bearer token for the Stellar Expert API (required when token prices are enabled)")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceCacheTTLSeconds, "price-cache-ttl-seconds", 30, "TTL for cached token prices in Redis (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceStaleCacheTTLSeconds, "price-stale-cache-ttl-seconds", 120, "Maximum age for degraded cached token prices in Redis (seconds); set equal to --price-cache-ttl-seconds to disable stale fallback")
+	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceFetchTimeoutSeconds, "price-fetch-timeout-seconds", 9, "Budget for uncached token price fetches before returning best-effort results (seconds)")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxTokensPerRequest, "max-tokens-per-request", 1000, "Maximum tokens accepted in a single token-prices request")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxConcurrentPriceFetches, "max-concurrent-price-fetches", 25, "Per-request concurrency cap for upstream price fetches")
 	return cmd

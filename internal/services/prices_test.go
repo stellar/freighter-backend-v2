@@ -220,6 +220,24 @@ func TestPrices_ConcurrencyCapHonored(t *testing.T) {
 		"expected at most 4 concurrent upstream calls, observed %d", expert.maxConcurrent.Load())
 }
 
+func TestPrices_MissFetchTimeoutReturnsBestEffortWithoutError(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	expert.delay = 100 * time.Millisecond
+	tokens := []string{"XLM", "USDC:" + testIssuer}
+
+	svc := NewPricesService(expert, nil, PricesServiceConfig{
+		MaxConcurrent:    1,
+		MissFetchTimeout: 10 * time.Millisecond,
+	}, nil)
+	got, err := svc.GetPrices(context.Background(), tokens, types.PUBLIC)
+	require.NoError(t, err)
+	require.Len(t, got, len(tokens))
+	assert.Nil(t, got["XLM"])
+	assert.Nil(t, got["USDC:"+testIssuer])
+}
+
 func TestPrices_PreservesPartialOnContextCancel(t *testing.T) {
 	t.Parallel()
 
@@ -238,6 +256,45 @@ func TestPrices_PreservesPartialOnContextCancel(t *testing.T) {
 		assert.True(t, errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled))
 	}
 	assert.NotNil(t, got)
+}
+
+func TestCachedPriceEntryFreshness(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	entry := cachedPriceEntry{
+		CurrentPrice: "1",
+		FetchedAt:    now.Add(-20 * time.Second).Format(time.RFC3339Nano),
+	}
+	assert.Equal(t, cacheFresh, entry.freshness(now, 30*time.Second, 2*time.Minute))
+
+	entry.FetchedAt = now.Add(-45 * time.Second).Format(time.RFC3339Nano)
+	assert.Equal(t, cacheStale, entry.freshness(now, 30*time.Second, 2*time.Minute))
+
+	entry.FetchedAt = now.Add(-3 * time.Minute).Format(time.RFC3339Nano)
+	assert.Equal(t, cacheMissing, entry.freshness(now, 30*time.Second, 2*time.Minute))
+
+	entry.FetchedAt = "not-a-time"
+	assert.Equal(t, cacheMissing, entry.freshness(now, 30*time.Second, 2*time.Minute))
+}
+
+func TestCompleteMissingResultsUsesStaleFallback(t *testing.T) {
+	t.Parallel()
+
+	tokens := []string{"XLM", "USDC:" + testIssuer, "BOGUS:" + testIssuer}
+	result := map[string]*types.PriceEntry{
+		"XLM": nil,
+	}
+	staleFallback := map[string]*types.PriceEntry{
+		"USDC:" + testIssuer: {CurrentPrice: "1", PercentagePriceChange24h: ptrStr("0")},
+	}
+
+	completeMissingResults(tokens, result, staleFallback)
+	require.Len(t, result, len(tokens))
+	assert.Nil(t, result["XLM"])
+	require.NotNil(t, result["USDC:"+testIssuer])
+	assert.Equal(t, "1", result["USDC:"+testIssuer].CurrentPrice)
+	assert.Nil(t, result["BOGUS:"+testIssuer])
 }
 
 func TestCompute24hChange(t *testing.T) {

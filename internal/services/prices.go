@@ -10,8 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/store"
@@ -24,6 +22,8 @@ const (
 
 	defaultMaxConcurrent = 25
 	defaultCacheTTL      = 30 * time.Second
+	defaultStaleCacheTTL = 2 * time.Minute
+	defaultMissFetchTTL  = 9 * time.Second
 
 	cacheKeyPrefix = "prices:v1"
 
@@ -37,8 +37,10 @@ const (
 // PricesServiceConfig tunes the orchestrator. Zero values fall back to safe
 // defaults so callers can construct a service with PricesServiceConfig{}.
 type PricesServiceConfig struct {
-	CacheTTL      time.Duration
-	MaxConcurrent int
+	CacheTTL         time.Duration
+	StaleCacheTTL    time.Duration
+	MissFetchTimeout time.Duration
+	MaxConcurrent    int
 }
 
 type pricesService struct {
@@ -57,6 +59,15 @@ func NewPricesService(expert types.StellarExpertService, redis *store.RedisStore
 	if cfg.CacheTTL <= 0 {
 		cfg.CacheTTL = defaultCacheTTL
 	}
+	if cfg.StaleCacheTTL <= 0 {
+		cfg.StaleCacheTTL = defaultStaleCacheTTL
+	}
+	if cfg.StaleCacheTTL < cfg.CacheTTL {
+		cfg.StaleCacheTTL = cfg.CacheTTL
+	}
+	if cfg.MissFetchTimeout <= 0 {
+		cfg.MissFetchTimeout = defaultMissFetchTTL
+	}
 	return &pricesService{expert: expert, redis: redis, cfg: cfg, svcMetrics: m}
 }
 
@@ -67,17 +78,18 @@ func (p *pricesService) GetHealth(ctx context.Context, network string) (types.Ge
 }
 
 // cachedPriceEntry is the on-disk shape in Redis. Only positive results are
-// cached; unknown / malformed assets are returned as nil per request and
-// re-fetched on the next call so freshly-listed assets surface quickly.
+// cached; FetchedAt lets us distinguish fresh hits from bounded stale fallbacks.
 type cachedPriceEntry struct {
 	CurrentPrice             string  `json:"currentPrice,omitempty"`
 	PercentagePriceChange24h *string `json:"percentagePriceChange24h,omitempty"`
+	FetchedAt                string  `json:"fetchedAt,omitempty"`
 }
 
 // GetPrices fetches a snapshot for each canonical token id. The returned map
 // is keyed by canonical id; nil values mean the token is unpriceable
-// (unknown to Stellar Expert, malformed, or upstream failure). The whole
-// request only fails on context cancellation or unrecoverable system errors.
+// (unknown to Stellar Expert, malformed, or unavailable within the request's
+// miss-fetch budget). The whole request only fails on caller context
+// cancellation or unrecoverable system errors.
 func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network string) (_ map[string]*types.PriceEntry, err error) {
 	start := time.Now()
 	defer func() {
@@ -100,70 +112,122 @@ func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network 
 		keyToken[keys[i]] = c
 	}
 
-	if p.redis != nil {
-		hits, mgetErr := p.redis.MGetJSON(ctx, keys, func() any { return new(cachedPriceEntry) })
-		if mgetErr != nil {
-			logger.Warn("prices: redis MGet failed; bypassing cache", "error", mgetErr)
-		}
-		for k, v := range hits {
-			entry, ok := v.(*cachedPriceEntry)
-			if !ok {
-				continue
-			}
-			result[keyToken[k]] = &types.PriceEntry{
-				CurrentPrice:             entry.CurrentPrice,
-				PercentagePriceChange24h: entry.PercentagePriceChange24h,
-			}
-		}
+	freshHits, staleFallback := p.loadCachedPrices(ctx, keys, keyToken, start)
+	for token, entry := range freshHits {
+		result[token] = entry
 	}
 
-	misses := make([]string, 0, len(canonical))
-	for _, c := range canonical {
-		if _, ok := result[c]; !ok {
-			misses = append(misses, c)
-		}
-	}
+	misses := missingTokens(canonical, result)
 	if len(misses) == 0 {
 		return result, nil
 	}
 
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(p.cfg.MaxConcurrent)
+	fetchCtx, cancel := context.WithTimeout(ctx, p.cfg.MissFetchTimeout)
+	defer cancel()
 
-	for _, c := range misses {
-		c := c
-		g.Go(func() error {
-			entry := p.fetchAndCache(gctx, network, cacheNet, c)
-			resultMu.Lock()
-			result[c] = entry
-			resultMu.Unlock()
-			return nil
-		})
+	p.resolveMisses(fetchCtx, network, cacheNet, misses, result, &resultMu)
+	unresolved := countMissingTokens(canonical, result)
+	if unresolved > 0 && fetchCtx.Err() != nil && ctx.Err() == nil {
+		logger.Warn("prices: miss fetch budget exhausted; returning best-effort results", "network", network, "misses", len(misses), "unresolved", unresolved)
 	}
-
-	g.Wait()
-	// Per-goroutine errors are swallowed (logged + nil entry), so g.Wait()
-	// itself never returns. Surface ctx cancellation / deadline-exceeded
-	// explicitly so the handler can map it to 503 instead of 500.
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
+	completeMissingResults(canonical, result, staleFallback)
 	return result, nil
 }
 
+func (p *pricesService) loadCachedPrices(ctx context.Context, keys []string, keyToken map[string]string, now time.Time) (map[string]*types.PriceEntry, map[string]*types.PriceEntry) {
+	fresh := make(map[string]*types.PriceEntry, len(keys))
+	stale := make(map[string]*types.PriceEntry, len(keys))
+	if p.redis == nil {
+		return fresh, stale
+	}
+
+	hits, mgetErr := p.redis.MGetJSON(ctx, keys, func() any { return new(cachedPriceEntry) })
+	if mgetErr != nil {
+		logger.Warn("prices: redis MGet failed; bypassing cache", "error", mgetErr)
+		return fresh, stale
+	}
+
+	for k, v := range hits {
+		entry, ok := v.(*cachedPriceEntry)
+		if !ok {
+			continue
+		}
+		priceEntry := entry.toPriceEntry()
+		switch entry.freshness(now, p.cfg.CacheTTL, p.cfg.StaleCacheTTL) {
+		case cacheFresh:
+			fresh[keyToken[k]] = priceEntry
+		case cacheStale:
+			stale[keyToken[k]] = priceEntry
+		}
+	}
+	return fresh, stale
+}
+
+func (p *pricesService) resolveMisses(ctx context.Context, network, cacheNet string, misses []string, result map[string]*types.PriceEntry, resultMu *sync.Mutex) {
+	workers := min(len(misses), p.cfg.MaxConcurrent)
+	if workers == 0 {
+		return
+	}
+
+	jobs := make(chan string)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case canonical, ok := <-jobs:
+					if !ok {
+						return
+					}
+					entry, resolved := p.fetchAndCache(ctx, network, cacheNet, canonical)
+					if !resolved {
+						continue
+					}
+					resultMu.Lock()
+					result[canonical] = entry
+					resultMu.Unlock()
+				}
+			}
+		}()
+	}
+
+	for _, canonical := range misses {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			return
+		case jobs <- canonical:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+}
+
 // fetchAndCache hits Stellar Expert for one canonical asset id, writes a
-// successful result to Redis, and returns the response entry. Per-token
-// failures (not found, malformed, transient upstream error) map to nil and
-// are not cached; nothing here propagates to the caller.
-func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, canonical string) *types.PriceEntry {
+// successful result to Redis, and returns the response entry. The boolean
+// reports whether the token was authoritatively resolved for this request:
+// not-found/malformed assets resolve to nil; transient failures and budget
+// exhaustion leave the token eligible for stale fallback.
+func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, canonical string) (_ *types.PriceEntry, resolved bool) {
 	expertID := assetid.ToStellarExpert(canonical)
 	asset, err := p.expert.GetAsset(ctx, network, expertID)
 	if err != nil {
 		if errors.Is(err, ErrAssetNotFound) || errors.Is(err, ErrAssetMalformed) {
-			return nil
+			return nil, true
+		}
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return nil, false
 		}
 		logger.Warn("prices: upstream fetch failed", "asset", canonical, "error", err)
-		return nil
+		return nil, false
 	}
 
 	entry := &types.PriceEntry{
@@ -171,7 +235,7 @@ func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, ca
 		PercentagePriceChange24h: compute24hChange(asset.Price, asset.Price7d),
 	}
 	p.cachePositive(ctx, cacheNet, canonical, entry)
-	return entry
+	return entry, true
 }
 
 func (p *pricesService) cachePositive(ctx context.Context, cacheNet, canonical string, entry *types.PriceEntry) {
@@ -181,8 +245,9 @@ func (p *pricesService) cachePositive(ctx context.Context, cacheNet, canonical s
 	value := cachedPriceEntry{
 		CurrentPrice:             entry.CurrentPrice,
 		PercentagePriceChange24h: entry.PercentagePriceChange24h,
+		FetchedAt:                time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), value, p.cfg.CacheTTL); err != nil {
+	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), value, p.cfg.StaleCacheTTL); err != nil {
 		logger.Warn("prices: redis SET failed", "asset", canonical, "error", err)
 	}
 }
@@ -221,6 +286,72 @@ func compute24hChange(current float64, candles [][2]float64) *string {
 	}
 	s := strconv.FormatFloat(rounded, 'f', -1, 64)
 	return &s
+}
+
+type cacheFreshness int
+
+const (
+	cacheMissing cacheFreshness = iota
+	cacheFresh
+	cacheStale
+)
+
+func (c *cachedPriceEntry) toPriceEntry() *types.PriceEntry {
+	if c == nil {
+		return nil
+	}
+	return &types.PriceEntry{
+		CurrentPrice:             c.CurrentPrice,
+		PercentagePriceChange24h: c.PercentagePriceChange24h,
+	}
+}
+
+func (c *cachedPriceEntry) freshness(now time.Time, freshTTL, staleTTL time.Duration) cacheFreshness {
+	if c == nil || c.FetchedAt == "" {
+		return cacheMissing
+	}
+	fetchedAt, err := time.Parse(time.RFC3339Nano, c.FetchedAt)
+	if err != nil {
+		return cacheMissing
+	}
+	age := now.Sub(fetchedAt)
+	if age < 0 {
+		age = 0
+	}
+	if age <= freshTTL {
+		return cacheFresh
+	}
+	if age <= staleTTL {
+		return cacheStale
+	}
+	return cacheMissing
+}
+
+func missingTokens(tokens []string, result map[string]*types.PriceEntry) []string {
+	misses := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		if _, ok := result[token]; !ok {
+			misses = append(misses, token)
+		}
+	}
+	return misses
+}
+
+func countMissingTokens(tokens []string, result map[string]*types.PriceEntry) int {
+	return len(missingTokens(tokens, result))
+}
+
+func completeMissingResults(tokens []string, result, staleFallback map[string]*types.PriceEntry) {
+	for _, token := range tokens {
+		if _, ok := result[token]; ok {
+			continue
+		}
+		if fallback, ok := staleFallback[token]; ok {
+			result[token] = fallback
+			continue
+		}
+		result[token] = nil
+	}
 }
 
 func dedupePreserveOrder(tokens []string) []string {

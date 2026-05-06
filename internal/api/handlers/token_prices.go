@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
@@ -14,10 +13,6 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils/assetid"
-)
-
-const (
-	TokenPricesContextTimeout = 10 * time.Second
 )
 
 type TokenPricesHandler struct {
@@ -34,8 +29,8 @@ type TokenPricesRequest struct {
 }
 
 type validatedTokenPricesRequest struct {
-	originalInputs []string
-	canonicalIDs   []string
+	originalInputs      []string
+	canonicalIDs        []string
 	originalByCanonical map[string]string
 }
 
@@ -78,9 +73,6 @@ func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedToken
 
 // GetPrices handles POST /api/v1/token-prices.
 func (h *TokenPricesHandler) GetPrices(w http.ResponseWriter, r *http.Request) error {
-	ctx, cancel := context.WithTimeout(r.Context(), TokenPricesContextTimeout)
-	defer cancel()
-
 	network := r.URL.Query().Get("network")
 	if !isValidNetwork(network) {
 		return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
@@ -94,7 +86,7 @@ func (h *TokenPricesHandler) GetPrices(w http.ResponseWriter, r *http.Request) e
 		return validationErr
 	}
 
-	prices, err := h.PricesService.GetPrices(ctx, req.canonicalIDs, network)
+	prices, err := h.PricesService.GetPrices(r.Context(), req.canonicalIDs, network)
 	if err != nil {
 		logger.ErrorWithContext(r.Context(), "getting token prices", "error", err)
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
