@@ -13,17 +13,11 @@ gh workflow run publish-prerelease.yml \
   -f target_ref=main
 ```
 
-This builds a Docker image from the chosen ref and pushes it to:
-
-```
-746476062914.dkr.ecr.us-east-1.amazonaws.com/stg/freighter-backend-v2:v1.2.3-rc.1
-```
-
-It also creates a GitHub prerelease at the same commit.
+This builds a Docker image from the chosen ref, pushes it to the staging namespace of the internal ECR registry under the `freighter-backend-v2` repository tagged `v1.2.3-rc.1`, and creates a GitHub prerelease at the same commit.
 
 ### 2. Test the prerelease in staging
 
-Deploy `stg/freighter-backend-v2:v1.2.3-rc.1` to your staging cluster and validate.
+Deploy the staging image to your staging cluster and validate.
 
 ### 3. Promote to a release
 
@@ -33,11 +27,7 @@ gh workflow run promote-release.yml \
   -f release_version=v1.2.3
 ```
 
-This re-tags the existing staging image into the production ECR namespace (preserving the image digest — no rebuild) and creates a non-prerelease GitHub release:
-
-```
-746476062914.dkr.ecr.us-east-1.amazonaws.com/prd/freighter-backend-v2:v1.2.3
-```
+This re-tags the existing staging image into the production namespace (preserving the image digest — no rebuild) and creates a non-prerelease GitHub release.
 
 ### Tag format
 
