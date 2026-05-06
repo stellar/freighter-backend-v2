@@ -132,7 +132,7 @@ func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network 
 	defer cancel()
 
 	p.resolveMisses(fetchCtx, network, cacheNet, misses, result, &resultMu)
-	unresolved := countMissingTokens(canonical, result)
+	unresolved := len(missingTokens(canonical, result))
 	if unresolved > 0 && fetchCtx.Err() != nil && ctx.Err() == nil {
 		logger.Warn("prices: miss fetch budget exhausted; returning best-effort results", "network", network, "misses", len(misses), "unresolved", unresolved)
 	}
@@ -161,7 +161,10 @@ func (p *pricesService) loadCachedPrices(ctx context.Context, cacheKeys []string
 		if !ok {
 			continue
 		}
-		priceEntry := entry.toPriceEntry()
+		priceEntry := &types.PriceEntry{
+			CurrentPrice:             entry.CurrentPrice,
+			PercentagePriceChange24h: entry.PercentagePriceChange24h,
+		}
 		switch entry.freshness(now, p.cfg.CacheTTL, p.cfg.StaleCacheTTL) {
 		case cacheFresh:
 			fresh[tokenByCacheKey[k]] = priceEntry
@@ -341,16 +344,6 @@ const (
 	cacheStale
 )
 
-func (c *cachedPriceEntry) toPriceEntry() *types.PriceEntry {
-	if c == nil {
-		return nil
-	}
-	return &types.PriceEntry{
-		CurrentPrice:             c.CurrentPrice,
-		PercentagePriceChange24h: c.PercentagePriceChange24h,
-	}
-}
-
 func (c *cachedPriceEntry) freshness(now time.Time, freshTTL, staleTTL time.Duration) cacheFreshness {
 	if c == nil || c.FetchedAt == "" {
 		return cacheMissing
@@ -380,10 +373,6 @@ func missingTokens(tokens []string, result map[string]*types.PriceEntry) []strin
 		}
 	}
 	return misses
-}
-
-func countMissingTokens(tokens []string, result map[string]*types.PriceEntry) int {
-	return len(missingTokens(tokens, result))
 }
 
 func completeMissingResults(tokens []string, result, staleFallback map[string]*types.PriceEntry) {

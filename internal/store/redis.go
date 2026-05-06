@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -44,23 +43,6 @@ func (r *RedisStore) GetHealth(ctx context.Context, network string) (types.GetHe
 	return types.GetHealthResponse{
 		Status: types.StatusHealthy,
 	}, nil
-}
-
-// GetJSON fetches a JSON-encoded value at key into dest. Returns (true, nil)
-// on a cache hit, (false, nil) on a miss, and (false, err) on transport or
-// decode failure.
-func (r *RedisStore) GetJSON(ctx context.Context, key string, dest any) (bool, error) {
-	raw, err := r.redis.Get(ctx, key).Bytes()
-	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			return false, nil
-		}
-		return false, fmt.Errorf("redis GET %s: %w", key, err)
-	}
-	if err := json.Unmarshal(raw, dest); err != nil {
-		return false, fmt.Errorf("redis decode %s: %w", key, err)
-	}
-	return true, nil
 }
 
 // MGetJSON fetches multiple JSON-encoded values in a single round trip.
