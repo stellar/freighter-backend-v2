@@ -44,10 +44,6 @@ func newFakeStellarExpert() *fakeStellarExpert {
 
 func (f *fakeStellarExpert) Name() string { return "fake-expert" }
 
-func (f *fakeStellarExpert) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
-	return types.GetHealthResponse{Status: types.StatusHealthy}, nil
-}
-
 func (f *fakeStellarExpert) GetAsset(ctx context.Context, network, assetID string) (*types.StellarExpertAsset, error) {
 	in := f.concurrentInUse.Add(1)
 	for {

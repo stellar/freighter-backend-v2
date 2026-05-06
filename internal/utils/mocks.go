@@ -140,10 +140,6 @@ type MockPricesService struct {
 
 func (m *MockPricesService) Name() string { return "mock-prices" }
 
-func (m *MockPricesService) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
-	return types.GetHealthResponse{Status: types.StatusHealthy}, nil
-}
-
 func (m *MockPricesService) GetPrices(ctx context.Context, tokens []string, network string) (map[string]*types.PriceEntry, error) {
 	m.LastTokens = tokens
 	m.LastNetwork = network

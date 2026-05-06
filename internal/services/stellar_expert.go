@@ -82,19 +82,6 @@ func (s *stellarExpertService) Name() string {
 	return stellarExpertServiceName
 }
 
-func (s *stellarExpertService) GetHealth(ctx context.Context, network string) (_ types.GetHealthResponse, err error) {
-	start := time.Now()
-	defer func() {
-		metrics.Record(s.svcMetrics, stellarExpertServiceName, "GetHealth", network, time.Since(start).Seconds(), err)
-	}()
-
-	// Probe a known-good asset to verify connectivity.
-	if _, err = s.GetAsset(ctx, network, "XLM"); err != nil {
-		return types.GetHealthResponse{Status: types.StatusError}, err
-	}
-	return types.GetHealthResponse{Status: types.StatusHealthy}, nil
-}
-
 // GetAsset fetches the price snapshot for one asset. assetID must already be
 // in Stellar Expert's wire format ("XLM" or "CODE-ISSUER-{1|2}" or a Soroban
 // contract id).

@@ -22,11 +22,11 @@ const (
 
 type Service interface {
 	Name() string
-	GetHealth(ctx context.Context, network string) (GetHealthResponse, error)
 }
 
 type RPCService interface {
 	Service
+	GetHealth(ctx context.Context, network string) (GetHealthResponse, error)
 	SimulateTx(ctx context.Context, tx *txnbuild.Transaction, network string) (SimulateTransactionResponse, error)
 	SimulateInvocation(
 		ctx context.Context,
@@ -42,6 +42,7 @@ type RPCService interface {
 
 type WalletBackendService interface {
 	Service
+	GetHealth(ctx context.Context, network string) (GetHealthResponse, error)
 	GetBalancesByAccountAddresses(ctx context.Context, addresses []string, network string) (interface{}, error)
 }
 

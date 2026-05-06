@@ -79,10 +79,6 @@ func NewPricesService(stellarExpert types.StellarExpertService, redis *store.Red
 
 func (p *pricesService) Name() string { return pricesServiceName }
 
-func (p *pricesService) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
-	return p.stellarExpert.GetHealth(ctx, network)
-}
-
 // cachedPriceEntry is the on-disk shape in Redis. Only positive results are
 // cached; FetchedAt lets us distinguish fresh hits from bounded stale fallbacks.
 type cachedPriceEntry struct {
