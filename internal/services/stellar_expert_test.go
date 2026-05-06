@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,11 +27,12 @@ func newTestStellarExpert(t *testing.T, handler http.Handler) (types.StellarExpe
 func TestStellarExpert_GetAsset_Success(t *testing.T) {
 	t.Parallel()
 
-	var gotPath, gotAuth string
+	var gotPath, gotAuth, gotOrigin string
 	body := `{"price":0.15968,"price7d":[[1776902400,0.1755],[1777507200,0.1597]]}`
 	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
+		gotOrigin = r.Header.Get("Origin")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
 	}))
@@ -39,6 +41,7 @@ func TestStellarExpert_GetAsset_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "/explorer/public/asset/XLM", gotPath)
 	assert.Equal(t, "Bearer test-key", gotAuth)
+	assert.Equal(t, "https://stellar.expert", gotOrigin)
 	assert.InDelta(t, 0.15968, asset.Price, 1e-9)
 	require.Len(t, asset.Price7d, 2)
 	assert.InDelta(t, 0.1597, asset.Price7d[1][1], 1e-9)
@@ -128,6 +131,78 @@ func TestStellarExpert_GetAsset_RejectsUnknownNetwork(t *testing.T) {
 	_, err := svc.GetAsset(context.Background(), types.FUTURENET, "XLM")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNetworkNotConfigured))
+}
+
+func TestStellarExpert_GetAssetCandles_Success(t *testing.T) {
+	t.Parallel()
+
+	var gotPath, gotQuery, gotOrigin string
+	body := `[
+		[1739707200, 0.001, 0.0009, 0.0011, 0.00105, 1, 1, 5],
+		[1739710800, 0.00105, 0.001, 0.00108, 0.00106, 2, 2, 6]
+	]`
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotOrigin = r.Header.Get("Origin")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+
+	from := time.Unix(1739707200, 0).UTC()
+	to := time.Unix(1739710800, 0).UTC()
+	rows, err := svc.GetAssetCandles(context.Background(), types.PUBLIC, "USDC-G..-1", from, to, 3600)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+
+	assert.Equal(t, "/explorer/public/asset/USDC-G..-1/candles", gotPath)
+	assert.Contains(t, gotQuery, "from=1739707200")
+	assert.Contains(t, gotQuery, "to=1739710800")
+	assert.Contains(t, gotQuery, "resolution=3600")
+	assert.Contains(t, gotQuery, "order=asc")
+	assert.Equal(t, "https://stellar.expert", gotOrigin)
+	assert.InDelta(t, 0.001, rows[0].Open(), 1e-9)
+	assert.InDelta(t, 0.00106, rows[1].Close(), 1e-9)
+	assert.Equal(t, int64(1739707200), rows[0].TS())
+}
+
+func TestStellarExpert_GetAssetCandles_EmptyForNativeXLM(t *testing.T) {
+	t.Parallel()
+
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+
+	rows, err := svc.GetAssetCandles(context.Background(), types.PUBLIC, "XLM", time.Now().Add(-time.Hour), time.Now(), 3600)
+	require.NoError(t, err)
+	assert.Empty(t, rows)
+}
+
+func TestStellarExpert_GetAssetCandles_NotFound(t *testing.T) {
+	t.Parallel()
+
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"status":404}`, http.StatusNotFound)
+	}))
+
+	_, err := svc.GetAssetCandles(context.Background(), types.PUBLIC, "BOGUS", time.Now().Add(-time.Hour), time.Now(), 3600)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrAssetNotFound))
+}
+
+func TestStellarExpert_GetAssetCandles_ServerError(t *testing.T) {
+	t.Parallel()
+
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusBadGateway)
+	}))
+
+	_, err := svc.GetAssetCandles(context.Background(), types.PUBLIC, "XLM", time.Now().Add(-time.Hour), time.Now(), 3600)
+	require.Error(t, err)
+	var upstream *metrics.UpstreamError
+	require.True(t, errors.As(err, &upstream))
+	assert.Equal(t, http.StatusBadGateway, upstream.Code)
 }
 
 func TestStellarExpert_Name(t *testing.T) {

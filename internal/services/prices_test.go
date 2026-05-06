@@ -21,8 +21,11 @@ const testIssuer = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
 type fakeStellarExpert struct {
 	mu              sync.Mutex
 	assets          map[string]*types.StellarExpertAsset
+	candles         map[string][]types.StellarExpertCandle
+	candleErrs      map[string]error
 	errs            map[string]error
 	calls           map[string]int
+	candleCalls     map[string]int
 	delay           time.Duration
 	concurrentInUse atomic.Int64
 	maxConcurrent   atomic.Int64
@@ -30,9 +33,12 @@ type fakeStellarExpert struct {
 
 func newFakeStellarExpert() *fakeStellarExpert {
 	return &fakeStellarExpert{
-		assets: map[string]*types.StellarExpertAsset{},
-		errs:   map[string]error{},
-		calls:  map[string]int{},
+		assets:      map[string]*types.StellarExpertAsset{},
+		candles:     map[string][]types.StellarExpertCandle{},
+		candleErrs:  map[string]error{},
+		errs:        map[string]error{},
+		calls:       map[string]int{},
+		candleCalls: map[string]int{},
 	}
 }
 
@@ -75,10 +81,57 @@ func (f *fakeStellarExpert) GetAsset(ctx context.Context, network, assetID strin
 	return asset, nil
 }
 
+func (f *fakeStellarExpert) GetAssetCandles(ctx context.Context, network, assetID string, from, to time.Time, resolutionSec int) ([]types.StellarExpertCandle, error) {
+	in := f.concurrentInUse.Add(1)
+	for {
+		cur := f.maxConcurrent.Load()
+		if in <= cur || f.maxConcurrent.CompareAndSwap(cur, in) {
+			break
+		}
+	}
+	defer f.concurrentInUse.Add(-1)
+
+	if f.delay > 0 {
+		select {
+		case <-time.After(f.delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	f.mu.Lock()
+	f.candleCalls[assetID]++
+	rows, ok := f.candles[assetID]
+	err := f.candleErrs[assetID]
+	f.mu.Unlock()
+
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		// No candles configured: return empty (the native XLM shape) rather
+		// than an error so the prices service's fallback path is exercised.
+		return nil, nil
+	}
+	return rows, nil
+}
+
 func (f *fakeStellarExpert) Set(assetID string, asset *types.StellarExpertAsset) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.assets[assetID] = asset
+}
+
+func (f *fakeStellarExpert) SetCandles(assetID string, rows []types.StellarExpertCandle) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.candles[assetID] = rows
+}
+
+func (f *fakeStellarExpert) SetCandleErr(assetID string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.candleErrs[assetID] = err
 }
 
 func (f *fakeStellarExpert) SetErr(assetID string, err error) {
@@ -91,6 +144,12 @@ func (f *fakeStellarExpert) CallCount(assetID string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.calls[assetID]
+}
+
+func (f *fakeStellarExpert) CandleCallCount(assetID string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.candleCalls[assetID]
 }
 
 func TestPrices_HappyPath_NoCache(t *testing.T) {
@@ -134,6 +193,77 @@ func TestPrices_HappyPath_NoCache(t *testing.T) {
 	assert.Equal(t, "1", usdc.CurrentPrice)
 	require.NotNil(t, usdc.PercentagePriceChange24h)
 	assert.Equal(t, "0", *usdc.PercentagePriceChange24h)
+}
+
+func TestPrices_UsesCandlesWhenAvailable(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	// price7d would yield 1% if used. Candles yield -10% — verify candles win.
+	expert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
+		Price:   1.10,
+		Price7d: [][2]float64{{1, 1.0}, {2, 1.089}}, // 1.01% if computed from price7d
+	})
+	expert.SetCandles("USDC-"+testIssuer+"-1", []types.StellarExpertCandle{
+		// [ts, open, low, high, close, qvol, bvol, trades]; oldest open=1.222 → (1.10-1.222)/1.222*100 ≈ -9.98 → -9.98
+		{1, 1.222, 1.2, 1.23, 1.21, 0, 0, 0},
+		{2, 1.21, 1.10, 1.21, 1.10, 0, 0, 0},
+	})
+
+	svc := NewPricesService(expert, nil, PricesServiceConfig{}, nil)
+	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
+	require.NoError(t, err)
+
+	usdc := got["USDC:"+testIssuer]
+	require.NotNil(t, usdc)
+	assert.Equal(t, "1.1", usdc.CurrentPrice)
+	require.NotNil(t, usdc.PercentagePriceChange24h)
+	assert.Equal(t, "-9.98", *usdc.PercentagePriceChange24h)
+	assert.Equal(t, 1, expert.CandleCallCount("USDC-"+testIssuer+"-1"))
+}
+
+func TestPrices_CandlesEmptyFallsBackToPrice7d(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	// XLM has no candles upstream; expect price7d fallback to drive the 24h change.
+	expert.Set("XLM", &types.StellarExpertAsset{
+		Price:   0.16,
+		Price7d: [][2]float64{{1, 0.158}, {2, 0.16}},
+	})
+
+	svc := NewPricesService(expert, nil, PricesServiceConfig{}, nil)
+	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+
+	xlm := got["XLM"]
+	require.NotNil(t, xlm)
+	assert.Equal(t, "0.16", xlm.CurrentPrice)
+	require.NotNil(t, xlm.PercentagePriceChange24h)
+	assert.Equal(t, "1.27", *xlm.PercentagePriceChange24h)
+	assert.Equal(t, 1, expert.CandleCallCount("XLM"), "candles still attempted once before fallback")
+}
+
+func TestPrices_CandlesErrorFallsBackToPrice7d(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	expert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
+		Price: 1.0,
+		// compute24hChange reads price7d[len-2], i.e. 0.95 here:
+		// (1.0 - 0.95) / 0.95 * 100 ≈ 5.26
+		Price7d: [][2]float64{{1, 0.95}, {2, 0.97}},
+	})
+	expert.SetCandleErr("USDC-"+testIssuer+"-1", errors.New("transient candles boom"))
+
+	svc := NewPricesService(expert, nil, PricesServiceConfig{}, nil)
+	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
+	require.NoError(t, err)
+
+	usdc := got["USDC:"+testIssuer]
+	require.NotNil(t, usdc)
+	require.NotNil(t, usdc.PercentagePriceChange24h)
+	assert.Equal(t, "5.26", *usdc.PercentagePriceChange24h)
 }
 
 func TestPrices_NotFound_ReturnsNull(t *testing.T) {

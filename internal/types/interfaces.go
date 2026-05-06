@@ -2,6 +2,7 @@ package types
 
 import (
 	"context"
+	"time"
 
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -51,9 +52,19 @@ type StellarExpertAsset struct {
 	Price7d [][2]float64 `json:"price7d"`
 }
 
+// StellarExpertCandle is one row of /asset/{id}/candles.
+// Wire shape per Stellar Expert API docs: [ts, open, low, high, close,
+// quote_volume, base_volume, trades]. Native XLM returns no candles.
+type StellarExpertCandle [8]float64
+
+func (c StellarExpertCandle) TS() int64      { return int64(c[0]) }
+func (c StellarExpertCandle) Open() float64  { return c[1] }
+func (c StellarExpertCandle) Close() float64 { return c[4] }
+
 type StellarExpertService interface {
 	Service
 	GetAsset(ctx context.Context, network, assetID string) (*StellarExpertAsset, error)
+	GetAssetCandles(ctx context.Context, network, assetID string, from, to time.Time, resolutionSec int) ([]StellarExpertCandle, error)
 }
 
 // PriceEntry is the per-token shape returned to the client. Numeric fields

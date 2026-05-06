@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
@@ -19,6 +21,12 @@ const (
 	stellarExpertNetTestnet  = "testnet"
 
 	stellarExpertHTTPTimeout = 15 * time.Second
+
+	// stellarExpertOrigin matches the SPA's Origin so Cloudflare's Origin
+	// gate (returns 402 otherwise) accepts the request. Stellar Expert
+	// publishes the API as public; the gate is just an anti-scrape soft
+	// rule keyed on this header.
+	stellarExpertOrigin = "https://stellar.expert"
 )
 
 var (
@@ -100,15 +108,11 @@ func (s *stellarExpertService) GetAsset(ctx context.Context, network, assetID st
 	if err != nil {
 		return nil, err
 	}
-	url := fmt.Sprintf("%s/asset/%s", baseURL, assetID)
+	reqURL := fmt.Sprintf("%s/asset/%s", baseURL, assetID)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := s.newRequest(ctx, reqURL)
 	if err != nil {
-		return nil, fmt.Errorf("building stellar expert request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-	if s.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+s.apiKey)
+		return nil, err
 	}
 
 	resp, err := s.httpClient.Do(req)
@@ -134,6 +138,71 @@ func (s *stellarExpertService) GetAsset(ctx context.Context, network, assetID st
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return nil, &metrics.UpstreamError{Kind: "http_error", Code: resp.StatusCode, Err: fmt.Errorf("stellar expert status %d", resp.StatusCode)}
 	}
+}
+
+// GetAssetCandles fetches OHLC candles for one asset over [from, to] at the
+// given resolution (seconds). assetID must already be in Stellar Expert wire
+// format. Native XLM has no candle data; the upstream returns an empty array
+// and this method propagates that as a nil-error empty slice.
+func (s *stellarExpertService) GetAssetCandles(ctx context.Context, network, assetID string, from, to time.Time, resolutionSec int) (_ []types.StellarExpertCandle, err error) {
+	start := time.Now()
+	defer func() {
+		metrics.Record(s.svcMetrics, stellarExpertServiceName, "GetAssetCandles", network, time.Since(start).Seconds(), err)
+	}()
+
+	baseURL, err := s.baseURLForNetwork(network)
+	if err != nil {
+		return nil, err
+	}
+
+	q := url.Values{}
+	q.Set("from", strconv.FormatInt(from.Unix(), 10))
+	q.Set("to", strconv.FormatInt(to.Unix(), 10))
+	q.Set("resolution", strconv.Itoa(resolutionSec))
+	q.Set("order", "asc")
+	reqURL := fmt.Sprintf("%s/asset/%s/candles?%s", baseURL, assetID, q.Encode())
+
+	req, err := s.newRequest(ctx, reqURL)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, &metrics.UpstreamError{Kind: "http_error", Err: err}
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var rows []types.StellarExpertCandle
+		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
+			return nil, fmt.Errorf("decoding stellar expert candles response: %w", err)
+		}
+		return rows, nil
+	case http.StatusNotFound:
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil, ErrAssetNotFound
+	case http.StatusBadRequest:
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil, ErrAssetMalformed
+	default:
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil, &metrics.UpstreamError{Kind: "http_error", Code: resp.StatusCode, Err: fmt.Errorf("stellar expert candles status %d", resp.StatusCode)}
+	}
+}
+
+func (s *stellarExpertService) newRequest(ctx context.Context, reqURL string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("building stellar expert request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Origin", stellarExpertOrigin)
+	if s.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+s.apiKey)
+	}
+	return req, nil
 }
 
 func (s *stellarExpertService) baseURLForNetwork(network string) (string, error) {

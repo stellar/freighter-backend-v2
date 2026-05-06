@@ -32,6 +32,12 @@ const (
 	// the cap bounds the per-request amplification factor regardless of how
 	// the operator sets the runtime flag.
 	MaxTokensPerPriceRequest = 1000
+
+	// candlesWindow / candlesResolutionSec define the rolling 24h window used
+	// to compute percentagePriceChange24h from /asset/{id}/candles. Hourly
+	// resolution yields ~25 records, well under Stellar Expert's 200-record cap.
+	candlesWindow         = 24 * time.Hour
+	candlesResolutionSec  = 3600
 )
 
 // PricesServiceConfig tunes the orchestrator. Zero values fall back to safe
@@ -230,12 +236,51 @@ func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, ca
 		return nil, false
 	}
 
+	change := p.compute24hChangeFromCandles(ctx, network, expertID, asset.Price)
+	if change == nil {
+		// Fallback for native XLM (candles are empty) and for transient
+		// /candles failures: derive from the daily price7d on /asset/{id}.
+		change = compute24hChange(asset.Price, asset.Price7d)
+	}
+
 	entry := &types.PriceEntry{
 		CurrentPrice:             formatPrice(asset.Price),
-		PercentagePriceChange24h: compute24hChange(asset.Price, asset.Price7d),
+		PercentagePriceChange24h: change,
 	}
 	p.cachePositive(ctx, cacheNet, canonical, entry)
 	return entry, true
+}
+
+// compute24hChangeFromCandles fetches a rolling 24h hourly candle window and
+// returns the percentage delta between the current price and the open of the
+// oldest candle. Returns nil when the upstream is empty (e.g. native XLM has
+// no candles), the request fails, or the open is zero.
+func (p *pricesService) compute24hChangeFromCandles(ctx context.Context, network, expertID string, current float64) *string {
+	to := time.Now().UTC()
+	from := to.Add(-candlesWindow)
+	rows, err := p.expert.GetAssetCandles(ctx, network, expertID, from, to, candlesResolutionSec)
+	if err != nil {
+		if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) &&
+			!errors.Is(err, ErrAssetNotFound) && !errors.Is(err, ErrAssetMalformed) {
+			logger.Warn("prices: candles fetch failed; falling back to price7d", "asset", expertID, "error", err)
+		}
+		return nil
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	open := rows[0].Open()
+	if open == 0 {
+		return nil
+	}
+	pct := (current - open) / open * 100
+	rounded := math.Round(pct*100) / 100
+	if rounded == 0 {
+		// Collapse negative zero to "0" so the JSON is byte-stable.
+		rounded = 0
+	}
+	s := strconv.FormatFloat(rounded, 'f', -1, 64)
+	return &s
 }
 
 func (p *pricesService) cachePositive(ctx context.Context, cacheNet, canonical string, entry *types.PriceEntry) {
