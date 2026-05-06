@@ -9,11 +9,6 @@ on:
         description: "Prerelease version to tag (e.g., v1.2.3-rc.1)"
         required: true
         type: string
-      target_ref:
-        description: "Branch, tag, or SHA to tag (default: main)"
-        required: false
-        default: "main"
-        type: string
 
 permissions:
   id-token: write
@@ -33,20 +28,18 @@ jobs:
           fi
           echo "Version format OK: $VERSION"
 
-      - name: Checkout target_ref
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.target_ref }}
+          ref: main
           fetch-depth: 0
           fetch-tags: true
 
       - name: Resolve commit SHA
         id: resolve_sha
-        env:
-          TARGET_REF: ${{ inputs.target_ref }}
         run: |
           SHA=$(git rev-parse HEAD)
-          echo "Resolved $TARGET_REF -> $SHA"
+          echo "Resolved main -> $SHA"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
 
       - name: Verify tag does not exist
@@ -66,9 +59,6 @@ jobs:
       - name: ECR login via OIDC
         id: ecr_login
         uses: stellar/actions/sdf-ecr-login@main
-        with:
-          aws-oidc-role: ${{ secrets.AWS_GITHUB_OIDC_ROLE }}
-          aws-ecr-login-role: ${{ secrets.AWS_ECR_LOGIN_ROLE }}
 
       - name: Build and push prerelease image
         env:

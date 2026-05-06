@@ -9,11 +9,10 @@ Releases follow a two-step prerelease → promote flow. Both steps run in GitHub
 
 ```bash
 gh workflow run publish-prerelease.yml \
-  -f version=v1.2.3-rc.1 \
-  -f target_ref=main
+  -f version=v1.2.3-rc.1
 ```
 
-This builds a Docker image from the chosen ref, pushes it to the staging namespace of the internal ECR registry under the `freighter-backend-v2` repository tagged `v1.2.3-rc.1`, and creates a GitHub prerelease at the same commit.
+This builds a Docker image from the current `main` HEAD, pushes it to the staging namespace of the internal ECR registry under the `freighter-backend-v2` repository tagged `v1.2.3-rc.1`, and creates a GitHub prerelease at the same commit.
 
 ### 2. Test the prerelease in staging
 

@@ -93,9 +93,6 @@ jobs:
       - name: ECR login via OIDC
         id: ecr_login
         uses: stellar/actions/sdf-ecr-login@main
-        with:
-          aws-oidc-role: ${{ secrets.AWS_GITHUB_OIDC_ROLE }}
-          aws-ecr-login-role: ${{ secrets.AWS_ECR_LOGIN_ROLE }}
 
       - name: Re-tag image from staging to production ECR
         env:
@@ -106,7 +103,7 @@ jobs:
           STG_TAG="${ECR_REGISTRY}/stg/freighter-backend-v2:${PRERELEASE_TAG}"
           PRD_TAG="${ECR_REGISTRY}/prd/freighter-backend-v2:${RELEASE_VERSION}"
           echo "Re-tagging $STG_TAG -> $PRD_TAG"
-          docker buildx imagetools create --tag "$PRD_TAG" "$STG_TAG"
+          docker buildx imagetools create --prefer-index=false --tag "$PRD_TAG" "$STG_TAG"
           echo "Verifying digests match..."
           STG_DIGEST=$(docker buildx imagetools inspect "$STG_TAG" --format '{{.Manifest.Digest}}')
           PRD_DIGEST=$(docker buildx imagetools inspect "$PRD_TAG" --format '{{.Manifest.Digest}}')
