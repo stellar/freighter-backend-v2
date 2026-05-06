@@ -29,9 +29,8 @@ type TokenPricesRequest struct {
 }
 
 type validatedTokenPricesRequest struct {
-	originalInputs      []string
-	canonicalIDs        []string
-	originalByCanonical map[string]string
+	originalInputs []string
+	canonicalIDs   []string
 }
 
 func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedTokenPricesRequest, *httperror.HttpError) {
@@ -52,22 +51,21 @@ func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedToken
 	}
 
 	canonicalIDs := make([]string, 0, len(req.Tokens))
-	originalByCanonical := make(map[string]string, len(req.Tokens))
+	seen := make(map[string]struct{}, len(req.Tokens))
 	for _, t := range req.Tokens {
 		canonical, err := assetid.Normalize(t)
 		if err != nil {
 			return nil, httperror.BadRequest("invalid token id", err)
 		}
-		if _, dup := originalByCanonical[canonical]; !dup {
+		if _, dup := seen[canonical]; !dup {
+			seen[canonical] = struct{}{}
 			canonicalIDs = append(canonicalIDs, canonical)
-			originalByCanonical[canonical] = t
 		}
 	}
 
 	return &validatedTokenPricesRequest{
-		originalInputs:      req.Tokens,
-		canonicalIDs:        canonicalIDs,
-		originalByCanonical: originalByCanonical,
+		originalInputs: req.Tokens,
+		canonicalIDs:   canonicalIDs,
 	}, nil
 }
 
