@@ -1,0 +1,64 @@
+# ABOUTME: Builds and pushes a prerelease Docker image to staging ECR from a chosen ref,
+# ABOUTME: then creates a corresponding GitHub prerelease tagged at that commit.
+name: Publish Prerelease
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Prerelease version to tag (e.g., v1.2.3-rc.1)"
+        required: true
+        type: string
+      target_ref:
+        description: "Branch, tag, or SHA to tag (default: main)"
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  publish-prerelease:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version format
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
+            echo "::error::Invalid version format: '$VERSION'. Expected vMAJOR.MINOR.PATCH-rc.N (e.g., v1.2.3-rc.1)."
+            exit 1
+          fi
+          echo "Version format OK: $VERSION"
+
+      - name: Checkout target_ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve commit SHA
+        id: resolve_sha
+        env:
+          TARGET_REF: ${{ inputs.target_ref }}
+        run: |
+          SHA=$(git rev-parse HEAD)
+          echo "Resolved $TARGET_REF -> $SHA"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag does not exist
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if git ls-remote --tags origin "refs/tags/$VERSION" | grep -q .; then
+            echo "::error::Tag '$VERSION' already exists on origin."
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag '$VERSION' already exists locally."
+            exit 1
+          fi
+          echo "Tag '$VERSION' does not exist. Proceeding."
