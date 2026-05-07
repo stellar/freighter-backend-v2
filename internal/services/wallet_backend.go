@@ -32,11 +32,11 @@ const (
 var httpStatusCodeRegex = regexp.MustCompile(`statusCode=(\d{3})`)
 
 type walletBackendService struct {
-	pubnetClient            *wbclient.Client
-	testnetClient           *wbclient.Client
-	httpClient              *http.Client
-	svcMetrics              *metrics.Service
-	maxBalanceConcurrency   int
+	pubnetClient          *wbclient.Client
+	testnetClient         *wbclient.Client
+	httpClient            *http.Client
+	svcMetrics            *metrics.Service
+	maxBalanceConcurrency int
 }
 
 // NewWalletBackendService constructs a wallet-backend service backed by the
