@@ -131,11 +131,11 @@ func (m *MockWalletBackendService) GetBalancesByAccountAddresses(ctx context.Con
 }
 
 type MockPricesService struct {
-	GetPricesFunc      func(ctx context.Context, tokens []string, network string) (map[string]*types.PriceEntry, error)
-	GetPricesOverride  map[string]*types.PriceEntry
-	GetPricesError     error
-	LastTokens         []string
-	LastNetwork        string
+	GetPricesFunc     func(ctx context.Context, tokens []string, network string) (map[string]*types.PriceEntry, error)
+	GetPricesOverride map[string]*types.PriceEntry
+	GetPricesError    error
+	LastTokens        []string
+	LastNetwork       string
 }
 
 func (m *MockPricesService) Name() string { return "mock-prices" }

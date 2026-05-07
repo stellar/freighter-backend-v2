@@ -89,6 +89,7 @@ func (s *ApiServer) initServices() error {
 		s.cfg.PricesConfig.StellarExpertPubnetURL,
 		s.cfg.PricesConfig.StellarExpertTestnetURL,
 		s.cfg.PricesConfig.StellarExpertAPIKey,
+		s.cfg.PricesConfig.StellarExpertOrigin,
 		s.appMetrics.Service,
 	)
 	s.pricesService = services.NewPricesService(stellarExpert, s.redis, services.PricesServiceConfig{

@@ -48,6 +48,7 @@ type PricesConfig struct {
 	StellarExpertPubnetURL    string
 	StellarExpertTestnetURL   string
 	StellarExpertAPIKey       string
+	StellarExpertOrigin       string
 	PriceCacheTTLSeconds      int
 	PriceStaleCacheTTLSeconds int
 	PriceFetchTimeoutSeconds  int

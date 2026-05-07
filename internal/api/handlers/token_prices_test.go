@@ -25,7 +25,7 @@ func TestTokenPrices_Success(t *testing.T) {
 
 	mock := &utils.MockPricesService{
 		GetPricesOverride: map[string]*types.PriceEntry{
-			"XLM":               {CurrentPrice: "0.16", PercentagePriceChange24h: ptr("1.27")},
+			"XLM":                 {CurrentPrice: "0.16", PercentagePriceChange24h: ptr("1.27")},
 			"USDC:" + validIssuer: {CurrentPrice: "1", PercentagePriceChange24h: ptr("0")},
 		},
 	}

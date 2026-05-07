@@ -39,6 +39,16 @@ const (
 	candlesWindow        = 24 * time.Hour
 	candlesResolutionSec = 3600
 
+	// minCandleWindow / maxCandleWindow bound how far before `to` the
+	// oldest returned candle must open. With hourly resolution and a
+	// truncated `to`, an asset trading continuously yields candles[0] at
+	// exactly 24h ago; sparse trading or upstream truncation can shift it
+	// later (closer to now) or rarely earlier. ±1h around 24h covers
+	// normal bucket-boundary slack while rejecting sparse-data drift that
+	// would make the result not represent a 24h window.
+	minCandleWindow = 23 * time.Hour
+	maxCandleWindow = 25 * time.Hour
+
 	// maxPrice7dFallbackAge bounds how stale the last price7d daily candle
 	// may be before we suppress the fallback 24h change. Daily candles align
 	// to ~24h UTC boundaries, so the last entry is at most ~24h old in
@@ -174,6 +184,7 @@ func (p *pricesService) loadCachedPrices(ctx context.Context, cacheKeys []string
 			fresh[tokenByCacheKey[k]] = priceEntry
 		case cacheStale:
 			stale[tokenByCacheKey[k]] = priceEntry
+		case cacheMissing:
 		}
 	}
 	return fresh, stale
@@ -228,29 +239,56 @@ func (p *pricesService) resolveMisses(ctx context.Context, network, cacheNet str
 // successful result to Redis, and returns the response entry. The boolean
 // reports whether the token was authoritatively resolved for this request:
 // not-found/malformed assets resolve to nil; transient failures and budget
-// exhaustion leave the token eligible for stale fallback.
+// exhaustion leave the token eligible for stale fallback. The asset and
+// candles calls run concurrently; on a terminal asset error the candles
+// call is cancelled so unknown assets don't double upstream load.
 func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, canonical string) (_ *types.PriceEntry, resolved bool) {
 	stellarExpertID := assetid.ToStellarExpert(canonical)
-	asset, err := p.stellarExpert.GetAsset(ctx, network, stellarExpertID)
-	if err != nil {
-		if errors.Is(err, ErrAssetNotFound) || errors.Is(err, ErrAssetMalformed) {
+
+	// Truncate to the candle resolution so `from` and `to` align to bucket
+	// boundaries; otherwise upstream may return a window 23–25h wide with
+	// no consistent rule. The current price is still as-of-now via
+	// /asset/{id}, so the actual price comparison is at most ~1h off 24h.
+	resolution := time.Duration(candlesResolutionSec) * time.Second
+	to := time.Now().UTC().Truncate(resolution)
+	from := to.Add(-candlesWindow)
+
+	fetchCtx, cancelFetch := context.WithCancel(ctx)
+	defer cancelFetch()
+
+	var (
+		asset      *types.StellarExpertAsset
+		assetErr   error
+		candles    []types.StellarExpertCandle
+		candlesErr error
+		wg         sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		asset, assetErr = p.stellarExpert.GetAsset(fetchCtx, network, stellarExpertID)
+		if assetErr != nil && (errors.Is(assetErr, ErrAssetNotFound) || errors.Is(assetErr, ErrAssetMalformed)) {
+			cancelFetch()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		candles, candlesErr = p.stellarExpert.GetAssetCandles(fetchCtx, network, stellarExpertID, from, to, candlesResolutionSec)
+	}()
+	wg.Wait()
+
+	if assetErr != nil {
+		if errors.Is(assetErr, ErrAssetNotFound) || errors.Is(assetErr, ErrAssetMalformed) {
 			return nil, true
 		}
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		if errors.Is(assetErr, context.DeadlineExceeded) || errors.Is(assetErr, context.Canceled) {
 			return nil, false
 		}
-		logger.Warn("prices: upstream fetch failed", "asset", canonical, "error", err)
+		logger.Warn("prices: upstream fetch failed", "asset", canonical, "error", assetErr)
 		return nil, false
 	}
 
-	change24h := p.compute24hChangeFromCandles(ctx, network, stellarExpertID, asset.Price)
-	if change24h == nil {
-		// Fallback for native XLM (candles are empty) and for transient
-		// /candles failures: derive from the daily price7d on /asset/{id}.
-		// Suppressed if the daily-candle data is too stale to defensibly
-		// approximate a 24h window.
-		change24h = compute24hChange(asset.Price, asset.Price7d, time.Now().UTC())
-	}
+	change24h := changeFromCandlesOrFallback(asset, candles, candlesErr, stellarExpertID, to)
 
 	entry := &types.PriceEntry{
 		CurrentPrice:             formatPrice(asset.Price),
@@ -260,22 +298,35 @@ func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, ca
 	return entry, true
 }
 
-// compute24hChangeFromCandles fetches a rolling 24h hourly candle window and
-// returns the percentage delta between the current price and the open of the
-// oldest candle. Returns nil when the upstream is empty (e.g. native XLM has
-// no candles), the request fails, or the open is zero.
-func (p *pricesService) compute24hChangeFromCandles(ctx context.Context, network, stellarExpertID string, currentPrice float64) *string {
-	to := time.Now().UTC()
-	from := to.Add(-candlesWindow)
-	candles, err := p.stellarExpert.GetAssetCandles(ctx, network, stellarExpertID, from, to, candlesResolutionSec)
-	if err != nil {
-		if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) &&
-			!errors.Is(err, ErrAssetNotFound) && !errors.Is(err, ErrAssetMalformed) {
-			logger.Warn("prices: candles fetch failed; falling back to price7d", "asset", stellarExpertID, "error", err)
+// changeFromCandlesOrFallback picks the best 24h-change source: the candles
+// window when it covers ~24h with a non-zero open, otherwise the daily
+// price7d fallback. Candles errors that aren't context-related fall back to
+// price7d after a single warning log.
+func changeFromCandlesOrFallback(asset *types.StellarExpertAsset, candles []types.StellarExpertCandle, candlesErr error, stellarExpertID string, to time.Time) *string {
+	if candlesErr != nil {
+		if !errors.Is(candlesErr, context.DeadlineExceeded) && !errors.Is(candlesErr, context.Canceled) &&
+			!errors.Is(candlesErr, ErrAssetNotFound) && !errors.Is(candlesErr, ErrAssetMalformed) {
+			logger.Warn("prices: candles fetch failed; falling back to price7d", "asset", stellarExpertID, "error", candlesErr)
 		}
+		return compute24hChange(asset.Price, asset.Price7d, time.Now().UTC())
+	}
+	if change := change24hFromCandles(asset.Price, candles, to); change != nil {
+		return change
+	}
+	return compute24hChange(asset.Price, asset.Price7d, time.Now().UTC())
+}
+
+// change24hFromCandles computes the 24h percentage delta between currentPrice
+// and the open of the oldest candle. Returns nil when the upstream is empty
+// (e.g. native XLM has no candles), the open is zero, or the oldest returned
+// candle is too far from 24h before `to` to credibly represent a 24h window
+// (sparse trading or anomalous upstream return).
+func change24hFromCandles(currentPrice float64, candles []types.StellarExpertCandle, to time.Time) *string {
+	if len(candles) == 0 {
 		return nil
 	}
-	if len(candles) == 0 {
+	oldestAge := to.Sub(time.Unix(candles[0].TS(), 0))
+	if oldestAge < minCandleWindow || oldestAge > maxCandleWindow {
 		return nil
 	}
 	openPrice := candles[0].Open()

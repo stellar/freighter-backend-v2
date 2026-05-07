@@ -22,11 +22,11 @@ const (
 
 	stellarExpertHTTPTimeout = 15 * time.Second
 
-	// stellarExpertOrigin matches the SPA's Origin so Cloudflare's Origin
-	// gate (returns 402 otherwise) accepts the request. Stellar Expert
-	// publishes the API as public; the gate is just an anti-scrape soft
-	// rule keyed on this header.
-	stellarExpertOrigin = "https://stellar.expert"
+	// defaultStellarExpertOrigin is the SPA Origin used as a fallback when
+	// no explicit origin is configured. Stellar Expert ties API-key quotas
+	// to the Origin header; production deployments should override this
+	// (typically to a *.freighter.app value associated with the API key).
+	defaultStellarExpertOrigin = "https://stellar.expert"
 )
 
 var (
@@ -48,6 +48,7 @@ type stellarExpertService struct {
 	pubnetBaseURL  string
 	testnetBaseURL string
 	apiKey         string
+	origin         string
 	httpClient     *http.Client
 	svcMetrics     *metrics.Service
 }
@@ -56,7 +57,9 @@ type stellarExpertService struct {
 // Expert /asset endpoint. The base URLs should already include the network
 // segment (e.g. https://api.stellar.expert/explorer/public). apiKey, when
 // non-empty, is sent as `Authorization: Bearer <apiKey>` on every request.
-func NewStellarExpertService(pubnetURL, testnetURL, apiKey string, metricsService *metrics.Service) types.StellarExpertService {
+// origin is sent as the Origin header; if empty, defaultStellarExpertOrigin
+// is used.
+func NewStellarExpertService(pubnetURL, testnetURL, apiKey, origin string, metricsService *metrics.Service) types.StellarExpertService {
 	httpClient := &http.Client{
 		Timeout: stellarExpertHTTPTimeout,
 		Transport: &http.Transport{
@@ -69,10 +72,14 @@ func NewStellarExpertService(pubnetURL, testnetURL, apiKey string, metricsServic
 			ForceAttemptHTTP2:     true,
 		},
 	}
+	if origin == "" {
+		origin = defaultStellarExpertOrigin
+	}
 	return &stellarExpertService{
 		pubnetBaseURL:  pubnetURL,
 		testnetBaseURL: testnetURL,
 		apiKey:         apiKey,
+		origin:         origin,
 		httpClient:     httpClient,
 		svcMetrics:     metricsService,
 	}
@@ -106,7 +113,7 @@ func (s *stellarExpertService) GetAsset(ctx context.Context, network, assetID st
 	if err != nil {
 		return nil, &metrics.UpstreamError{Kind: "http_error", Err: err}
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	switch resp.StatusCode {
 	case http.StatusOK:
@@ -158,7 +165,7 @@ func (s *stellarExpertService) GetAssetCandles(ctx context.Context, network, ass
 	if err != nil {
 		return nil, &metrics.UpstreamError{Kind: "http_error", Err: err}
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	switch resp.StatusCode {
 	case http.StatusOK:
@@ -185,7 +192,7 @@ func (s *stellarExpertService) newRequest(ctx context.Context, reqURL string) (*
 		return nil, fmt.Errorf("building stellar expert request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Origin", stellarExpertOrigin)
+	req.Header.Set("Origin", s.origin)
 	if s.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+s.apiKey)
 	}

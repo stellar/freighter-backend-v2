@@ -29,6 +29,21 @@ func recentDailyCandles(now time.Time, closes ...float64) [][2]float64 {
 	return out
 }
 
+// hourlyCandlesAged builds hourly candles whose first entry's timestamp is
+// `oldestAge` before `now` (truncated to the hour) and whose subsequent
+// entries step forward 1h. `opens` supplies the open price for each
+// candle; only Open() (index 1) is read by the service code, so other
+// fields are zeroed.
+func hourlyCandlesAged(now time.Time, oldestAge time.Duration, opens ...float64) []types.StellarExpertCandle {
+	base := now.Truncate(time.Hour).Add(-oldestAge).Unix()
+	out := make([]types.StellarExpertCandle, len(opens))
+	for i, op := range opens {
+		ts := float64(base + int64(i)*3600)
+		out[i] = types.StellarExpertCandle{ts, op, 0, 0, op, 0, 0, 0}
+	}
+	return out
+}
+
 // fakeStellarExpert is a programmable stub for the StellarExpertService
 // interface. Tests configure assets via Set and inspect call counts via Calls.
 type fakeStellarExpert struct {
@@ -203,11 +218,8 @@ func TestPrices_UsesCandlesWhenAvailable(t *testing.T) {
 		Price:   1.10,
 		Price7d: recentDailyCandles(now, 1.0, 1.089), // 1.01% if computed from price7d
 	})
-	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", []types.StellarExpertCandle{
-		// [ts, open, low, high, close, qvol, bvol, trades]; oldest open=1.222 → (1.10-1.222)/1.222*100 ≈ -9.98 → -9.98
-		{1, 1.222, 1.2, 1.23, 1.21, 0, 0, 0},
-		{2, 1.21, 1.10, 1.21, 1.10, 0, 0, 0},
-	})
+	// oldest open=1.222 → (1.10-1.222)/1.222*100 ≈ -9.98 → -9.98
+	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", hourlyCandlesAged(now, 24*time.Hour, 1.222, 1.21))
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
@@ -265,6 +277,32 @@ func TestPrices_CandlesErrorFallsBackToPrice7d(t *testing.T) {
 	require.NotNil(t, usdc)
 	require.NotNil(t, usdc.PercentagePriceChange24h)
 	assert.Equal(t, "5.26", *usdc.PercentagePriceChange24h)
+}
+
+// Sparse upstream data: candles return 2 buckets but the oldest is only
+// 6h old. The coverage check must reject this so the service falls back
+// to the price7d path rather than labeling a 6h change as "24h".
+func TestPrices_SparseCandles_FallsBackToPrice7d(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
+		Price: 1.0,
+		// Fresh price7d; (1.0-0.95)/0.95*100 ≈ 5.26
+		Price7d: recentDailyCandles(now, 0.95, 0.97),
+	})
+	// Only 6h of coverage — outside [23h, 25h] from `to`.
+	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", hourlyCandlesAged(now, 6*time.Hour, 0.5, 0.6))
+
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
+	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
+	require.NoError(t, err)
+
+	usdc := got["USDC:"+testIssuer]
+	require.NotNil(t, usdc)
+	require.NotNil(t, usdc.PercentagePriceChange24h)
+	assert.Equal(t, "5.26", *usdc.PercentagePriceChange24h, "sparse candles must fall through to price7d, not produce a 6h change")
 }
 
 // When /candles is empty AND price7d's last daily candle is older than
@@ -370,8 +408,11 @@ func TestPrices_ConcurrencyCapHonored(t *testing.T) {
 	got, err := svc.GetPrices(context.Background(), tokens, types.PUBLIC)
 	require.NoError(t, err)
 	assert.Len(t, got, 20)
-	assert.LessOrEqual(t, stellarExpert.maxConcurrent.Load(), int64(4),
-		"expected at most 4 concurrent upstream calls, observed %d", stellarExpert.maxConcurrent.Load())
+	// MaxConcurrent caps tokens-in-flight; each token issues GetAsset and
+	// GetAssetCandles in parallel, so the observed HTTP-level concurrency
+	// ceiling is 2× MaxConcurrent.
+	assert.LessOrEqual(t, stellarExpert.maxConcurrent.Load(), int64(8),
+		"expected at most 8 concurrent upstream calls (2× workers), observed %d", stellarExpert.maxConcurrent.Load())
 }
 
 func TestPrices_MissFetchTimeoutReturnsBestEffortWithoutError(t *testing.T) {

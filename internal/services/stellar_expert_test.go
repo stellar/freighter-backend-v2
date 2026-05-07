@@ -20,7 +20,7 @@ func newTestStellarExpert(t *testing.T, handler http.Handler) (types.StellarExpe
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	svc := NewStellarExpertService(server.URL+"/explorer/public", server.URL+"/explorer/testnet", "test-key", nil)
+	svc := NewStellarExpertService(server.URL+"/explorer/public", server.URL+"/explorer/testnet", "test-key", "", nil)
 	return svc, server
 }
 
@@ -57,10 +57,26 @@ func TestStellarExpert_GetAsset_OmitsAuthHeaderWhenKeyEmpty(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	svc := NewStellarExpertService(server.URL+"/explorer/public", "", "", nil)
+	svc := NewStellarExpertService(server.URL+"/explorer/public", "", "", "", nil)
 	_, err := svc.GetAsset(context.Background(), types.PUBLIC, "XLM")
 	require.NoError(t, err)
 	assert.False(t, gotAuthHeaderPresent, "expected no Authorization header when apiKey is empty")
+}
+
+func TestStellarExpert_GetAsset_UsesConfiguredOrigin(t *testing.T) {
+	t.Parallel()
+
+	var gotOrigin string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotOrigin = r.Header.Get("Origin")
+		_, _ = w.Write([]byte(`{"price":1,"price7d":[]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	svc := NewStellarExpertService(server.URL+"/explorer/public", "", "test-key", "https://api.freighter.app", nil)
+	_, err := svc.GetAsset(context.Background(), types.PUBLIC, "XLM")
+	require.NoError(t, err)
+	assert.Equal(t, "https://api.freighter.app", gotOrigin)
 }
 
 func TestStellarExpert_GetAsset_TestnetURL(t *testing.T) {
@@ -118,7 +134,7 @@ func TestStellarExpert_GetAsset_ServerError(t *testing.T) {
 func TestStellarExpert_GetAsset_NetworkNotConfigured(t *testing.T) {
 	t.Parallel()
 
-	svc := NewStellarExpertService("https://example.invalid", "", "test-key", nil)
+	svc := NewStellarExpertService("https://example.invalid", "", "test-key", "", nil)
 	_, err := svc.GetAsset(context.Background(), types.TESTNET, "XLM")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNetworkNotConfigured))
@@ -127,7 +143,7 @@ func TestStellarExpert_GetAsset_NetworkNotConfigured(t *testing.T) {
 func TestStellarExpert_GetAsset_RejectsUnknownNetwork(t *testing.T) {
 	t.Parallel()
 
-	svc := NewStellarExpertService("https://a", "https://b", "test-key", nil)
+	svc := NewStellarExpertService("https://a", "https://b", "test-key", "", nil)
 	_, err := svc.GetAsset(context.Background(), types.FUTURENET, "XLM")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrNetworkNotConfigured))
@@ -207,6 +223,6 @@ func TestStellarExpert_GetAssetCandles_ServerError(t *testing.T) {
 
 func TestStellarExpert_Name(t *testing.T) {
 	t.Parallel()
-	svc := NewStellarExpertService("a", "b", "test-key", nil)
+	svc := NewStellarExpertService("a", "b", "test-key", "", nil)
 	assert.Equal(t, "stellar-expert", svc.Name())
 }
