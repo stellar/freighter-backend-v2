@@ -109,7 +109,7 @@ func TestTokenPrices_BadRequests(t *testing.T) {
 		{"empty tokens", "/api/v1/token-prices?network=PUBLIC", `{"tokens":[]}`, http.StatusBadRequest},
 		{"invalid JSON", "/api/v1/token-prices?network=PUBLIC", `{garbage`, http.StatusBadRequest},
 		{"malformed token", "/api/v1/token-prices?network=PUBLIC", `{"tokens":["bad-format"]}`, http.StatusBadRequest},
-		{"too many tokens", "/api/v1/token-prices?network=PUBLIC", `{"tokens":["XLM","XLM","XLM"]}`, http.StatusBadRequest},
+		{"too many unique tokens", "/api/v1/token-prices?network=PUBLIC", `{"tokens":["XLM","USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN","AQUA:GBNZILSTVQZ4R7IKQDGHYGY2QXL5QOFJYQMXPKWRRM5PAV7Y4M67AQUA"]}`, http.StatusBadRequest},
 	}
 
 	for _, tc := range cases {
@@ -128,6 +128,24 @@ func TestTokenPrices_BadRequests(t *testing.T) {
 			assert.Equal(t, tc.wantCode, httpErr)
 		})
 	}
+}
+
+// Duplicates collapse to a single canonical id; the cap is enforced on the
+// deduped set so a request like ["XLM","native","xlm"] (3 raw, 1 canonical)
+// passes a cap of 2.
+func TestTokenPrices_DuplicatesCollapseUnderCap(t *testing.T) {
+	t.Parallel()
+
+	mock := &utils.MockPricesService{}
+	handler := NewTokenPricesHandler(mock, 2)
+
+	body := `{"tokens":["XLM","native","xlm"]}`
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/token-prices?network=PUBLIC", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	err := handler.GetPrices(rr, req)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"XLM"}, mock.LastTokens)
 }
 
 func TestTokenPrices_ServiceError(t *testing.T) {

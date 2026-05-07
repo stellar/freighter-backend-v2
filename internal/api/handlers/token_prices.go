@@ -45,10 +45,6 @@ func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedToken
 		errStr := "tokens array cannot be empty"
 		return nil, httperror.BadRequest(errStr, errors.New(errStr))
 	}
-	if maxTokens > 0 && len(req.Tokens) > maxTokens {
-		errStr := fmt.Sprintf("too many tokens: maximum is %d, got %d", maxTokens, len(req.Tokens))
-		return nil, httperror.BadRequest(errStr, errors.New(errStr))
-	}
 
 	canonicalIDs := make([]string, 0, len(req.Tokens))
 	seen := make(map[string]struct{}, len(req.Tokens))
@@ -61,6 +57,15 @@ func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedToken
 			seen[canonical] = struct{}{}
 			canonicalIDs = append(canonicalIDs, canonical)
 		}
+	}
+
+	// Apply the cap on the deduped canonical set, not raw input — a request
+	// with many duplicates collapses to a single upstream fetch and shouldn't
+	// be rejected for shape reasons. Body-size middleware bounds the worst
+	// case before we ever decode.
+	if maxTokens > 0 && len(canonicalIDs) > maxTokens {
+		errStr := fmt.Sprintf("too many tokens: maximum is %d, got %d unique", maxTokens, len(canonicalIDs))
+		return nil, httperror.BadRequest(errStr, errors.New(errStr))
 	}
 
 	return &validatedTokenPricesRequest{
