@@ -147,12 +147,10 @@ func (w *walletBackendService) configureNetworkClient(network string) *wbclient.
 
 // GetBalancesByAccountAddresses fans out one wbclient.GetAccountBalances call
 // per unique address using a per-request errgroup bounded by
-// maxBalanceConcurrency. Behavior matches the historical multi-account
-// wallet-backend GraphQL endpoint:
+// maxBalanceConcurrency.
 //
 //   - Duplicate input addresses collapse to a single result while preserving
-//     first-seen order, mirroring the old wallet-backend resolver
-//     (queries.resolvers.go:369-378 prior to its removal).
+//     first-seen order.
 //   - Address-scoped failures (GraphQL errors, HTTP 4xx) become a per-account
 //     Error string in the returned []*types.AccountBalances. Other accounts
 //     in the same request still return their balances.
@@ -174,9 +172,7 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 		return nil, fmt.Errorf("wallet backend client not configured for network: %s", network)
 	}
 
-	// Dedupe while preserving first-seen order. Mirrors the historical
-	// wallet-backend resolver behavior so callers that previously relied on
-	// dedupe semantics keep working after the multi-account endpoint removal.
+	// Dedupe while preserving first-seen order.
 	seen := make(map[string]struct{}, len(addresses))
 	unique := make([]string, 0, len(addresses))
 	for _, a := range addresses {
