@@ -34,6 +34,7 @@ func (e *UpstreamError) Unwrap() error { return e.Err }
 type Metrics struct {
 	HTTP    *HTTP
 	Service *Service
+	Prices  *Prices
 }
 
 // NewMetrics creates and registers all application metrics with the given registerer.
@@ -41,6 +42,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	return &Metrics{
 		HTTP:    NewHTTP(reg),
 		Service: NewService(reg),
+		Prices:  NewPrices(reg),
 	}
 }
 
@@ -107,6 +109,53 @@ func NewService(reg prometheus.Registerer) *Service {
 	}
 	reg.MustRegister(s.CallsTotal, s.CallDuration, s.ErrorsTotal)
 	return s
+}
+
+// Prices holds metrics specific to the token-prices service: cache outcomes,
+// degraded-mode signals (stale fallback, miss-budget exhaustion), and
+// Redis-from-this-service-POV errors.
+type Prices struct {
+	// CacheOutcomes counts per-token cache outcomes by network and outcome:
+	// "hit_fresh" (within --price-cache-ttl-seconds), "hit_stale" (within
+	// --price-stale-cache-ttl-seconds), "miss" (no entry, expired beyond
+	// stale, or upstream-only path).
+	CacheOutcomes *prometheus.CounterVec
+	// StaleFallbackServed counts requests in which at least one token was
+	// returned from the bounded stale cache (because the live miss path
+	// failed or the budget expired). Labeled by network.
+	StaleFallbackServed *prometheus.CounterVec
+	// MissBudgetExhausted counts requests whose miss-fetch budget
+	// (--price-fetch-timeout-seconds) tripped before all misses resolved.
+	// Labeled by network.
+	MissBudgetExhausted *prometheus.CounterVec
+	// RedisErrors counts Redis operations from the prices service that
+	// failed (and were silently fallen-through). Labeled by op: "mget" or
+	// "set".
+	RedisErrors *prometheus.CounterVec
+}
+
+// NewPrices creates and registers prices-service metrics with the given registerer.
+func NewPrices(reg prometheus.Registerer) *Prices {
+	p := &Prices{
+		CacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_prices_cache_outcomes_total",
+			Help: "Per-token cache outcomes for the token-prices endpoint.",
+		}, []string{"network", "outcome"}),
+		StaleFallbackServed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_prices_stale_fallback_served_total",
+			Help: "Requests in which at least one token was served from the stale cache.",
+		}, []string{"network"}),
+		MissBudgetExhausted: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_prices_miss_budget_exhausted_total",
+			Help: "Requests whose miss-fetch budget elapsed before all misses resolved.",
+		}, []string{"network"}),
+		RedisErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_prices_redis_errors_total",
+			Help: "Redis operation failures observed by the prices service.",
+		}, []string{"op"}),
+	}
+	reg.MustRegister(p.CacheOutcomes, p.StaleFallbackServed, p.MissBudgetExhausted, p.RedisErrors)
+	return p
 }
 
 // Record records call metrics for a service method invocation.

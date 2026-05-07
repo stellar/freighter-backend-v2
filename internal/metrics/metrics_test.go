@@ -23,6 +23,7 @@ func TestNewMetrics_RegistersWithoutPanic(t *testing.T) {
 		require.NotNil(t, m)
 		require.NotNil(t, m.HTTP)
 		require.NotNil(t, m.Service)
+		require.NotNil(t, m.Prices)
 	})
 }
 
@@ -46,6 +47,15 @@ func TestNewHTTP_LintPasses(t *testing.T) {
 func TestNewService_LintPasses(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	NewService(reg)
+
+	problems, err := testutil.GatherAndLint(reg)
+	require.NoError(t, err)
+	assert.Empty(t, problems, "lint problems: %v", problems)
+}
+
+func TestNewPrices_LintPasses(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	NewPrices(reg)
 
 	problems, err := testutil.GatherAndLint(reg)
 	require.NoError(t, err)

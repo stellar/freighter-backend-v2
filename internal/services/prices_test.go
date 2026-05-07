@@ -8,9 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
+	"github.com/stellar/freighter-backend-v2/internal/store"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
@@ -190,7 +194,7 @@ func TestPrices_HappyPath_NoCache(t *testing.T) {
 		Price7d: recentDailyCandles(now, 1.0, 1.0),
 	})
 
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"XLM", "USDC:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
 
@@ -221,7 +225,7 @@ func TestPrices_UsesCandlesWhenAvailable(t *testing.T) {
 	// oldest open=1.222 → (1.10-1.222)/1.222*100 ≈ -9.98 → -9.98
 	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", hourlyCandlesAged(now, 24*time.Hour, 1.222, 1.21))
 
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
 
@@ -244,7 +248,7 @@ func TestPrices_CandlesEmptyFallsBackToPrice7d(t *testing.T) {
 		Price7d: recentDailyCandles(now, 0.158, 0.16),
 	})
 
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
 	require.NoError(t, err)
 
@@ -269,7 +273,7 @@ func TestPrices_CandlesErrorFallsBackToPrice7d(t *testing.T) {
 	})
 	stellarExpert.SetCandleErr("USDC-"+testIssuer+"-1", errors.New("transient candles boom"))
 
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
 
@@ -295,7 +299,7 @@ func TestPrices_SparseCandles_FallsBackToPrice7d(t *testing.T) {
 	// Only 6h of coverage — outside [23h, 25h] from `to`.
 	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", hourlyCandlesAged(now, 6*time.Hour, 0.5, 0.6))
 
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
 
@@ -318,7 +322,7 @@ func TestPrices_StalePrice7d_SuppressesFallbackChange(t *testing.T) {
 		Price7d: recentDailyCandles(stalePast, 0.95, 0.97),
 	})
 
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
 
@@ -334,7 +338,7 @@ func TestPrices_NotFound_ReturnsNull(t *testing.T) {
 	stellarExpert := newFakeStellarExpert()
 	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
 
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"XLM", "BOGUS:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
 	assert.NotNil(t, got["XLM"])
@@ -349,7 +353,7 @@ func TestPrices_Malformed_ReturnsNull(t *testing.T) {
 	stellarExpert := newFakeStellarExpert()
 	stellarExpert.SetErr("BAD-"+testIssuer+"-1", ErrAssetMalformed)
 
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"BAD:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
 	assert.Nil(t, got["BAD:"+testIssuer])
@@ -361,7 +365,7 @@ func TestPrices_UpstreamError_ReturnsNull(t *testing.T) {
 	stellarExpert := newFakeStellarExpert()
 	stellarExpert.SetErr("XLM", errors.New("transport boom"))
 
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
 	require.NoError(t, err)
 	xlm, ok := got["XLM"]
@@ -375,7 +379,7 @@ func TestPrices_DedupesDuplicateTokens(t *testing.T) {
 	stellarExpert := newFakeStellarExpert()
 	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
 
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	_, err := svc.GetPrices(context.Background(), []string{"XLM", "XLM", "XLM"}, types.PUBLIC)
 	require.NoError(t, err)
 	assert.Equal(t, 1, stellarExpert.CallCount("XLM"))
@@ -385,7 +389,7 @@ func TestPrices_RejectsUnsupportedNetwork(t *testing.T) {
 	t.Parallel()
 
 	stellarExpert := newFakeStellarExpert()
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.FUTURENET)
 	require.Error(t, err)
 }
@@ -404,7 +408,7 @@ func TestPrices_ConcurrencyCapHonored(t *testing.T) {
 		tokens[i] = string(code) + ":" + testIssuer
 	}
 
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{MaxConcurrent: 4}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{MaxConcurrent: 4}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), tokens, types.PUBLIC)
 	require.NoError(t, err)
 	assert.Len(t, got, 20)
@@ -425,7 +429,7 @@ func TestPrices_MissFetchTimeoutReturnsBestEffortWithoutError(t *testing.T) {
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{
 		MaxConcurrent:    1,
 		MissFetchTimeout: 10 * time.Millisecond,
-	}, nil)
+	}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), tokens, types.PUBLIC)
 	require.NoError(t, err)
 	require.Len(t, got, len(tokens))
@@ -443,7 +447,7 @@ func TestPrices_PreservesPartialOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{MaxConcurrent: 1}, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{MaxConcurrent: 1}, nil, nil)
 	got, err := svc.GetPrices(ctx, []string{"XLM"}, types.PUBLIC)
 	// errgroup surfaces ctx.Err() but we still receive the (possibly empty)
 	// partial result map.
@@ -484,12 +488,13 @@ func TestCompleteMissingResultsUsesStaleFallback(t *testing.T) {
 		"USDC:" + testIssuer: {CurrentPrice: "1", PercentagePriceChange24h: ptrStr("0")},
 	}
 
-	completeMissingResults(tokens, result, staleFallback)
+	staleServed := completeMissingResults(tokens, result, staleFallback)
 	require.Len(t, result, len(tokens))
 	assert.Nil(t, result["XLM"])
 	require.NotNil(t, result["USDC:"+testIssuer])
 	assert.Equal(t, "1", result["USDC:"+testIssuer].CurrentPrice)
 	assert.Nil(t, result["BOGUS:"+testIssuer])
+	assert.Equal(t, 1, staleServed, "one token took the stale fallback")
 }
 
 func TestCompute24hChange(t *testing.T) {
@@ -559,3 +564,75 @@ func TestFormatPrice(t *testing.T) {
 }
 
 func ptrStr(s string) *string { return &s }
+
+func TestPrices_CacheOutcomes_NilRedisCountsAllAsMisses(t *testing.T) {
+	t.Parallel()
+
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
+	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 1.0, Price7d: [][2]float64{{1, 1}, {2, 1}}})
+
+	reg := prometheus.NewRegistry()
+	pm := metrics.NewPrices(reg)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, pm)
+
+	_, err := svc.GetPrices(context.Background(), []string{"XLM", "USDC:" + testIssuer}, types.PUBLIC)
+	require.NoError(t, err)
+
+	assert.Equal(t, float64(2), testutil.ToFloat64(pm.CacheOutcomes.WithLabelValues(types.PUBLIC, "miss")))
+	assert.Equal(t, float64(0), testutil.ToFloat64(pm.CacheOutcomes.WithLabelValues(types.PUBLIC, "hit_fresh")))
+	assert.Equal(t, float64(0), testutil.ToFloat64(pm.CacheOutcomes.WithLabelValues(types.PUBLIC, "hit_stale")))
+}
+
+func TestPrices_MissBudgetExhausted_EmitsMetric(t *testing.T) {
+	t.Parallel()
+
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.delay = 100 * time.Millisecond
+	tokens := []string{"XLM", "USDC:" + testIssuer}
+
+	reg := prometheus.NewRegistry()
+	pm := metrics.NewPrices(reg)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{
+		MaxConcurrent:    1,
+		MissFetchTimeout: 10 * time.Millisecond,
+	}, nil, pm)
+
+	_, err := svc.GetPrices(context.Background(), tokens, types.PUBLIC)
+	require.NoError(t, err)
+
+	assert.Equal(t, float64(1), testutil.ToFloat64(pm.MissBudgetExhausted.WithLabelValues(types.PUBLIC)))
+}
+
+// Pointing at an unreachable port makes MGetJSON return an error, which the
+// service swallows and falls through to upstream — but it should still bump
+// the redis_errors{op=mget} counter so operators see the cache bypass.
+func TestPrices_RedisErrors_MGetUnreachable_Increments(t *testing.T) {
+	t.Parallel()
+
+	redisStore := store.NewRedisStore("localhost", 1, "") // port 1 = no listener
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
+
+	reg := prometheus.NewRegistry()
+	pm := metrics.NewPrices(reg)
+	svc := NewPricesService(stellarExpert, redisStore, PricesServiceConfig{
+		MissFetchTimeout: 250 * time.Millisecond,
+	}, nil, pm)
+
+	_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+
+	assert.GreaterOrEqual(t, testutil.ToFloat64(pm.RedisErrors.WithLabelValues("mget")), float64(1))
+}
+
+func TestPrices_NilMetrics_NoOps(t *testing.T) {
+	t.Parallel()
+
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
+
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
+	_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+}

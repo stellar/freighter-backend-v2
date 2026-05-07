@@ -97,7 +97,7 @@ func (s *ApiServer) initServices() error {
 		StaleCacheTTL:    time.Duration(s.cfg.PricesConfig.PriceStaleCacheTTLSeconds) * time.Second,
 		MissFetchTimeout: time.Duration(s.cfg.PricesConfig.PriceFetchTimeoutSeconds) * time.Second,
 		MaxConcurrent:    s.cfg.PricesConfig.MaxConcurrentPriceFetches,
-	}, s.appMetrics.Service)
+	}, s.appMetrics.Service, s.appMetrics.Prices)
 
 	return nil
 }
