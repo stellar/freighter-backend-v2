@@ -320,6 +320,9 @@ func createFreighterContainer(ctx context.Context, name string, imageName string
 			"PUBNET_RPC_URL":         "http://stellar-rpc:8000",
 			"TESTNET_RPC_URL":        "http://horizon-testnet.stellar.org",
 			"FUTURENET_RPC_URL":      "http://horizon-futurenet.stellar.org",
+			// Token-prices endpoint isn't exercised by integration tests;
+			// the server still requires a non-empty key at startup.
+			"STELLAR_EXPERT_API_KEY": "integration-test-placeholder",
 		},
 		Networks:   []string{testNetwork.Name},
 		WaitingFor: wait.ForHTTP("/api/v1/ping"),
