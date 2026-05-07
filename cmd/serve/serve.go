@@ -100,7 +100,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	// Token Prices Config
 	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertPubnetURL, "stellar-expert-pubnet-url", "https://api.stellar.expert/explorer/public", "Stellar Expert base URL for pubnet")
 	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertTestnetURL, "stellar-expert-testnet-url", "https://api.stellar.expert/explorer/testnet", "Stellar Expert base URL for testnet")
-	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertAPIKey, "stellar-expert-api-key", "", "Bearer token for the Stellar Expert API (required when token prices are enabled)")
+	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertAPIKey, "stellar-expert-api-key", "", "Bearer token for the Stellar Expert API (required)")
 	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertOrigin, "stellar-expert-origin", "https://stellar.expert", "Origin header sent on Stellar Expert requests; Stellar Expert associates the API key with this origin (e.g. https://api.freighter.app in production)")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceCacheTTLSeconds, "price-cache-ttl-seconds", 30, "TTL for cached token prices in Redis (seconds)")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceStaleCacheTTLSeconds, "price-stale-cache-ttl-seconds", 120, "Maximum age for degraded cached token prices in Redis (seconds); set equal to --price-cache-ttl-seconds to disable stale fallback")
