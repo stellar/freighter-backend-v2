@@ -19,18 +19,28 @@ func TestClassifyWBError(t *testing.T) {
 		err           error
 		expectWrapped bool
 		expectedKind  string
+		expectedCode  int
 	}{
 		{
-			name:          "GraphQL error wraps as graphql_error",
+			name:          "GraphQL error wraps as graphql_error with no code",
 			err:           fmt.Errorf("GraphQL error: something went wrong"),
 			expectWrapped: true,
 			expectedKind:  "graphql_error",
+			expectedCode:  0,
 		},
 		{
-			name:          "unexpected statusCode wraps as http_error",
-			err:           fmt.Errorf("unexpected statusCode=500: internal server error"),
+			name:          "HTTP 500 wraps as http_error with parsed code",
+			err:           fmt.Errorf("unexpected statusCode=500, body=internal server error"),
 			expectWrapped: true,
 			expectedKind:  "http_error",
+			expectedCode:  500,
+		},
+		{
+			name:          "HTTP 404 wraps as http_error with parsed code",
+			err:           fmt.Errorf("unexpected statusCode=404, body=not found"),
+			expectWrapped: true,
+			expectedKind:  "http_error",
+			expectedCode:  404,
 		},
 		{
 			name:          "generic error passes through unchanged",
@@ -46,7 +56,7 @@ func TestClassifyWBError(t *testing.T) {
 				var upErr *metrics.UpstreamError
 				require.True(t, errors.As(result, &upErr), "expected UpstreamError, got %T", result)
 				assert.Equal(t, tt.expectedKind, upErr.Kind)
-				assert.Equal(t, 0, upErr.Code)
+				assert.Equal(t, tt.expectedCode, upErr.Code)
 			} else {
 				assert.Equal(t, tt.err, result)
 			}
