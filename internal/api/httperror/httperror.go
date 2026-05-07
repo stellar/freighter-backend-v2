@@ -13,7 +13,7 @@ type ErrorMessage struct {
 
 type HttpError struct {
 	Message    string                 `json:"message"`
-	Err        error                  `json:"originalError,omitempty"`
+	Err        error                  `json:"-"`
 	StatusCode int                    `json:"statusCode"`
 	Extras     map[string]interface{} `json:"extras,omitempty"`
 }

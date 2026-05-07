@@ -19,7 +19,6 @@ type jsonErrorResponse struct {
 	Message    string                 `json:"message"`
 	StatusCode int                    `json:"statusCode"`
 	Extras     map[string]interface{} `json:"extras,omitempty"`
-	// We don't need to assert OriginalError for these tests, so it can be omitted
 }
 
 func TestCustomHandler(t *testing.T) {

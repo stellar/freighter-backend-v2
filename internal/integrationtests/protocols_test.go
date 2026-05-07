@@ -17,10 +17,9 @@ import (
 
 // testHTTPError is a local struct for unmarshaling HTTP error responses in tests.
 type testHTTPError struct {
-	Message       string          `json:"message"`
-	OriginalError json.RawMessage `json:"originalError,omitempty"`
-	StatusCode    int             `json:"statusCode"`
-	Extras        map[string]any  `json:"extras,omitempty"`
+	Message    string         `json:"message"`
+	StatusCode int            `json:"statusCode"`
+	Extras     map[string]any `json:"extras,omitempty"`
 }
 
 type ProtocolsTestSuite struct {
