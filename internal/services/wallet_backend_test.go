@@ -1,16 +1,27 @@
-// ABOUTME: Unit tests for wallet backend service error classification.
-// ABOUTME: Verifies classifyWBError wraps errors with correct UpstreamError kinds and GetHealth wraps HTTP errors.
+// ABOUTME: Unit tests for wallet backend service error classification, address-scope policy, and balances fan-out.
+// ABOUTME: Uses httptest.Server fakes to exercise GetBalancesByAccountAddresses without a real wallet-backend.
 package services
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/wallet-backend/pkg/wbclient"
+
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
+	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
 func TestClassifyWBError(t *testing.T) {
@@ -79,4 +90,397 @@ func TestGetHealth_HTTPErrorClassification(t *testing.T) {
 	require.True(t, errors.As(healthErr, &upErr))
 	assert.Equal(t, "http_error", upErr.Kind)
 	assert.Equal(t, 503, upErr.Code)
+}
+
+// TestIsAddressScopedError walks the policy table from
+// walletBackendService.GetBalancesByAccountAddresses: which error classes
+// stay per-account vs which ones bubble up as a top-level 5xx.
+func TestIsAddressScopedError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"context.Canceled is systemic", context.Canceled, false},
+		{"context.DeadlineExceeded is systemic", context.DeadlineExceeded, false},
+		{"unclassified error is systemic", fmt.Errorf("dial tcp: connection refused"), false},
+		{"graphql_error is address-scoped", &metrics.UpstreamError{Kind: "graphql_error", Err: errors.New("x")}, true},
+		{"http 4xx is address-scoped", &metrics.UpstreamError{Kind: "http_error", Code: 404, Err: errors.New("x")}, true},
+		{"http 5xx is systemic", &metrics.UpstreamError{Kind: "http_error", Code: 503, Err: errors.New("x")}, false},
+		{"http 0 (unparsed) is systemic", &metrics.UpstreamError{Kind: "http_error", Code: 0, Err: errors.New("x")}, false},
+		{"unknown UpstreamError kind is systemic", &metrics.UpstreamError{Kind: "weird", Err: errors.New("x")}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isAddressScopedError(tt.err))
+		})
+	}
+}
+
+// fanoutFakeServer encapsulates an httptest server that responds to wbclient
+// GetAccountBalances calls. The handler dispatches based on the requested
+// address (parsed out of the GraphQL variables) so a single test can mix
+// success/failure responses across addresses.
+type fanoutFakeServer struct {
+	server   *httptest.Server
+	calls    atomic.Int64
+	inflight atomic.Int32
+	peak     atomic.Int32
+}
+
+// fanoutResponder returns the body and status the fake should write for a
+// given requested address. If body is empty and status is 0 the fake writes
+// a default empty-balances success response.
+type fanoutResponder func(address string) (status int, body string)
+
+func newFanoutFakeServer(t *testing.T, respond fanoutResponder) *fanoutFakeServer {
+	t.Helper()
+	f := &fanoutFakeServer{}
+	mux := http.NewServeMux()
+	// wbclient posts every query (mutations and queries) to /graphql/query.
+	mux.HandleFunc("/graphql/query", func(w http.ResponseWriter, r *http.Request) {
+		// Track concurrency for the bounded-concurrency assertion. We update
+		// before reading the body so the peak reflects work done in parallel
+		// inside the handler, not just the request arrival rate.
+		cur := f.inflight.Add(1)
+		defer f.inflight.Add(-1)
+		for {
+			old := f.peak.Load()
+			if cur <= old || f.peak.CompareAndSwap(old, cur) {
+				break
+			}
+		}
+		f.calls.Add(1)
+
+		body, _ := io.ReadAll(r.Body)
+		address := extractAddressFromGraphQLBody(t, body)
+
+		status, payload := respond(address)
+		if status == 0 && payload == "" {
+			status = http.StatusOK
+			payload = emptyBalancesGraphQLResponse()
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(payload))
+	})
+	f.server = httptest.NewServer(mux)
+	t.Cleanup(f.server.Close)
+	return f
+}
+
+// extractAddressFromGraphQLBody pulls the "address" variable from a wbclient
+// GraphQL request body. wbclient's executeGraphQL marshals as
+// {"query": "...", "variables": {"address": "G..."}}.
+func extractAddressFromGraphQLBody(t *testing.T, body []byte) string {
+	t.Helper()
+	var req struct {
+		Variables map[string]any `json:"variables"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("unmarshal graphql request body: %v (body=%q)", err, string(body))
+	}
+	addr, _ := req.Variables["address"].(string)
+	return addr
+}
+
+// emptyBalancesGraphQLResponse returns a GraphQL response with an empty
+// balances connection. Always-non-nil "edges": [] mirrors how wallet-backend
+// would respond for an account with no balances.
+func emptyBalancesGraphQLResponse() string {
+	return `{"data":{"accountByAddress":{"balances":{"edges":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}`
+}
+
+// nativeBalanceGraphQLResponse returns a GraphQL response with one
+// NativeBalance edge. The __typename field is mandatory — wbclient's
+// polymorphic UnmarshalBalance keys off it and errors with "unknown balance
+// type" if it's missing.
+func nativeBalanceGraphQLResponse(amount string) string {
+	return fmt.Sprintf(`{
+		"data": {
+			"accountByAddress": {
+				"balances": {
+					"edges": [{
+						"node": {
+							"__typename": "NativeBalance",
+							"balance": %q,
+							"tokenId": "native",
+							"tokenType": "NATIVE",
+							"minimumBalance": "1.0000000",
+							"buyingLiabilities": "0.0000000",
+							"sellingLiabilities": "0.0000000",
+							"lastModifiedLedger": 100
+						}
+					}],
+					"pageInfo": {"hasNextPage": false, "endCursor": null}
+				}
+			}
+		}
+	}`, amount)
+}
+
+// graphqlErrorResponse returns a 200 response carrying a GraphQL error.
+// wbclient surfaces these as `GraphQL error: ...` Go errors.
+func graphqlErrorResponse(message string) string {
+	return fmt.Sprintf(`{"errors":[{"message":%q}]}`, message)
+}
+
+// newTestWalletBackendService builds a walletBackendService directly,
+// bypassing NewWalletBackendService so we can wire a no-signer wbclient
+// pointed at the fake server. Tests live in the services package, so the
+// unexported struct is accessible.
+func newTestWalletBackendService(baseURL string, maxConcurrency int) *walletBackendService {
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	client := wbclient.NewClient(baseURL, nil) // nil signer is fine — wbclient skips signing when nil
+	client.HTTPClient = httpClient
+	return &walletBackendService{
+		pubnetClient:          client,
+		httpClient:            httpClient,
+		svcMetrics:            metrics.NewService(prometheus.NewRegistry()),
+		maxBalanceConcurrency: maxConcurrency,
+	}
+}
+
+const (
+	// Realistic-looking valid Stellar G-address shapes for tests. The fake
+	// server doesn't validate them; they just need to be distinct strings the
+	// fake can dispatch on.
+	addrA = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
+	addrB = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBLNG"
+	addrC = "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCK6T"
+)
+
+func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
+	t.Run("success_path_preserves_input_order", func(t *testing.T) {
+		f := newFanoutFakeServer(t, func(address string) (int, string) {
+			switch address {
+			case addrA:
+				return http.StatusOK, nativeBalanceGraphQLResponse("100.0000000")
+			case addrB:
+				return http.StatusOK, nativeBalanceGraphQLResponse("200.0000000")
+			}
+			t.Fatalf("unexpected address %q", address)
+			return 0, ""
+		})
+		svc := newTestWalletBackendService(f.server.URL, 10)
+
+		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA, addrB}, types.PUBLIC)
+		require.NoError(t, err)
+		results := raw.([]*types.AccountBalances)
+		require.Len(t, results, 2)
+		assert.Equal(t, addrA, results[0].Address)
+		assert.Equal(t, addrB, results[1].Address)
+		assert.Nil(t, results[0].Error)
+		assert.Nil(t, results[1].Error)
+		assert.Len(t, results[0].Balances, 1)
+		assert.Len(t, results[1].Balances, 1)
+	})
+
+	t.Run("per_account_graphql_error_does_not_fail_request", func(t *testing.T) {
+		f := newFanoutFakeServer(t, func(address string) (int, string) {
+			if address == addrA {
+				return http.StatusOK, graphqlErrorResponse("account not indexed")
+			}
+			return http.StatusOK, nativeBalanceGraphQLResponse("50.0000000")
+		})
+		svc := newTestWalletBackendService(f.server.URL, 10)
+
+		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA, addrB}, types.PUBLIC)
+		require.NoError(t, err)
+		results := raw.([]*types.AccountBalances)
+		require.Len(t, results, 2)
+		require.NotNil(t, results[0].Error)
+		assert.Contains(t, *results[0].Error, "graphql_error")
+		assert.Empty(t, results[0].Balances) // initialized to non-nil empty slice
+		assert.Nil(t, results[1].Error)
+		assert.Len(t, results[1].Balances, 1)
+	})
+
+	t.Run("per_account_http_4xx_does_not_fail_request", func(t *testing.T) {
+		f := newFanoutFakeServer(t, func(address string) (int, string) {
+			if address == addrA {
+				return http.StatusNotFound, `account not found`
+			}
+			return http.StatusOK, nativeBalanceGraphQLResponse("75.0000000")
+		})
+		svc := newTestWalletBackendService(f.server.URL, 10)
+
+		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA, addrB}, types.PUBLIC)
+		require.NoError(t, err)
+		results := raw.([]*types.AccountBalances)
+		require.Len(t, results, 2)
+		require.NotNil(t, results[0].Error)
+		assert.Contains(t, *results[0].Error, "http_error")
+		assert.Nil(t, results[1].Error)
+	})
+
+	t.Run("systemic_http_5xx_fails_request", func(t *testing.T) {
+		f := newFanoutFakeServer(t, func(address string) (int, string) {
+			if address == addrA {
+				return http.StatusServiceUnavailable, "wallet-backend down"
+			}
+			return http.StatusOK, nativeBalanceGraphQLResponse("100.0000000")
+		})
+		svc := newTestWalletBackendService(f.server.URL, 10)
+
+		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA, addrB}, types.PUBLIC)
+		require.Error(t, err, "5xx must surface as a top-level error so monitoring catches outages")
+		assert.Nil(t, raw)
+		var upErr *metrics.UpstreamError
+		require.True(t, errors.As(err, &upErr))
+		assert.Equal(t, "http_error", upErr.Kind)
+		assert.Equal(t, 503, upErr.Code)
+	})
+
+	t.Run("systemic_transport_error_fails_request", func(t *testing.T) {
+		f := newFanoutFakeServer(t, func(address string) (int, string) {
+			return http.StatusOK, nativeBalanceGraphQLResponse("100.0000000")
+		})
+		svc := newTestWalletBackendService(f.server.URL, 10)
+		// Close before calling so every request errors at the transport layer
+		// (connection refused). Transport errors must propagate top-level —
+		// turning them into per-account strings would hide outages.
+		f.server.Close()
+
+		_, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA, addrB}, types.PUBLIC)
+		require.Error(t, err)
+	})
+
+	t.Run("zero_balances_marshals_as_empty_array_not_null", func(t *testing.T) {
+		f := newFanoutFakeServer(t, func(address string) (int, string) { return 0, "" }) // default → empty edges
+		svc := newTestWalletBackendService(f.server.URL, 10)
+
+		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA}, types.PUBLIC)
+		require.NoError(t, err)
+		results := raw.([]*types.AccountBalances)
+		require.Len(t, results, 1)
+		assert.NotNil(t, results[0].Balances, "Balances must be a non-nil slice for empty accounts")
+		assert.Empty(t, results[0].Balances)
+
+		// Nail down the wire format — a regression to "balances":null would be
+		// a behavior change for API consumers.
+		jsonBytes, err := json.Marshal(results[0])
+		require.NoError(t, err)
+		assert.Contains(t, string(jsonBytes), `"balances":[]`)
+		assert.NotContains(t, string(jsonBytes), `"balances":null`)
+	})
+
+	t.Run("bounded_concurrency_respects_limit", func(t *testing.T) {
+		const limit = 2
+		const total = 6
+		barrier := make(chan struct{}, total)
+		release := make(chan struct{})
+
+		f := newFanoutFakeServer(t, func(address string) (int, string) {
+			// Signal arrival, then block until released. This forces the test
+			// to observe the true concurrent ceiling rather than the rate at
+			// which goroutines happen to be scheduled.
+			barrier <- struct{}{}
+			<-release
+			return http.StatusOK, nativeBalanceGraphQLResponse("1.0000000")
+		})
+		svc := newTestWalletBackendService(f.server.URL, limit)
+
+		addrs := []string{
+			"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+			"GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBLNG",
+			"GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCK6T",
+			"GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDPGE",
+			"GEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERVZ",
+			"GFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFB7M",
+		}
+		require.Len(t, addrs, total)
+
+		done := make(chan error, 1)
+		go func() {
+			_, err := svc.GetBalancesByAccountAddresses(context.Background(), addrs, types.PUBLIC)
+			done <- err
+		}()
+
+		// Wait for `limit` goroutines to be parked at the barrier. If errgroup
+		// admitted more than `limit`, we'd see >`limit` arrivals before any
+		// release happens.
+		for i := 0; i < limit; i++ {
+			select {
+			case <-barrier:
+			case <-time.After(2 * time.Second):
+				t.Fatalf("only %d goroutines arrived at the barrier (expected %d)", i, limit)
+			}
+		}
+		// Give a beat for any over-admission to surface.
+		select {
+		case <-barrier:
+			t.Fatalf("more than %d goroutines admitted concurrently", limit)
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		// Now drain by releasing in waves of `limit`.
+		remaining := total - limit
+		for remaining > 0 {
+			batch := limit
+			if remaining < batch {
+				batch = remaining
+			}
+			for i := 0; i < batch; i++ {
+				release <- struct{}{}
+			}
+			for i := 0; i < batch; i++ {
+				<-barrier
+			}
+			remaining -= batch
+		}
+		// Release the last batch (the initial `limit` goroutines that arrived
+		// first plus any final stragglers — total releases must equal total).
+		for i := 0; i < total; i++ {
+			select {
+			case release <- struct{}{}:
+			default:
+				// channel full means a goroutine already grabbed it
+			}
+		}
+		close(release)
+
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("fan-out did not complete after release")
+		}
+
+		assert.LessOrEqual(t, f.peak.Load(), int32(limit), "peak in-flight must respect the per-request limit")
+		assert.Equal(t, int64(total), f.calls.Load(), "every unique address must be queried exactly once")
+	})
+
+	t.Run("request_level_timeout_returns_top_level_error", func(t *testing.T) {
+		f := newFanoutFakeServer(t, func(address string) (int, string) {
+			// Sleep longer than the test ctx timeout so the in-flight call
+			// observes ctx.Err() and bubbles it up.
+			time.Sleep(500 * time.Millisecond)
+			return http.StatusOK, nativeBalanceGraphQLResponse("1.0000000")
+		})
+		svc := newTestWalletBackendService(f.server.URL, 10)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		_, err := svc.GetBalancesByAccountAddresses(ctx, []string{addrA, addrB}, types.PUBLIC)
+		require.Error(t, err, "ctx timeout must surface as top-level error, not per-account strings")
+	})
+
+	t.Run("duplicate_addresses_collapse_preserving_first_seen_order", func(t *testing.T) {
+		f := newFanoutFakeServer(t, func(address string) (int, string) {
+			return http.StatusOK, nativeBalanceGraphQLResponse("1.0000000")
+		})
+		svc := newTestWalletBackendService(f.server.URL, 10)
+
+		raw, err := svc.GetBalancesByAccountAddresses(
+			context.Background(),
+			[]string{addrA, addrB, addrA, addrA},
+			types.PUBLIC,
+		)
+		require.NoError(t, err)
+		results := raw.([]*types.AccountBalances)
+		require.Len(t, results, 2, "duplicates must collapse")
+		assert.Equal(t, addrA, results[0].Address, "first-seen ordering preserved")
+		assert.Equal(t, addrB, results[1].Address)
+		assert.Equal(t, int64(2), f.calls.Load(), "fake server must see exactly len(unique) GraphQL calls")
+	})
 }
