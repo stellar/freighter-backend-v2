@@ -78,7 +78,7 @@ func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedToken
 func (h *TokenPricesHandler) GetPrices(w http.ResponseWriter, r *http.Request) error {
 	network := r.URL.Query().Get("network")
 	if !isValidNetwork(network) {
-		return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
+		return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s or %s", types.PUBLIC, types.TESTNET), errors.New("invalid network"))
 	}
 	if network == types.FUTURENET {
 		return httperror.BadRequest("token prices are not available on FUTURENET", errors.New("futurenet not supported"))
