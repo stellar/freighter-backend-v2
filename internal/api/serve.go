@@ -72,6 +72,7 @@ func (s *ApiServer) initServices() error {
 		s.cfg.WalletBackendConfig.TestnetUrl,
 		s.cfg.WalletBackendConfig.PubnetSigningKey,
 		s.cfg.WalletBackendConfig.TestnetSigningKey,
+		s.cfg.AppConfig.WalletBackendBalanceConcurrency,
 		s.appMetrics.Service,
 	)
 	if err != nil {
