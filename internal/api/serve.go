@@ -12,6 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
@@ -56,10 +57,9 @@ func (s *ApiServer) Start() error {
 		return err
 	}
 
-	mux := s.initHandlers()
-	handler := s.initMiddleware(mux)
-	s.startServer(handler)
-	return nil
+	apiHandler := s.initMiddleware(s.initHandlers())
+	metricsHandler := middleware.Chain(s.initMetricsHandler(), middleware.Recover())
+	return s.startServers(apiHandler, metricsHandler)
 }
 
 func (s *ApiServer) initServices() error {
@@ -130,9 +130,12 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 
 	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest)
 	mux.HandleFunc("POST /api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices))
+	return mux
+}
 
+func (s *ApiServer) initMetricsHandler() http.Handler {
+	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{Registry: s.registry}))
-
 	return mux
 }
 
@@ -150,36 +153,63 @@ func (s *ApiServer) initMiddleware(mux *http.ServeMux) http.Handler {
 	return handler
 }
 
-func (s *ApiServer) startServer(handler http.Handler) {
-	server := &http.Server{
+func (s *ApiServer) startServers(apiHandler http.Handler, metricsHandler http.Handler) error {
+	apiServer := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", s.cfg.AppConfig.FreighterBackendHost, s.cfg.AppConfig.FreighterBackendPort),
-		Handler:      handler,
+		Handler:      apiHandler,
+		ReadTimeout:  DefaultReadTimeout,
+		WriteTimeout: DefaultWriteTimeout,
+		IdleTimeout:  DefaultIdleTimeout,
+	}
+	metricsServer := &http.Server{
+		Addr:         fmt.Sprintf("%s:%d", s.cfg.AppConfig.MetricsHost, s.cfg.AppConfig.MetricsPort),
+		Handler:      metricsHandler,
 		ReadTimeout:  DefaultReadTimeout,
 		WriteTimeout: DefaultWriteTimeout,
 		IdleTimeout:  DefaultIdleTimeout,
 	}
 
-	// Start the server in a goroutine
-	go func() {
-		logger.Info("Starting HTTP server", "address", server.Addr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("HTTP server error", "error", err)
+	// errgroup: if either ListenAndServe returns an unexpected error, ctx is
+	// canceled so we tear down the surviving server and surface the failure.
+	g, ctx := errgroup.WithContext(context.Background())
+	g.Go(func() error {
+		logger.Info("Starting API server", "address", apiServer.Addr)
+		if err := apiServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("api server: %w", err)
 		}
-	}()
+		return nil
+	})
+	g.Go(func() error {
+		logger.Info("Starting metrics server", "address", metricsServer.Addr)
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("metrics server: %w", err)
+		}
+		return nil
+	})
 
-	// Wait for termination signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
 
-	// Graceful shutdown
-	logger.Info("Shutting down server...")
-	ctx, cancel := context.WithTimeout(context.Background(), ServerShutdownTimeout)
-	defer cancel()
-
-	if err := server.Shutdown(ctx); err != nil {
-		logger.Error("Server forced to shutdown", "error", err)
+	select {
+	case <-quit:
+		logger.Info("Shutting down servers...")
+	case <-ctx.Done():
+		logger.Error("Server exited unexpectedly; shutting down siblings")
 	}
 
-	logger.Info("Server gracefully stopped")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), ServerShutdownTimeout)
+	defer cancel()
+
+	if err := apiServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("API server forced to shutdown", "error", err)
+	}
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("Metrics server forced to shutdown", "error", err)
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	logger.Info("Servers gracefully stopped")
+	return nil
 }

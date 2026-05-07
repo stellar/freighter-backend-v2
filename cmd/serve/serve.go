@@ -51,6 +51,8 @@ func (s *ServeCmd) Command() *cobra.Command {
 	// App Config
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.FreighterBackendHost, "freighter-backend-host", "localhost", "The host of the freighter backend server")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.FreighterBackendPort, "freighter-backend-port", 3002, "The port of the freighter backend server")
+	cmd.Flags().StringVar(&s.Cfg.AppConfig.MetricsHost, "metrics-host", "localhost", "The host of the internal metrics server (Prometheus /metrics)")
+	cmd.Flags().IntVar(&s.Cfg.AppConfig.MetricsPort, "metrics-port", 9090, "The port of the internal metrics server (Prometheus /metrics)")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.Mode, "mode", "development", "The mode of the server")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.SentryKey, "sentry-key", "", "The Sentry key")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.ProtocolsConfigPath, "protocols-config-path", "/app/config/protocols.json", "The path to the protocols config file while lists all supported protocols in Freighter")
