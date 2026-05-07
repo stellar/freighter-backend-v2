@@ -242,7 +242,8 @@ func TestPrices_CandlesEmptyFallsBackToPrice7d(t *testing.T) {
 
 	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
-	// XLM has no candles upstream; expect price7d fallback to drive the 24h change.
+	// XLM has no candles upstream; the service skips the call and uses
+	// price7d to derive the 24h change.
 	stellarExpert.Set("XLM", &types.StellarExpertAsset{
 		Price:   0.16,
 		Price7d: recentDailyCandles(now, 0.158, 0.16),
@@ -257,7 +258,7 @@ func TestPrices_CandlesEmptyFallsBackToPrice7d(t *testing.T) {
 	assert.Equal(t, "0.16", xlm.CurrentPrice)
 	require.NotNil(t, xlm.PercentagePriceChange24h)
 	assert.Equal(t, "1.27", *xlm.PercentagePriceChange24h)
-	assert.Equal(t, 1, stellarExpert.CandleCallCount("XLM"), "candles still attempted once before fallback")
+	assert.Equal(t, 0, stellarExpert.CandleCallCount("XLM"), "candles call is skipped for native XLM")
 }
 
 func TestPrices_CandlesErrorFallsBackToPrice7d(t *testing.T) {

@@ -266,7 +266,9 @@ func (p *pricesService) resolveMisses(ctx context.Context, network, cacheNet str
 // not-found/malformed assets resolve to nil; transient failures and budget
 // exhaustion leave the token eligible for stale fallback. The asset and
 // candles calls run concurrently; on a terminal asset error the candles
-// call is cancelled so unknown assets don't double upstream load.
+// call is cancelled so unknown assets don't double upstream load. Native
+// XLM has no candle data upstream, so the candles call is skipped and the
+// price7d fallback computes the 24h change.
 func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, canonical string) (_ *types.PriceEntry, resolved bool) {
 	stellarExpertID := assetid.ToStellarExpert(canonical)
 
@@ -281,6 +283,8 @@ func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, ca
 	fetchCtx, cancelFetch := context.WithCancel(ctx)
 	defer cancelFetch()
 
+	skipCandles := canonical == assetid.NativeCanonical
+
 	var (
 		asset      *types.StellarExpertAsset
 		assetErr   error
@@ -288,7 +292,7 @@ func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, ca
 		candlesErr error
 		wg         sync.WaitGroup
 	)
-	wg.Add(2)
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		asset, assetErr = p.stellarExpert.GetAsset(fetchCtx, network, stellarExpertID)
@@ -296,10 +300,13 @@ func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, ca
 			cancelFetch()
 		}
 	}()
-	go func() {
-		defer wg.Done()
-		candles, candlesErr = p.stellarExpert.GetAssetCandles(fetchCtx, network, stellarExpertID, from, to, candlesResolutionSec)
-	}()
+	if !skipCandles {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			candles, candlesErr = p.stellarExpert.GetAssetCandles(fetchCtx, network, stellarExpertID, from, to, candlesResolutionSec)
+		}()
+	}
 	wg.Wait()
 
 	if assetErr != nil {
