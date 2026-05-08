@@ -254,9 +254,8 @@ func classifyWBError(err error) error {
 //
 //	context.Canceled / DeadlineExceeded -> systemic (request-wide)
 //	Unclassified errors                 -> systemic (likely transport/signing)
-//	UpstreamError{Kind:"graphql_error"} -> address-scoped (entity not found, bad query for this address)
-//	UpstreamError{Kind:"http_error", Code: 4xx} -> address-scoped (client-side error for this account)
-//	UpstreamError{Kind:"http_error", Code: 5xx or unknown} -> systemic (server-side outage)
+//	UpstreamError{Kind:"graphql_error"} -> address-scoped (server-side resolver error scoped to this account)
+//	UpstreamError{Kind:"http_error"}    -> systemic (every status — see comment below)
 func isAddressScopedError(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
@@ -269,7 +268,15 @@ func isAddressScopedError(err error) bool {
 	case "graphql_error":
 		return true
 	case "http_error":
-		return upErr.Code >= 400 && upErr.Code < 500
+		// wbclient POSTs every call to /graphql/query and translates any
+		// HTTP >= 400 into an http_error before parsing the GraphQL body.
+		// There is no 4xx code that means "this account doesn't exist" —
+		// that signal arrives as a 200 with accountByAddress:null. So every
+		// http_error is systemic: wrong base URL (404), bad query body
+		// (400/422), auth/signing (401/403), rate limit (429), or an
+		// upstream outage (5xx). Failing the whole request lets monitoring
+		// see real outages instead of a 200 of per-account error strings.
+		return false
 	}
 	return false
 }
