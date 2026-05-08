@@ -189,10 +189,11 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 
 	for i, addr := range unique {
 		g.Go(func() error {
-			balances, fetchErr := client.GetAccountBalances(gctx, addr)
-			// Always non-nil so the JSON encoder emits "balances": [] for
-			// accounts with no balances rather than "balances": null. The new
-			// wbclient SDK returns a nil slice when there are zero edges.
+			balances, fetchErr := client.GetAllAccountBalances(gctx, addr)
+			// Always non-nil so the JSON encoder emits "balances": [] even if
+			// a future SDK regression returned nil for an account with zero
+			// balances. GetAllAccountBalances currently returns a non-nil
+			// empty slice; keeping the guard is cheap insurance.
 			ab := &types.AccountBalances{
 				Address:  addr,
 				Balances: []wbtypes.Balance{},
