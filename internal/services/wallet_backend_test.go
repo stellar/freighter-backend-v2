@@ -139,9 +139,13 @@ type fanoutFakeServer struct {
 }
 
 // fanoutResponder returns the body and status the fake should write for a
-// given requested address. If body is empty and status is 0 the fake writes
-// a default empty-balances success response.
-type fanoutResponder func(address string) (status int, body string)
+// given requested address and pagination cursor. The after argument is nil
+// for first-page requests (per wbclient's buildPaginationVars, nil
+// pagination vars are omitted from the GraphQL request map entirely, so a
+// missing "after" key surfaces as nil here — not pointer-to-empty). If body
+// is empty and status is 0 the fake writes a default empty-balances
+// success response.
+type fanoutResponder func(address string, after *string) (status int, body string)
 
 func newFanoutFakeServer(t *testing.T, respond fanoutResponder) *fanoutFakeServer {
 	t.Helper()
@@ -163,9 +167,9 @@ func newFanoutFakeServer(t *testing.T, respond fanoutResponder) *fanoutFakeServe
 		f.calls.Add(1)
 
 		body, _ := io.ReadAll(r.Body)
-		address := extractAddressFromGraphQLBody(t, body)
+		address, after := extractAddressFromGraphQLBody(t, body)
 
-		status, payload := respond(address)
+		status, payload := respond(address, after)
 		if status == 0 && payload == "" {
 			status = http.StatusOK
 			payload = emptyBalancesGraphQLResponse()
@@ -178,10 +182,14 @@ func newFanoutFakeServer(t *testing.T, respond fanoutResponder) *fanoutFakeServe
 	return f
 }
 
-// extractAddressFromGraphQLBody pulls the "address" variable from a wbclient
-// GraphQL request body. wbclient's executeGraphQL marshals as
-// {"query": "...", "variables": {"address": "G..."}}.
-func extractAddressFromGraphQLBody(t *testing.T, body []byte) string {
+// extractAddressFromGraphQLBody pulls the "address" variable and the
+// optional "after" pagination cursor from a wbclient GraphQL request body.
+// wbclient's executeGraphQL marshals as {"query": "...", "variables":
+// {"address": "G...", "after": "cursor"}} — and per buildPaginationVars,
+// nil pagination args are omitted from the variables map entirely. So a
+// missing "after" key surfaces here as a nil pointer (first page), distinct
+// from a present-but-empty cursor.
+func extractAddressFromGraphQLBody(t *testing.T, body []byte) (string, *string) {
 	t.Helper()
 	var req struct {
 		Variables map[string]any `json:"variables"`
@@ -190,7 +198,13 @@ func extractAddressFromGraphQLBody(t *testing.T, body []byte) string {
 		t.Fatalf("unmarshal graphql request body: %v (body=%q)", err, string(body))
 	}
 	addr, _ := req.Variables["address"].(string)
-	return addr
+	var after *string
+	if v, ok := req.Variables["after"]; ok {
+		if s, ok := v.(string); ok {
+			after = &s
+		}
+	}
+	return addr, after
 }
 
 // emptyBalancesGraphQLResponse returns a GraphQL response with an empty
@@ -242,6 +256,39 @@ func graphqlErrorResponse(message string) string {
 	return fmt.Sprintf(`{"errors":[{"message":%q}]}`, message)
 }
 
+// paginatedNativeBalanceResponse returns a GraphQL response with one
+// NativeBalance edge plus a configurable PageInfo. Use it to assemble
+// multi-page replies when testing the SDK's internal pagination loop:
+// page 1 with hasNext=true and a non-empty endCursor, then a follow-up
+// request keyed off that cursor.
+func paginatedNativeBalanceResponse(amount, endCursor string, hasNext bool) string {
+	cursorJSON := "null"
+	if endCursor != "" {
+		cursorJSON = fmt.Sprintf("%q", endCursor)
+	}
+	return fmt.Sprintf(`{
+		"data": {
+			"accountByAddress": {
+				"balances": {
+					"edges": [{
+						"node": {
+							"__typename": "NativeBalance",
+							"balance": %q,
+							"tokenId": "native",
+							"tokenType": "NATIVE",
+							"minimumBalance": "1.0000000",
+							"buyingLiabilities": "0.0000000",
+							"sellingLiabilities": "0.0000000",
+							"lastModifiedLedger": 100
+						}
+					}],
+					"pageInfo": {"hasNextPage": %t, "endCursor": %s}
+				}
+			}
+		}
+	}`, amount, hasNext, cursorJSON)
+}
+
 // newTestWalletBackendService builds a walletBackendService directly,
 // bypassing NewWalletBackendService so we can wire a no-signer wbclient
 // pointed at the fake server. Tests live in the services package, so the
@@ -269,7 +316,7 @@ const (
 
 func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 	t.Run("success_path_preserves_input_order", func(t *testing.T) {
-		f := newFanoutFakeServer(t, func(address string) (int, string) {
+		f := newFanoutFakeServer(t, func(address string, _ *string) (int, string) {
 			switch address {
 			case addrA:
 				return http.StatusOK, nativeBalanceGraphQLResponse("100.0000000")
@@ -293,8 +340,40 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 		assert.Len(t, results[1].Balances, 1)
 	})
 
+	t.Run("multi_page_account_aggregates_all_pages_via_sdk_loop", func(t *testing.T) {
+		// Regression-defense for the GetAllAccountBalances swap: if someone
+		// later swaps it back to GetAccountBalances (the explicit-page form)
+		// without adding a loop, only the first page's balances would land
+		// in the response and this assertion would fail. Page 1 returns one
+		// balance with hasNext=true; page 2 returns a second balance with
+		// hasNext=false. The fake dispatches by the after cursor.
+		const cursor = "page-1-end-cursor"
+		f := newFanoutFakeServer(t, func(address string, after *string) (int, string) {
+			if address != addrA {
+				t.Fatalf("unexpected address %q", address)
+			}
+			if after == nil {
+				return http.StatusOK, paginatedNativeBalanceResponse("10.0000000", cursor, true)
+			}
+			if *after != cursor {
+				t.Fatalf("unexpected after cursor %q (want %q)", *after, cursor)
+			}
+			return http.StatusOK, paginatedNativeBalanceResponse("20.0000000", "", false)
+		})
+		svc := newTestWalletBackendService(f.server.URL, 10)
+
+		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA}, types.PUBLIC)
+		require.NoError(t, err)
+		results := raw.([]*types.AccountBalances)
+		require.Len(t, results, 1)
+		assert.Equal(t, addrA, results[0].Address)
+		assert.Nil(t, results[0].Error)
+		require.Len(t, results[0].Balances, 2, "SDK pagination loop must aggregate edges across pages")
+		assert.EqualValues(t, int64(2), f.calls.Load(), "exactly one request per page")
+	})
+
 	t.Run("per_account_graphql_error_does_not_fail_request", func(t *testing.T) {
-		f := newFanoutFakeServer(t, func(address string) (int, string) {
+		f := newFanoutFakeServer(t, func(address string, _ *string) (int, string) {
 			if address == addrA {
 				return http.StatusOK, graphqlErrorResponse("account not indexed")
 			}
@@ -319,7 +398,7 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 		// sentinel ErrAccountNotFound (PR #612). It must remain address-scoped
 		// — failing the whole batch when one of N requested accounts isn't
 		// indexed would defeat the multi-account endpoint's purpose.
-		f := newFanoutFakeServer(t, func(address string) (int, string) {
+		f := newFanoutFakeServer(t, func(address string, _ *string) (int, string) {
 			if address == addrA {
 				return http.StatusOK, accountNotFoundGraphQLResponse()
 			}
@@ -346,7 +425,7 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 		// is surfaced as wbclient.ErrAccountNotFound). 4xx must fail the
 		// whole request so monitoring sees the outage instead of a 200 of
 		// per-account error strings.
-		f := newFanoutFakeServer(t, func(address string) (int, string) {
+		f := newFanoutFakeServer(t, func(address string, _ *string) (int, string) {
 			if address == addrA {
 				return http.StatusNotFound, `not found`
 			}
@@ -364,7 +443,7 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 	})
 
 	t.Run("systemic_http_5xx_fails_request", func(t *testing.T) {
-		f := newFanoutFakeServer(t, func(address string) (int, string) {
+		f := newFanoutFakeServer(t, func(address string, _ *string) (int, string) {
 			if address == addrA {
 				return http.StatusServiceUnavailable, "wallet-backend down"
 			}
@@ -382,7 +461,7 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 	})
 
 	t.Run("systemic_transport_error_fails_request", func(t *testing.T) {
-		f := newFanoutFakeServer(t, func(address string) (int, string) {
+		f := newFanoutFakeServer(t, func(address string, _ *string) (int, string) {
 			return http.StatusOK, nativeBalanceGraphQLResponse("100.0000000")
 		})
 		svc := newTestWalletBackendService(f.server.URL, 10)
@@ -396,7 +475,7 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 	})
 
 	t.Run("zero_balances_marshals_as_empty_array_not_null", func(t *testing.T) {
-		f := newFanoutFakeServer(t, func(address string) (int, string) { return 0, "" }) // default → empty edges
+		f := newFanoutFakeServer(t, func(address string, _ *string) (int, string) { return 0, "" }) // default → empty edges
 		svc := newTestWalletBackendService(f.server.URL, 10)
 
 		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA}, types.PUBLIC)
@@ -420,7 +499,7 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 		barrier := make(chan struct{}, total)
 		release := make(chan struct{})
 
-		f := newFanoutFakeServer(t, func(address string) (int, string) {
+		f := newFanoutFakeServer(t, func(address string, _ *string) (int, string) {
 			// Signal arrival, then block until released. This forces the test
 			// to observe the true concurrent ceiling rather than the rate at
 			// which goroutines happen to be scheduled.
@@ -501,7 +580,7 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 	})
 
 	t.Run("request_level_timeout_returns_top_level_error", func(t *testing.T) {
-		f := newFanoutFakeServer(t, func(address string) (int, string) {
+		f := newFanoutFakeServer(t, func(address string, _ *string) (int, string) {
 			// Sleep longer than the test ctx timeout so the in-flight call
 			// observes ctx.Err() and bubbles it up.
 			time.Sleep(500 * time.Millisecond)
@@ -516,7 +595,7 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 	})
 
 	t.Run("duplicate_addresses_collapse_preserving_first_seen_order", func(t *testing.T) {
-		f := newFanoutFakeServer(t, func(address string) (int, string) {
+		f := newFanoutFakeServer(t, func(address string, _ *string) (int, string) {
 			return http.StatusOK, nativeBalanceGraphQLResponse("1.0000000")
 		})
 		svc := newTestWalletBackendService(f.server.URL, 10)
