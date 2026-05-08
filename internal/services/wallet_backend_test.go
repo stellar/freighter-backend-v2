@@ -105,6 +105,7 @@ func TestIsAddressScopedError(t *testing.T) {
 		{"context.DeadlineExceeded is systemic", context.DeadlineExceeded, false},
 		{"unclassified error is systemic", fmt.Errorf("dial tcp: connection refused"), false},
 		{"graphql_error is address-scoped", &metrics.UpstreamError{Kind: "graphql_error", Err: errors.New("x")}, true},
+		{"account_not_found is address-scoped", &metrics.UpstreamError{Kind: "account_not_found", Err: errors.New("x")}, true},
 		// All http_error codes are systemic. wbclient maps every HTTP >= 400
 		// to an http_error before parsing the GraphQL body; per-account
 		// "account not indexed" arrives as a 200 with accountByAddress:null,
@@ -197,6 +198,14 @@ func extractAddressFromGraphQLBody(t *testing.T, body []byte) string {
 // would respond for an account with no balances.
 func emptyBalancesGraphQLResponse() string {
 	return `{"data":{"accountByAddress":{"balances":{"edges":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}`
+}
+
+// accountNotFoundGraphQLResponse returns a 200 response with a null
+// accountByAddress. wallet-backend uses this shape (rather than a GraphQL
+// errors[] entry or an HTTP 404) to signal that the requested account has
+// not been indexed; wbclient surfaces it as ErrAccountNotFound.
+func accountNotFoundGraphQLResponse() string {
+	return `{"data":{"accountByAddress":null}}`
 }
 
 // nativeBalanceGraphQLResponse returns a GraphQL response with one
@@ -299,6 +308,31 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 		require.Len(t, results, 2)
 		require.NotNil(t, results[0].Error)
 		assert.Contains(t, *results[0].Error, "graphql_error")
+		assert.Empty(t, results[0].Balances) // initialized to non-nil empty slice
+		assert.Nil(t, results[1].Error)
+		assert.Len(t, results[1].Balances, 1)
+	})
+
+	t.Run("account_not_found_returns_per_account_error", func(t *testing.T) {
+		// wallet-backend signals "account not indexed" with a 200 response
+		// carrying accountByAddress:null. wbclient surfaces that as the typed
+		// sentinel ErrAccountNotFound (PR #612). It must remain address-scoped
+		// — failing the whole batch when one of N requested accounts isn't
+		// indexed would defeat the multi-account endpoint's purpose.
+		f := newFanoutFakeServer(t, func(address string) (int, string) {
+			if address == addrA {
+				return http.StatusOK, accountNotFoundGraphQLResponse()
+			}
+			return http.StatusOK, nativeBalanceGraphQLResponse("25.0000000")
+		})
+		svc := newTestWalletBackendService(f.server.URL, 10)
+
+		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA, addrB}, types.PUBLIC)
+		require.NoError(t, err)
+		results := raw.([]*types.AccountBalances)
+		require.Len(t, results, 2)
+		require.NotNil(t, results[0].Error)
+		assert.Contains(t, *results[0].Error, "account_not_found")
 		assert.Empty(t, results[0].Balances) // initialized to non-nil empty slice
 		assert.Nil(t, results[1].Error)
 		assert.Len(t, results[1].Balances, 1)

@@ -223,12 +223,20 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 	return results, nil
 }
 
-// classifyWBError wraps wbclient errors with UpstreamError based on the error
-// message shape. wbclient builds errors via fmt.Errorf without %w wrapping,
-// so we match on string content. The HTTP status code is parsed out of
-// "unexpected statusCode=N" messages so isAddressScopedError can branch on
-// 4xx vs 5xx and so the metrics layer gets a faithful sub-label.
+// classifyWBError wraps wbclient errors with UpstreamError so the metrics
+// layer gets a faithful sub-label and isAddressScopedError can branch on the
+// classification.
+//
+// wbclient.ErrAccountNotFound is the typed sentinel returned when
+// accountByAddress is null upstream — checked first since it's the
+// preferred classification path. The remaining matchers fall back to
+// substring inspection because wbclient builds those errors via fmt.Errorf
+// without %w wrapping; tracking issue upstream to add typed sentinels for
+// auth/rate-limit/transport (see plan).
 func classifyWBError(err error) error {
+	if errors.Is(err, wbclient.ErrAccountNotFound) {
+		return &metrics.UpstreamError{Kind: "account_not_found", Err: err}
+	}
 	msg := err.Error()
 	if strings.Contains(msg, "GraphQL error:") {
 		return &metrics.UpstreamError{Kind: "graphql_error", Err: err}
@@ -252,10 +260,11 @@ func classifyWBError(err error) error {
 //
 // Policy:
 //
-//	context.Canceled / DeadlineExceeded -> systemic (request-wide)
-//	Unclassified errors                 -> systemic (likely transport/signing)
-//	UpstreamError{Kind:"graphql_error"} -> address-scoped (server-side resolver error scoped to this account)
-//	UpstreamError{Kind:"http_error"}    -> systemic (every status — see comment below)
+//	context.Canceled / DeadlineExceeded   -> systemic (request-wide)
+//	Unclassified errors                   -> systemic (likely transport/signing)
+//	UpstreamError{Kind:"graphql_error"}   -> address-scoped (server-side resolver error scoped to this account)
+//	UpstreamError{Kind:"account_not_found"} -> address-scoped (wbclient.ErrAccountNotFound for accountByAddress:null)
+//	UpstreamError{Kind:"http_error"}      -> systemic (every status — see comment below)
 func isAddressScopedError(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
@@ -265,7 +274,7 @@ func isAddressScopedError(err error) bool {
 		return false
 	}
 	switch upErr.Kind {
-	case "graphql_error":
+	case "graphql_error", "account_not_found":
 		return true
 	case "http_error":
 		// wbclient POSTs every call to /graphql/query and translates any
