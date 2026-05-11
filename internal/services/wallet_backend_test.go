@@ -92,41 +92,6 @@ func TestGetHealth_HTTPErrorClassification(t *testing.T) {
 	assert.Equal(t, 503, upErr.Code)
 }
 
-// TestIsAddressScopedError walks the policy table from
-// walletBackendService.GetBalancesByAccountAddresses: which error classes
-// stay per-account vs which ones bubble up as a top-level 5xx.
-func TestIsAddressScopedError(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"context.Canceled is systemic", context.Canceled, false},
-		{"context.DeadlineExceeded is systemic", context.DeadlineExceeded, false},
-		{"unclassified error is systemic", fmt.Errorf("dial tcp: connection refused"), false},
-		{"graphql_error is address-scoped", &metrics.UpstreamError{Kind: "graphql_error", Err: errors.New("x")}, true},
-		{"account_not_found is address-scoped", &metrics.UpstreamError{Kind: "account_not_found", Err: errors.New("x")}, true},
-		// All http_error codes are systemic. wbclient maps every HTTP >= 400
-		// to an http_error before parsing the GraphQL body; per-account
-		// "account not indexed" arrives as a 200 with accountByAddress:null,
-		// surfaced separately by the SDK as ErrAccountNotFound, not a 4xx.
-		{"http 400 is systemic (malformed query)", &metrics.UpstreamError{Kind: "http_error", Code: 400, Err: errors.New("x")}, false},
-		{"http 401 is systemic (auth failure)", &metrics.UpstreamError{Kind: "http_error", Code: 401, Err: errors.New("x")}, false},
-		{"http 403 is systemic (forbidden)", &metrics.UpstreamError{Kind: "http_error", Code: 403, Err: errors.New("x")}, false},
-		{"http 404 is systemic (wrong base URL or missing route)", &metrics.UpstreamError{Kind: "http_error", Code: 404, Err: errors.New("x")}, false},
-		{"http 422 is systemic (unprocessable query)", &metrics.UpstreamError{Kind: "http_error", Code: 422, Err: errors.New("x")}, false},
-		{"http 429 is systemic (rate limited)", &metrics.UpstreamError{Kind: "http_error", Code: 429, Err: errors.New("x")}, false},
-		{"http 503 is systemic (upstream outage)", &metrics.UpstreamError{Kind: "http_error", Code: 503, Err: errors.New("x")}, false},
-		{"http 0 (unparsed) is systemic", &metrics.UpstreamError{Kind: "http_error", Code: 0, Err: errors.New("x")}, false},
-		{"unknown UpstreamError kind is systemic", &metrics.UpstreamError{Kind: "weird", Err: errors.New("x")}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isAddressScopedError(tt.err))
-		})
-	}
-}
-
 // fanoutFakeServer encapsulates an httptest server that responds to wbclient
 // GetAccountBalances calls. The handler dispatches based on the requested
 // address (parsed out of the GraphQL variables) so a single test can mix
@@ -372,24 +337,29 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 		assert.EqualValues(t, int64(2), f.calls.Load(), "exactly one request per page")
 	})
 
-	t.Run("per_account_graphql_error_does_not_fail_request", func(t *testing.T) {
+	t.Run("graphql_error_fails_request_systemically", func(t *testing.T) {
+		// A GraphQL errors[] payload from the server is most likely systemic
+		// (schema/query/resolver bug affecting every account in the fan-out)
+		// and the SDK exposes no structured signal to prove account-locality
+		// — only the first error's message is stringified. Surface as a
+		// top-level error so monitoring sees the outage instead of a 200 of
+		// per-account error strings. The one demonstrably address-scoped
+		// case (accountByAddress:null) is the typed wbclient.ErrAccountNotFound
+		// sentinel, covered by the next subtest.
 		f := newFanoutFakeServer(t, func(address string, _ *string) (int, string) {
 			if address == addrA {
-				return http.StatusOK, graphqlErrorResponse("account not indexed")
+				return http.StatusOK, graphqlErrorResponse("schema validation failed")
 			}
 			return http.StatusOK, nativeBalanceGraphQLResponse("50.0000000")
 		})
 		svc := newTestWalletBackendService(f.server.URL, 10)
 
 		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA, addrB}, types.PUBLIC)
-		require.NoError(t, err)
-		results := raw.([]*types.AccountBalances)
-		require.Len(t, results, 2)
-		require.NotNil(t, results[0].Error)
-		assert.Contains(t, *results[0].Error, "graphql_error")
-		assert.Empty(t, results[0].Balances) // initialized to non-nil empty slice
-		assert.Nil(t, results[1].Error)
-		assert.Len(t, results[1].Balances, 1)
+		require.Error(t, err)
+		assert.Nil(t, raw)
+		var upErr *metrics.UpstreamError
+		require.True(t, errors.As(err, &upErr))
+		assert.Equal(t, "graphql_error", upErr.Kind)
 	})
 
 	t.Run("account_not_found_returns_per_account_error", func(t *testing.T) {
@@ -411,7 +381,9 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 		results := raw.([]*types.AccountBalances)
 		require.Len(t, results, 2)
 		require.NotNil(t, results[0].Error)
-		assert.Contains(t, *results[0].Error, "account_not_found")
+		// The per-account error string is the raw wbclient error, whose
+		// chain contains the typed sentinel's "account not found" message.
+		assert.Contains(t, *results[0].Error, "account not found")
 		assert.Empty(t, results[0].Balances) // initialized to non-nil empty slice
 		assert.Nil(t, results[1].Error)
 		assert.Len(t, results[1].Balances, 1)

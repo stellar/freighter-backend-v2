@@ -199,16 +199,20 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 				Balances: []wbtypes.Balance{},
 			}
 			if fetchErr != nil {
-				classified := classifyWBError(fetchErr)
-				if !isAddressScopedError(classified) {
-					// Surface systemic failures at the top level. Folding them
-					// into a per-account Error would mask outages from
-					// monitoring (a 200 with N error strings looks healthy).
-					return classified
+				if !errors.Is(fetchErr, wbclient.ErrAccountNotFound) {
+					// Everything except the typed account-not-found sentinel
+					// is systemic. wbclient exposes no structured signal that
+					// proves a GraphQL errors[] entry or an HTTP 4xx is
+					// account-local — most such failures (schema/query bugs,
+					// auth/signing, rate limits, transport, ctx cancellation,
+					// 5xx) affect every account in the fan-out the same way.
+					// Surface them at the top level so monitoring sees the
+					// outage instead of a 200 of per-account error strings.
+					return classifyWBError(fetchErr)
 				}
 				logger.ErrorWithContext(gctx, "fetching account balances",
-					"address", addr, "error", classified)
-				msg := classified.Error()
+					"address", addr, "error", fetchErr)
+				msg := fetchErr.Error()
 				ab.Error = &msg
 			} else if len(balances) > 0 {
 				ab.Balances = balances
@@ -223,20 +227,13 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 	return results, nil
 }
 
-// classifyWBError wraps wbclient errors with UpstreamError so the metrics
-// layer gets a faithful sub-label and isAddressScopedError can branch on the
-// classification.
-//
-// wbclient.ErrAccountNotFound is the typed sentinel returned when
-// accountByAddress is null upstream — checked first since it's the
-// preferred classification path. The remaining matchers fall back to
-// substring inspection because wbclient builds those errors via fmt.Errorf
-// without %w wrapping; tracking issue upstream to add typed sentinels for
-// auth/rate-limit/transport (see plan).
+// classifyWBError wraps a systemic wbclient error with an UpstreamError so
+// metrics.ClassifyError can emit a faithful sub-label
+// (graphql_error / http_error[:code]). The typed account-not-found case is
+// address-scoped and handled at the call site, so it is intentionally not
+// matched here. Falls back to substring inspection because wbclient builds
+// these errors via fmt.Errorf without %w wrapping.
 func classifyWBError(err error) error {
-	if errors.Is(err, wbclient.ErrAccountNotFound) {
-		return &metrics.UpstreamError{Kind: "account_not_found", Err: err}
-	}
 	msg := err.Error()
 	if strings.Contains(msg, "GraphQL error:") {
 		return &metrics.UpstreamError{Kind: "graphql_error", Err: err}
@@ -251,41 +248,4 @@ func classifyWBError(err error) error {
 		return &metrics.UpstreamError{Kind: "http_error", Code: code, Err: err}
 	}
 	return err
-}
-
-// isAddressScopedError reports whether err describes a failure specific to a
-// single address (so it can be captured in AccountBalances.Error and the
-// request can still return 200) rather than a systemic problem that should
-// fail the whole request.
-//
-// Policy:
-//
-//	context.Canceled / DeadlineExceeded   -> systemic (request-wide)
-//	Unclassified errors                   -> systemic (likely transport/signing)
-//	UpstreamError{Kind:"graphql_error"}   -> address-scoped (server-side resolver error scoped to this account)
-//	UpstreamError{Kind:"account_not_found"} -> address-scoped (wbclient.ErrAccountNotFound for accountByAddress:null)
-//	UpstreamError{Kind:"http_error"}      -> systemic (every status — see comment below)
-func isAddressScopedError(err error) bool {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	var upErr *metrics.UpstreamError
-	if !errors.As(err, &upErr) {
-		return false
-	}
-	switch upErr.Kind {
-	case "graphql_error", "account_not_found":
-		return true
-	case "http_error":
-		// wbclient POSTs every call to /graphql/query and translates any
-		// HTTP >= 400 into an http_error before parsing the GraphQL body.
-		// There is no 4xx code that means "this account doesn't exist" —
-		// that signal arrives as a 200 with accountByAddress:null. So every
-		// http_error is systemic: wrong base URL (404), bad query body
-		// (400/422), auth/signing (401/403), rate limit (429), or an
-		// upstream outage (5xx). Failing the whole request lets monitoring
-		// see real outages instead of a 200 of per-account error strings.
-		return false
-	}
-	return false
 }
