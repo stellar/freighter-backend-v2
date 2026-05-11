@@ -15,11 +15,13 @@ import (
 //
 // Wire format: address is the canonical Stellar account ID, balances is always a
 // non-nil slice (an account with no balances marshals to "balances": []), and
-// error — when present — describes an address-scoped failure (GraphQL error or
-// HTTP 4xx from wallet-backend) that did not warrant failing the entire request.
-// Systemic failures (HTTP 5xx, transport, signing, request-level cancellation)
-// surface as a top-level error from the service rather than a per-account Error
-// string, so monitoring sees real outages instead of a 200 of error strings.
+// error — when present — carries the wallet-backend account-not-found message
+// for that address (the typed wbclient.ErrAccountNotFound sentinel surfaced as
+// accountByAddress:null upstream). This is the only address-scoped failure.
+// Every other failure (GraphQL errors[] from the server, HTTP 4xx/5xx,
+// transport, signing, request-level cancellation) surfaces as a top-level
+// error from the service rather than a per-account Error string, so
+// monitoring sees real outages instead of a 200 of error strings.
 type AccountBalances struct {
 	Address  string            `json:"address"`
 	Balances []wbtypes.Balance `json:"balances"`

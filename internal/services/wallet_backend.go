@@ -151,13 +151,18 @@ func (w *walletBackendService) configureNetworkClient(network string) *wbclient.
 //
 //   - Duplicate input addresses collapse to a single result while preserving
 //     first-seen order.
-//   - Address-scoped failures (GraphQL errors, HTTP 4xx) become a per-account
-//     Error string in the returned []*types.AccountBalances. Other accounts
-//     in the same request still return their balances.
-//   - Systemic failures (HTTP 5xx, transport, signing, request-level
-//     cancellation/timeout) are returned as a top-level error so the handler
-//     emits a 5xx and monitoring sees the outage rather than a 200 of
-//     per-account error strings.
+//   - The single address-scoped failure is the typed
+//     wbclient.ErrAccountNotFound sentinel (accountByAddress:null upstream):
+//     it becomes a per-account Error string in the returned
+//     []*types.AccountBalances while other accounts in the same request
+//     still return their balances.
+//   - Every other failure is systemic and returned as a top-level error so
+//     the handler emits a 5xx and monitoring sees the outage rather than a
+//     200 of per-account error strings. This includes GraphQL errors[]
+//     from the server (no structured signal to prove account-locality —
+//     schema/query/resolver bugs hit every account the same way), HTTP
+//     4xx/5xx, transport failures, signing failures, and request-level
+//     cancellation/timeout.
 //
 // The returned interface{} is a []*types.AccountBalances; the interface type
 // is preserved for compatibility with the existing handler signature.
