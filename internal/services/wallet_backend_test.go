@@ -1,4 +1,4 @@
-// ABOUTME: Unit tests for wallet backend service error classification, address-scope policy, and balances fan-out.
+// ABOUTME: Unit tests for the wallet-backend service constructor, error classification, and balances fan-out.
 // ABOUTME: Uses httptest.Server fakes to exercise GetBalancesByAccountAddresses without a real wallet-backend.
 package services
 
@@ -75,21 +75,19 @@ func TestClassifyWBError(t *testing.T) {
 	}
 }
 
-func TestGetHealth_HTTPErrorClassification(t *testing.T) {
-	// Verify that the UpstreamError created by GetHealth for non-200 responses
-	// classifies correctly with the HTTP status code as a sub-label.
-	healthErr := &metrics.UpstreamError{
-		Kind: "http_error",
-		Code: 503,
-		Err:  fmt.Errorf("health endpoint returned status 503"),
-	}
+func TestNewWalletBackendService_ValidatesConcurrency(t *testing.T) {
+	// Zero/negative concurrency is a misconfiguration that would silently
+	// disable the fan-out (errgroup with SetLimit(0) blocks forever), so the
+	// constructor must reject it at startup.
+	_, err := NewWalletBackendService("", "", "", "", 0, nil)
+	require.Error(t, err, "0 must be rejected")
+	assert.Contains(t, err.Error(), "must be > 0")
 
-	assert.Equal(t, "http_error:503", metrics.ClassifyError(healthErr))
+	_, err = NewWalletBackendService("", "", "", "", -1, nil)
+	require.Error(t, err, "negative values must be rejected")
 
-	var upErr *metrics.UpstreamError
-	require.True(t, errors.As(healthErr, &upErr))
-	assert.Equal(t, "http_error", upErr.Kind)
-	assert.Equal(t, 503, upErr.Code)
+	_, err = NewWalletBackendService("", "", "", "", 1, nil)
+	require.NoError(t, err, "positive value must be accepted")
 }
 
 // fanoutFakeServer encapsulates an httptest server that responds to wbclient
@@ -107,9 +105,7 @@ type fanoutFakeServer struct {
 // given requested address and pagination cursor. The after argument is nil
 // for first-page requests (per wbclient's buildPaginationVars, nil
 // pagination vars are omitted from the GraphQL request map entirely, so a
-// missing "after" key surfaces as nil here — not pointer-to-empty). If body
-// is empty and status is 0 the fake writes a default empty-balances
-// success response.
+// missing "after" key surfaces as nil here — not pointer-to-empty).
 type fanoutResponder func(address string, after *string) (status int, body string)
 
 func newFanoutFakeServer(t *testing.T, respond fanoutResponder) *fanoutFakeServer {
@@ -135,10 +131,6 @@ func newFanoutFakeServer(t *testing.T, respond fanoutResponder) *fanoutFakeServe
 		address, after := extractAddressFromGraphQLBody(t, body)
 
 		status, payload := respond(address, after)
-		if status == 0 && payload == "" {
-			status = http.StatusOK
-			payload = emptyBalancesGraphQLResponse()
-		}
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(payload))
 	})
@@ -276,7 +268,6 @@ const (
 	// fake can dispatch on.
 	addrA = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
 	addrB = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBLNG"
-	addrC = "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCK6T"
 )
 
 func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
@@ -447,7 +438,9 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 	})
 
 	t.Run("zero_balances_marshals_as_empty_array_not_null", func(t *testing.T) {
-		f := newFanoutFakeServer(t, func(address string, _ *string) (int, string) { return 0, "" }) // default → empty edges
+		f := newFanoutFakeServer(t, func(_ string, _ *string) (int, string) {
+			return http.StatusOK, emptyBalancesGraphQLResponse()
+		})
 		svc := newTestWalletBackendService(f.server.URL, 10)
 
 		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA}, types.PUBLIC)
