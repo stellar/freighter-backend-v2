@@ -1015,6 +1015,205 @@ func TestGetAccountOperations(t *testing.T) {
 	})
 }
 
+func TestGetAccountStateChanges(t *testing.T) {
+	const addr = "GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"
+
+	// happyScBody is the canonical single-state-change response reused by several
+	// sub-tests that need a non-empty result. Uses StandardBalanceChange — the
+	// simplest concrete type — so the __typename discriminator is exercised.
+	const happyScBody = `{"data":{"accountByAddress":{"stateChanges":{` +
+		`"edges":[{"cursor":"sc-1","node":{` +
+		`"__typename":"StandardBalanceChange",` +
+		`"type":"BALANCE","reason":"CREDIT",` +
+		`"ingestedAt":"2026-01-01T00:00:01Z",` +
+		`"ledgerCreatedAt":"2026-01-01T00:00:00Z",` +
+		`"ledgerNumber":42,` +
+		`"standardBalanceTokenId":"native","amount":"100"` +
+		`}}],` +
+		`"pageInfo":{"startCursor":"sc-1","endCursor":"sc-1","hasNextPage":false,"hasPreviousPage":false}` +
+		`}}}}`
+
+	t.Run("happy path returns paginated response and filter args are absent", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, vars map[string]interface{}) (int, string) {
+			// direction=next → first+after; no last/before
+			assert.EqualValues(t, 20, vars["first"])
+			assert.Equal(t, "cur-prev", vars["after"])
+			_, hasLast := vars["last"]
+			_, hasBefore := vars["before"]
+			assert.False(t, hasLast)
+			assert.False(t, hasBefore)
+			// The four state-change filter args must NOT be sent when they are nil.
+			_, hasTransactionHash := vars["transactionHash"]
+			_, hasOperationId := vars["operationId"]
+			_, hasCategory := vars["category"]
+			_, hasReason := vars["reason"]
+			assert.False(t, hasTransactionHash, "transactionHash must be absent when nil")
+			assert.False(t, hasOperationId, "operationId must be absent when nil")
+			assert.False(t, hasCategory, "category must be absent when nil")
+			assert.False(t, hasReason, "reason must be absent when nil")
+			return 200, happyScBody
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		cursor := "cur-prev"
+		got, err := svc.GetAccountStateChanges(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{
+			Limit:     20,
+			Cursor:    &cursor,
+			Direction: types.PaginationDirectionNext,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Len(t, got.Data, 1)
+		assert.Equal(t, wbtypes.StateChangeCategoryBalance, got.Data[0].GetType())
+		assert.Equal(t, wbtypes.StateChangeReasonCredit, got.Data[0].GetReason())
+		assert.False(t, got.Pagination.HasNext)
+		assert.False(t, got.Pagination.HasPrevious)
+	})
+
+	t.Run("direction=prev translates to last/before", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, vars map[string]interface{}) (int, string) {
+			assert.EqualValues(t, 5, vars["last"])
+			assert.Equal(t, "cur-end", vars["before"])
+			_, hasFirst := vars["first"]
+			_, hasAfter := vars["after"]
+			assert.False(t, hasFirst)
+			assert.False(t, hasAfter)
+			return 200, `{"data":{"accountByAddress":{"stateChanges":{"edges":[],"pageInfo":{"hasNextPage":false,"hasPreviousPage":false}}}}}`
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		cursor := "cur-end"
+		_, err := svc.GetAccountStateChanges(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{
+			Limit:     5,
+			Cursor:    &cursor,
+			Direction: types.PaginationDirectionPrev,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("accountByAddress null returns ErrAccountNotFound", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 200, `{"data":{"accountByAddress":null}}`
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		_, err := svc.GetAccountStateChanges(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, wbclient.ErrAccountNotFound))
+	})
+
+	t.Run("GraphQL errors are wrapped as graphql_error", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 200, `{"errors":[{"message":"schema bug"}]}`
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		_, err := svc.GetAccountStateChanges(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
+		require.Error(t, err)
+		var upErr *metrics.UpstreamError
+		require.True(t, errors.As(err, &upErr))
+		assert.Equal(t, "graphql_error", upErr.Kind)
+	})
+
+	t.Run("HTTP 503 from upstream is wrapped as http_error with code", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 503, `service unavailable`
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		_, err := svc.GetAccountStateChanges(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
+		require.Error(t, err)
+		var upErr *metrics.UpstreamError
+		require.True(t, errors.As(err, &upErr))
+		assert.Equal(t, "http_error", upErr.Kind)
+		assert.Equal(t, 503, upErr.Code)
+	})
+
+	t.Run("null stateChanges connection on existing account returns empty page", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 200, `{"data":{"accountByAddress":{"stateChanges":null}}}`
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		got, err := svc.GetAccountStateChanges(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, []wbtypes.StateChangeNode{}, got.Data)
+		assert.False(t, got.Pagination.HasNext)
+		assert.False(t, got.Pagination.HasPrevious)
+		assert.Nil(t, got.Pagination.NextCursor)
+		assert.Nil(t, got.Pagination.PrevCursor)
+	})
+
+	t.Run("edges with nil node entries are skipped", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 200, `{"data":{"accountByAddress":{"stateChanges":{` +
+				`"edges":[` +
+				`{"cursor":"a","node":null},` +
+				`{"cursor":"b","node":{"__typename":"StandardBalanceChange","type":"BALANCE","reason":"CREDIT","ingestedAt":"2026-01-01T00:00:01Z","ledgerCreatedAt":"2026-01-01T00:00:00Z","ledgerNumber":42,"standardBalanceTokenId":"native","amount":"100"}}` +
+				`],` +
+				`"pageInfo":{"hasNextPage":false,"hasPreviousPage":false}` +
+				`}}}}`
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		got, err := svc.GetAccountStateChanges(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Len(t, got.Data, 1)
+		assert.Equal(t, wbtypes.StateChangeCategoryBalance, got.Data[0].GetType())
+	})
+
+	t.Run("nil edges slice returns empty page", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 200, `{"data":{"accountByAddress":{"stateChanges":{` +
+				`"edges":null,` +
+				`"pageInfo":{"hasNextPage":false,"hasPreviousPage":false}` +
+				`}}}}`
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		got, err := svc.GetAccountStateChanges(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, []wbtypes.StateChangeNode{}, got.Data)
+	})
+
+	t.Run("ErrAccountNotFound does not increment ErrorsTotal", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 200, `{"data":{"accountByAddress":null}}`
+		})
+		defer server.Close()
+
+		reg := prometheus.NewRegistry()
+		svcMetrics := metrics.NewService(reg)
+		svc := newTestWalletBackendServiceWithMetrics(t, server.URL, svcMetrics)
+		_, err := svc.GetAccountStateChanges(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, wbclient.ErrAccountNotFound))
+
+		assert.Equal(t, float64(1), testutilCounterValue(t, reg, "freighter_service_calls_total", map[string]string{"service": "wallet-backend", "method": "GetAccountStateChanges", "network": types.PUBLIC}))
+		assert.Equal(t, float64(0), testutilCounterValue(t, reg, "freighter_service_errors_total", nil))
+	})
+}
+
 // newTestWalletBackendService builds a walletBackendService configured against the
 // given pubnet URL, with no metrics (test helper for non-metrics tests).
 func newTestWalletBackendService(t *testing.T, pubnetURL string) types.WalletBackendService {

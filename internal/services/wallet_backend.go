@@ -297,6 +297,16 @@ func emptyOpPage() *types.PaginatedResponse[*wbtypes.Operation] {
 	}
 }
 
+// emptyStateChangePage is the empty-page response shape used when wallet-backend
+// returns a null stateChanges connection on an existing account (schema-valid
+// per wallet-backend PR #616 — distinct from ErrAccountNotFound).
+func emptyStateChangePage() *types.PaginatedResponse[wbtypes.StateChangeNode] {
+	return &types.PaginatedResponse[wbtypes.StateChangeNode]{
+		Data:       []wbtypes.StateChangeNode{},
+		Pagination: types.PaginationInfo{},
+	}
+}
+
 // GetAccountTransactions returns a paginated list of transactions for the given
 // account address and network. It translates the freighter-backend pagination
 // params into the (first/last/after/before) tuple expected by the wbclient SDK
@@ -374,9 +384,43 @@ func (w *walletBackendService) GetAccountOperations(ctx context.Context, address
 	}, nil
 }
 
-// GetAccountStateChanges is a temporary stub replaced by the real implementation in Task 8 (TDD).
-func (w *walletBackendService) GetAccountStateChanges(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[wbtypes.StateChangeNode], error) {
-	return nil, fmt.Errorf("not implemented")
+// GetAccountStateChanges returns one page of an account's state changes from
+// wallet-backend. See GetAccountTransactions for the shared semantics around
+// ErrAccountNotFound, null-connection-as-empty-page, and nil-node skipping.
+// The SDK's state-change-specific filter args (transactionHash, operationID,
+// category, reason) are passed as nil — v1 does not expose them.
+func (w *walletBackendService) GetAccountStateChanges(ctx context.Context, address, network string, p types.AccountHistoryParams) (_ *types.PaginatedResponse[wbtypes.StateChangeNode], err error) {
+	start := time.Now()
+	defer func() { w.recordWBCall("GetAccountStateChanges", network, start, err) }()
+
+	client := w.configureNetworkClient(network)
+	if client == nil {
+		return nil, fmt.Errorf("wallet backend client not configured for network: %s", network)
+	}
+
+	first, last, after, before := translateParams(p)
+	conn, err := client.GetAccountStateChanges(ctx, address, nil, nil, nil, nil, p.Since, p.Until, first, last, after, before)
+	if err != nil {
+		if errors.Is(err, wbclient.ErrAccountNotFound) {
+			return nil, err
+		}
+		return nil, classifyWBError(err)
+	}
+	if conn == nil {
+		return emptyStateChangePage(), nil
+	}
+
+	nodes := make([]wbtypes.StateChangeNode, 0, len(conn.Edges))
+	for _, e := range conn.Edges {
+		if e.Node == nil {
+			continue
+		}
+		nodes = append(nodes, e.Node)
+	}
+	return &types.PaginatedResponse[wbtypes.StateChangeNode]{
+		Data:       nodes,
+		Pagination: toPaginationInfo(conn.PageInfo),
+	}, nil
 }
 
 // classifyWBError wraps a systemic wbclient error with an UpstreamError so
