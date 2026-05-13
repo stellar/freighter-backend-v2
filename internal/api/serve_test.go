@@ -23,13 +23,33 @@ func TestNewApiServer(t *testing.T) {
 	assert.Equal(t, cfg, s.cfg)
 }
 
-func TestApiServer_initServices_Error(t *testing.T) {
+func TestApiServer_initServices_Success(t *testing.T) {
+	// Minimal but valid config: WalletBackendBalanceConcurrency must be > 0
+	// because NewWalletBackendService rejects non-positive values to avoid
+	// errgroup.SetLimit(0)/(-1) surprises.
 	s := &ApiServer{
-		cfg:        &config.Config{RedisConfig: config.RedisConfig{Host: "", Port: 0}},
+		cfg: &config.Config{
+			RedisConfig: config.RedisConfig{Host: "", Port: 0},
+			AppConfig:   config.AppConfig{WalletBackendBalanceConcurrency: 10},
+		},
 		appMetrics: metrics.NewMetrics(prometheus.NewRegistry()),
 	}
 	err := s.initServices()
 	assert.NoError(t, err)
+}
+
+func TestApiServer_initServices_RejectsNonPositiveBalanceConcurrency(t *testing.T) {
+	for _, n := range []int{0, -1} {
+		s := &ApiServer{
+			cfg: &config.Config{
+				AppConfig: config.AppConfig{WalletBackendBalanceConcurrency: n},
+			},
+			appMetrics: metrics.NewMetrics(prometheus.NewRegistry()),
+		}
+		err := s.initServices()
+		require.Error(t, err, "expected error for WalletBackendBalanceConcurrency=%d", n)
+		assert.Contains(t, err.Error(), "maxBalanceConcurrency")
+	}
 }
 
 func TestApiServer_initHandlers(t *testing.T) {

@@ -27,6 +27,12 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.AppConfig.MaxLedgerKeyAddresses; n > services.MaxLedgerEntryKeys {
 				return fmt.Errorf("--max-ledger-key-addresses=%d exceeds upstream Stellar RPC ceiling of %d keys per getLedgerEntries call", n, services.MaxLedgerEntryKeys)
 			}
+			// Reject non-positive values explicitly: errgroup.SetLimit(0) would block
+			// every goroutine, and SetLimit(-1) means unbounded — neither is what an
+			// operator who passes 0 or a negative flag would expect.
+			if n := s.Cfg.AppConfig.WalletBackendBalanceConcurrency; n <= 0 {
+				return fmt.Errorf("--wallet-backend-balance-concurrency=%d must be positive", n)
+			}
 			return nil
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -53,6 +59,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().Int64Var(&s.Cfg.AppConfig.MaxRequestBodySize, "max-request-body-size", 1<<20, "Maximum request body size in bytes (default: 1MB)")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxBalanceAddresses, "max-balance-addresses", 100, "Maximum number of addresses allowed in account balances request")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxLedgerKeyAddresses, "max-ledger-key-addresses", 100, "Maximum number of public keys allowed in a ledger-key/accounts request")
+	cmd.Flags().IntVar(&s.Cfg.AppConfig.WalletBackendBalanceConcurrency, "wallet-backend-balance-concurrency", 10, "Per-request maximum number of concurrent wallet-backend balance fetches (the /accounts/balances handler fans out to one accountByAddress call per address)")
 
 	// RPC Config
 	cmd.Flags().StringVar(&s.Cfg.RpcConfig.PubnetRpcUrl, "pubnet-rpc-url", "", "The Pubnet URL of the Pubnet RPC instance")

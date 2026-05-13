@@ -1,15 +1,23 @@
+// ABOUTME: Wallet-backend service implementation that wraps the wbclient SDK and exposes the methods used by API handlers.
+// ABOUTME: Hosts the multi-account balances fan-out: per-request bounded concurrency over the per-address GraphQL query.
 package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/stellar/wallet-backend/pkg/wbclient"
 	"github.com/stellar/wallet-backend/pkg/wbclient/auth"
+	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
+	"golang.org/x/sync/errgroup"
 
+	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
@@ -18,14 +26,27 @@ const (
 	walletBackendServiceName = "wallet-backend"
 )
 
+// httpStatusCodeRegex extracts the numeric status code from wbclient's
+// "unexpected statusCode=N, body=..." error string. wbclient builds the message
+// with fmt.Errorf and no %w wrapping, so string parsing is the only option.
+var httpStatusCodeRegex = regexp.MustCompile(`statusCode=(\d{3})`)
+
 type walletBackendService struct {
-	pubnetClient  *wbclient.Client
-	testnetClient *wbclient.Client
-	httpClient    *http.Client
-	svcMetrics    *metrics.Service
+	pubnetClient          *wbclient.Client
+	testnetClient         *wbclient.Client
+	httpClient            *http.Client
+	svcMetrics            *metrics.Service
+	maxBalanceConcurrency int
 }
 
-func NewWalletBackendService(pubnetUrl, testnetUrl, pubnetSigningKey, testnetSigningKey string, m *metrics.Service) (types.WalletBackendService, error) {
+// NewWalletBackendService constructs a wallet-backend service backed by the
+// shared wbclient HTTP client. maxBalanceConcurrency caps the per-request
+// goroutine count for the multi-account balances fan-out and must be > 0.
+func NewWalletBackendService(pubnetUrl, testnetUrl, pubnetSigningKey, testnetSigningKey string, maxBalanceConcurrency int, m *metrics.Service) (types.WalletBackendService, error) {
+	if maxBalanceConcurrency <= 0 {
+		return nil, fmt.Errorf("maxBalanceConcurrency must be > 0, got %d", maxBalanceConcurrency)
+	}
+
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
@@ -67,10 +88,11 @@ func NewWalletBackendService(pubnetUrl, testnetUrl, pubnetSigningKey, testnetSig
 	}
 
 	return &walletBackendService{
-		pubnetClient:  pubnetClient,
-		testnetClient: testnetClient,
-		httpClient:    httpClient,
-		svcMetrics:    m,
+		pubnetClient:          pubnetClient,
+		testnetClient:         testnetClient,
+		httpClient:            httpClient,
+		svcMetrics:            m,
+		maxBalanceConcurrency: maxBalanceConcurrency,
 	}, nil
 }
 
@@ -123,6 +145,27 @@ func (w *walletBackendService) configureNetworkClient(network string) *wbclient.
 	return w.pubnetClient
 }
 
+// GetBalancesByAccountAddresses fans out one wbclient.GetAllAccountBalances call
+// per unique address using a per-request errgroup bounded by
+// maxBalanceConcurrency.
+//
+//   - Duplicate input addresses collapse to a single result while preserving
+//     first-seen order.
+//   - The single address-scoped failure is the typed
+//     wbclient.ErrAccountNotFound sentinel (accountByAddress:null upstream):
+//     it becomes a per-account Error string in the returned
+//     []*types.AccountBalances while other accounts in the same request
+//     still return their balances.
+//   - Every other failure is systemic and returned as a top-level error so
+//     the handler emits a 5xx and monitoring sees the outage rather than a
+//     200 of per-account error strings. This includes GraphQL errors[]
+//     from the server (no structured signal to prove account-locality —
+//     schema/query/resolver bugs hit every account the same way), HTTP
+//     4xx/5xx, transport failures, signing failures, and request-level
+//     cancellation/timeout.
+//
+// The returned interface{} is a []*types.AccountBalances; the interface type
+// is preserved for compatibility with the existing handler signature.
 func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context, addresses []string, network string) (_ interface{}, err error) {
 	start := time.Now()
 	defer func() {
@@ -134,23 +177,80 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 		return nil, fmt.Errorf("wallet backend client not configured for network: %s", network)
 	}
 
-	balances, err := client.GetBalancesByAccountAddresses(ctx, addresses)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get balances from wallet backend: %w", classifyWBError(err))
+	// Dedupe while preserving first-seen order.
+	seen := make(map[string]struct{}, len(addresses))
+	unique := make([]string, 0, len(addresses))
+	for _, a := range addresses {
+		if _, ok := seen[a]; ok {
+			continue
+		}
+		seen[a] = struct{}{}
+		unique = append(unique, a)
 	}
 
-	return balances, nil
+	results := make([]*types.AccountBalances, len(unique))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(w.maxBalanceConcurrency)
+
+	for i, addr := range unique {
+		g.Go(func() error {
+			balances, fetchErr := client.GetAllAccountBalances(gctx, addr)
+			// Always non-nil so the JSON encoder emits "balances": [] even if
+			// a future SDK regression returned nil for an account with zero
+			// balances. GetAllAccountBalances currently returns a non-nil
+			// empty slice; keeping the guard is cheap insurance.
+			ab := &types.AccountBalances{
+				Address:  addr,
+				Balances: []wbtypes.Balance{},
+			}
+			if fetchErr != nil {
+				if !errors.Is(fetchErr, wbclient.ErrAccountNotFound) {
+					// Everything except the typed account-not-found sentinel
+					// is systemic. wbclient exposes no structured signal that
+					// proves a GraphQL errors[] entry or an HTTP 4xx is
+					// account-local — most such failures (schema/query bugs,
+					// auth/signing, rate limits, transport, ctx cancellation,
+					// 5xx) affect every account in the fan-out the same way.
+					// Surface them at the top level so monitoring sees the
+					// outage instead of a 200 of per-account error strings.
+					return classifyWBError(fetchErr)
+				}
+				logger.ErrorWithContext(gctx, "fetching account balances",
+					"address", addr, "error", fetchErr)
+				msg := fetchErr.Error()
+				ab.Error = &msg
+			} else if len(balances) > 0 {
+				ab.Balances = balances
+			}
+			results[i] = ab
+			return nil
+		})
+	}
+	if waitErr := g.Wait(); waitErr != nil {
+		return nil, waitErr
+	}
+	return results, nil
 }
 
-// classifyWBError wraps wbclient errors with UpstreamError based on error message patterns.
-// wbclient uses fmt.Sprintf (not %w), so we match on string content.
+// classifyWBError wraps a systemic wbclient error with an UpstreamError so
+// metrics.ClassifyError can emit a faithful sub-label
+// (graphql_error / http_error[:code]). The typed account-not-found case is
+// address-scoped and handled at the call site, so it is intentionally not
+// matched here. Falls back to substring inspection because wbclient builds
+// these errors via fmt.Errorf without %w wrapping.
 func classifyWBError(err error) error {
 	msg := err.Error()
 	if strings.Contains(msg, "GraphQL error:") {
 		return &metrics.UpstreamError{Kind: "graphql_error", Err: err}
 	}
 	if strings.Contains(msg, "unexpected statusCode=") {
-		return &metrics.UpstreamError{Kind: "http_error", Err: err}
+		code := 0
+		if m := httpStatusCodeRegex.FindStringSubmatch(msg); len(m) == 2 {
+			if parsed, parseErr := strconv.Atoi(m[1]); parseErr == nil {
+				code = parsed
+			}
+		}
+		return &metrics.UpstreamError{Kind: "http_error", Code: code, Err: err}
 	}
 	return err
 }
