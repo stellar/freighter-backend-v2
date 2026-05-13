@@ -16,6 +16,7 @@ import (
 	"github.com/stellar/wallet-backend/pkg/wbclient"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
+	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
@@ -149,4 +150,24 @@ func (h *AccountHistoryHandler) parseRequest(r *http.Request) (address, network 
 	}
 
 	return address, network, p, nil
+}
+
+// GetAccountTransactions returns one page of an account's transactions from
+// wallet-backend, in the spec's PaginatedResponse[T] envelope.
+func (h *AccountHistoryHandler) GetAccountTransactions(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := context.WithTimeout(r.Context(), AccountHistoryContextTimeout)
+	defer cancel()
+
+	address, network, params, herr := h.parseRequest(r)
+	if herr != nil {
+		return herr
+	}
+
+	result, err := h.WalletBackendService.GetAccountTransactions(ctx, address, network, params)
+	if err != nil {
+		return translateServiceError(r.Context(), err, "account transactions", address, network)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	return response.OK(w, result)
 }

@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -16,7 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/wallet-backend/pkg/wbclient"
+	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
 
+	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
@@ -145,4 +148,156 @@ func TestParseRequest(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, herr.StatusCode)
 		})
 	}
+}
+
+func TestGetAccountTransactions_Handler(t *testing.T) {
+	t.Parallel()
+
+	t.Run("happy path 200 with paginated body", func(t *testing.T) {
+		t.Parallel()
+		nextCursor := "n"
+		mockSvc := &utils.MockWalletBackendService{
+			GetAccountTransactionsResult: &types.PaginatedResponse[*wbtypes.GraphQLTransaction]{
+				Data: []*wbtypes.GraphQLTransaction{{Hash: "h1"}},
+				Pagination: types.PaginationInfo{
+					NextCursor:  &nextCursor,
+					HasNext:     true,
+					HasPrevious: false,
+				},
+			},
+		}
+		h, err := NewAccountHistoryHandler(mockSvc, 20, 100)
+		require.NoError(t, err)
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testAddress)
+		require.NoError(t, h.GetAccountTransactions(rr, req))
+		assert.Equal(t, http.StatusOK, rr.Code)
+
+		var body types.PaginatedResponse[*wbtypes.GraphQLTransaction]
+		require.NoError(t, json.NewDecoder(rr.Body).Decode(&body))
+		require.Len(t, body.Data, 1)
+		assert.Equal(t, "h1", body.Data[0].Hash)
+		assert.True(t, body.Pagination.HasNext)
+	})
+
+	t.Run("404 when service returns ErrAccountNotFound", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{GetAccountTransactionsError: wbclient.ErrAccountNotFound}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testAddress)
+		err := h.GetAccountTransactions(httptest.NewRecorder(), req)
+		var herr *httperror.HttpError
+		require.True(t, errors.As(err, &herr))
+		assert.Equal(t, http.StatusNotFound, herr.StatusCode)
+	})
+
+	t.Run("502 when service returns graphql_error", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{GetAccountTransactionsError: &metrics.UpstreamError{Kind: "graphql_error", Err: errors.New("schema bug")}}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testAddress)
+		err := h.GetAccountTransactions(httptest.NewRecorder(), req)
+		var herr *httperror.HttpError
+		require.True(t, errors.As(err, &herr))
+		assert.Equal(t, http.StatusBadGateway, herr.StatusCode)
+	})
+
+	t.Run("502 when service returns http_error", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{GetAccountTransactionsError: &metrics.UpstreamError{Kind: "http_error", Code: 503, Err: errors.New("upstream down")}}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testAddress)
+		err := h.GetAccountTransactions(httptest.NewRecorder(), req)
+		var herr *httperror.HttpError
+		require.True(t, errors.As(err, &herr))
+		assert.Equal(t, http.StatusBadGateway, herr.StatusCode)
+	})
+
+	t.Run("504 when service returns context.DeadlineExceeded", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{GetAccountTransactionsError: context.DeadlineExceeded}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testAddress)
+		err := h.GetAccountTransactions(httptest.NewRecorder(), req)
+		var herr *httperror.HttpError
+		require.True(t, errors.As(err, &herr))
+		assert.Equal(t, http.StatusGatewayTimeout, herr.StatusCode)
+	})
+
+	t.Run("500 when service returns generic error", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{GetAccountTransactionsError: errors.New("boom")}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testAddress)
+		err := h.GetAccountTransactions(httptest.NewRecorder(), req)
+		var herr *httperror.HttpError
+		require.True(t, errors.As(err, &herr))
+		assert.Equal(t, http.StatusInternalServerError, herr.StatusCode)
+	})
+
+	t.Run("400 on invalid request (validation forwarded)", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+		req := httptest.NewRequest(http.MethodGet, "/x?network=FUTURENET", nil)
+		req.SetPathValue("address", testAddress)
+		err := h.GetAccountTransactions(httptest.NewRecorder(), req)
+		var herr *httperror.HttpError
+		require.True(t, errors.As(err, &herr))
+		assert.Equal(t, http.StatusBadRequest, herr.StatusCode)
+	})
+
+	t.Run("forwards parsed params to the service", func(t *testing.T) {
+		t.Parallel()
+		var (
+			gotAddress string
+			gotNetwork string
+			gotParams  types.AccountHistoryParams
+		)
+		mockSvc := &utils.MockWalletBackendService{
+			GetAccountTransactionsFunc: func(_ context.Context, addr, network string, p types.AccountHistoryParams) (*types.PaginatedResponse[*wbtypes.GraphQLTransaction], error) {
+				gotAddress = addr
+				gotNetwork = network
+				gotParams = p
+				return &types.PaginatedResponse[*wbtypes.GraphQLTransaction]{Data: []*wbtypes.GraphQLTransaction{}, Pagination: types.PaginationInfo{}}, nil
+			},
+		}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+
+		req := httptest.NewRequest(http.MethodGet, "/x?network=TESTNET&limit=5&cursor=abc&direction=prev&since=2026-01-01T00:00:00Z&until=2026-02-01T00:00:00Z", nil)
+		req.SetPathValue("address", testAddress)
+		require.NoError(t, h.GetAccountTransactions(httptest.NewRecorder(), req))
+
+		assert.Equal(t, testAddress, gotAddress)
+		assert.Equal(t, "TESTNET", gotNetwork)
+		assert.EqualValues(t, 5, gotParams.Limit)
+		assert.Equal(t, types.PaginationDirectionPrev, gotParams.Direction)
+		require.NotNil(t, gotParams.Cursor)
+		assert.Equal(t, "abc", *gotParams.Cursor)
+		require.NotNil(t, gotParams.Since)
+		require.NotNil(t, gotParams.Until)
+	})
+
+	t.Run("empty data slice marshals as []", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{
+			GetAccountTransactionsResult: &types.PaginatedResponse[*wbtypes.GraphQLTransaction]{
+				Data:       []*wbtypes.GraphQLTransaction{},
+				Pagination: types.PaginationInfo{HasNext: false, HasPrevious: false},
+			},
+		}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testAddress)
+		require.NoError(t, h.GetAccountTransactions(rr, req))
+		assert.Contains(t, rr.Body.String(), `"data":[]`)
+	})
 }
