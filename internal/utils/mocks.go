@@ -3,6 +3,8 @@ package utils
 import (
 	"context"
 
+	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
+
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/go-stellar-sdk/clients/rpcclient"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
@@ -108,6 +110,40 @@ func (m *MockRPCService) GetLedgerEntries(ctx context.Context, keys []string, ne
 type MockWalletBackendService struct {
 	GetBalancesOverride interface{}
 	GetBalancesError    error
+
+	// Result/Error are the default response when Func is nil. When Func is
+	// set it takes precedence and the test owns the entire response shape —
+	// useful for asserting that parsed query params were forwarded correctly.
+
+	// GetAccountTransactionsResult is returned by GetAccountTransactions when
+	// GetAccountTransactionsFunc is nil and GetAccountTransactionsError is nil.
+	GetAccountTransactionsResult *types.PaginatedResponse[*wbtypes.GraphQLTransaction]
+	// GetAccountTransactionsError is returned by GetAccountTransactions when
+	// GetAccountTransactionsFunc is nil.
+	GetAccountTransactionsError error
+	// GetAccountTransactionsFunc overrides Result/Error when set; the test
+	// controls the full response and can capture/assert call arguments.
+	GetAccountTransactionsFunc func(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[*wbtypes.GraphQLTransaction], error)
+
+	// GetAccountOperationsResult is returned by GetAccountOperations when
+	// GetAccountOperationsFunc is nil and GetAccountOperationsError is nil.
+	GetAccountOperationsResult *types.PaginatedResponse[*wbtypes.Operation]
+	// GetAccountOperationsError is returned by GetAccountOperations when
+	// GetAccountOperationsFunc is nil.
+	GetAccountOperationsError error
+	// GetAccountOperationsFunc overrides Result/Error when set; the test
+	// controls the full response and can capture/assert call arguments.
+	GetAccountOperationsFunc func(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[*wbtypes.Operation], error)
+
+	// GetAccountStateChangesResult is returned by GetAccountStateChanges when
+	// GetAccountStateChangesFunc is nil and GetAccountStateChangesError is nil.
+	GetAccountStateChangesResult *types.PaginatedResponse[wbtypes.StateChangeNode]
+	// GetAccountStateChangesError is returned by GetAccountStateChanges when
+	// GetAccountStateChangesFunc is nil.
+	GetAccountStateChangesError error
+	// GetAccountStateChangesFunc overrides Result/Error when set; the test
+	// controls the full response and can capture/assert call arguments.
+	GetAccountStateChangesFunc func(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[wbtypes.StateChangeNode], error)
 }
 
 func (m *MockWalletBackendService) Name() string {
@@ -128,4 +164,43 @@ func (m *MockWalletBackendService) GetBalancesByAccountAddresses(ctx context.Con
 	}
 
 	return nil, nil
+}
+
+// GetAccountTransactions returns a stubbed paginated transaction list. If
+// GetAccountTransactionsFunc is set it takes precedence; otherwise
+// GetAccountTransactionsError or GetAccountTransactionsResult is used.
+func (m *MockWalletBackendService) GetAccountTransactions(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[*wbtypes.GraphQLTransaction], error) {
+	if m.GetAccountTransactionsFunc != nil {
+		return m.GetAccountTransactionsFunc(ctx, address, network, params)
+	}
+	if m.GetAccountTransactionsError != nil {
+		return nil, m.GetAccountTransactionsError
+	}
+	return m.GetAccountTransactionsResult, nil
+}
+
+// GetAccountOperations returns a stubbed paginated operations list. If
+// GetAccountOperationsFunc is set it takes precedence; otherwise
+// GetAccountOperationsError or GetAccountOperationsResult is used.
+func (m *MockWalletBackendService) GetAccountOperations(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[*wbtypes.Operation], error) {
+	if m.GetAccountOperationsFunc != nil {
+		return m.GetAccountOperationsFunc(ctx, address, network, params)
+	}
+	if m.GetAccountOperationsError != nil {
+		return nil, m.GetAccountOperationsError
+	}
+	return m.GetAccountOperationsResult, nil
+}
+
+// GetAccountStateChanges returns a stubbed paginated state-changes list. If
+// GetAccountStateChangesFunc is set it takes precedence; otherwise
+// GetAccountStateChangesError or GetAccountStateChangesResult is used.
+func (m *MockWalletBackendService) GetAccountStateChanges(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[wbtypes.StateChangeNode], error) {
+	if m.GetAccountStateChangesFunc != nil {
+		return m.GetAccountStateChangesFunc(ctx, address, network, params)
+	}
+	if m.GetAccountStateChangesError != nil {
+		return nil, m.GetAccountStateChangesError
+	}
+	return m.GetAccountStateChangesResult, nil
 }

@@ -232,6 +232,21 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 	return results, nil
 }
 
+// GetAccountTransactions is a temporary stub replaced by the real implementation in Task 6 (TDD).
+func (w *walletBackendService) GetAccountTransactions(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[*wbtypes.GraphQLTransaction], error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+// GetAccountOperations is a temporary stub replaced by the real implementation in Task 7 (TDD).
+func (w *walletBackendService) GetAccountOperations(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[*wbtypes.Operation], error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+// GetAccountStateChanges is a temporary stub replaced by the real implementation in Task 8 (TDD).
+func (w *walletBackendService) GetAccountStateChanges(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[wbtypes.StateChangeNode], error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
 // classifyWBError wraps a systemic wbclient error with an UpstreamError so
 // metrics.ClassifyError can emit a faithful sub-label
 // (graphql_error / http_error[:code]). The typed account-not-found case is
