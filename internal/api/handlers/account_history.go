@@ -191,3 +191,25 @@ func (h *AccountHistoryHandler) GetAccountOperations(w http.ResponseWriter, r *h
 	w.Header().Set("Content-Type", "application/json")
 	return response.OK(w, result)
 }
+
+// GetAccountStateChanges returns one page of an account's state changes from
+// wallet-backend, in the PaginatedResponse[T] envelope. The Data slice elements
+// are polymorphic wbtypes.StateChangeNode values (concrete type determined by
+// the upstream __typename discriminator).
+func (h *AccountHistoryHandler) GetAccountStateChanges(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := context.WithTimeout(r.Context(), AccountHistoryContextTimeout)
+	defer cancel()
+
+	address, network, params, herr := h.parseRequest(r)
+	if herr != nil {
+		return herr
+	}
+
+	result, err := h.WalletBackendService.GetAccountStateChanges(ctx, address, network, params)
+	if err != nil {
+		return translateServiceError(r.Context(), err, "account state changes", address, network)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	return response.OK(w, result)
+}

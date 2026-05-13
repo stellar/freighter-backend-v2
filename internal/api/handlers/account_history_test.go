@@ -453,3 +453,156 @@ func TestGetAccountOperations_Handler(t *testing.T) {
 		assert.Contains(t, rr.Body.String(), `"data":[]`)
 	})
 }
+
+func TestGetAccountStateChanges_Handler(t *testing.T) {
+	t.Parallel()
+
+	t.Run("happy path 200 with paginated body", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{
+			GetAccountStateChangesResult: &types.PaginatedResponse[wbtypes.StateChangeNode]{
+				Data: []wbtypes.StateChangeNode{
+					&wbtypes.StandardBalanceChange{
+						BaseStateChangeFields: wbtypes.BaseStateChangeFields{
+							Type:   wbtypes.StateChangeCategoryBalance,
+							Reason: wbtypes.StateChangeReasonCredit,
+						},
+						TokenID: "native",
+						Amount:  "100",
+					},
+				},
+				Pagination: types.PaginationInfo{HasNext: false, HasPrevious: false},
+			},
+		}
+		h, err := NewAccountHistoryHandler(mockSvc, 20, 100)
+		require.NoError(t, err)
+
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testAddress)
+		require.NoError(t, h.GetAccountStateChanges(rr, req))
+		assert.Equal(t, http.StatusOK, rr.Code)
+		assert.Contains(t, rr.Body.String(), `"type":"BALANCE"`)
+		assert.Contains(t, rr.Body.String(), `"reason":"CREDIT"`)
+		assert.Contains(t, rr.Body.String(), `"has_next":false`)
+	})
+
+	t.Run("404 when service returns ErrAccountNotFound", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{GetAccountStateChangesError: wbclient.ErrAccountNotFound}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testAddress)
+		err := h.GetAccountStateChanges(httptest.NewRecorder(), req)
+		var herr *httperror.HttpError
+		require.True(t, errors.As(err, &herr))
+		assert.Equal(t, http.StatusNotFound, herr.StatusCode)
+	})
+
+	t.Run("502 when service returns graphql_error", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{GetAccountStateChangesError: &metrics.UpstreamError{Kind: "graphql_error", Err: errors.New("schema bug")}}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testAddress)
+		err := h.GetAccountStateChanges(httptest.NewRecorder(), req)
+		var herr *httperror.HttpError
+		require.True(t, errors.As(err, &herr))
+		assert.Equal(t, http.StatusBadGateway, herr.StatusCode)
+	})
+
+	t.Run("502 when service returns http_error", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{GetAccountStateChangesError: &metrics.UpstreamError{Kind: "http_error", Code: 503, Err: errors.New("upstream down")}}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testAddress)
+		err := h.GetAccountStateChanges(httptest.NewRecorder(), req)
+		var herr *httperror.HttpError
+		require.True(t, errors.As(err, &herr))
+		assert.Equal(t, http.StatusBadGateway, herr.StatusCode)
+	})
+
+	t.Run("504 when service returns context.DeadlineExceeded", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{GetAccountStateChangesError: context.DeadlineExceeded}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testAddress)
+		err := h.GetAccountStateChanges(httptest.NewRecorder(), req)
+		var herr *httperror.HttpError
+		require.True(t, errors.As(err, &herr))
+		assert.Equal(t, http.StatusGatewayTimeout, herr.StatusCode)
+	})
+
+	t.Run("500 when service returns generic error", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{GetAccountStateChangesError: errors.New("boom")}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testAddress)
+		err := h.GetAccountStateChanges(httptest.NewRecorder(), req)
+		var herr *httperror.HttpError
+		require.True(t, errors.As(err, &herr))
+		assert.Equal(t, http.StatusInternalServerError, herr.StatusCode)
+	})
+
+	t.Run("400 on invalid request (validation forwarded)", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+		req := httptest.NewRequest(http.MethodGet, "/x?network=FUTURENET", nil)
+		req.SetPathValue("address", testAddress)
+		err := h.GetAccountStateChanges(httptest.NewRecorder(), req)
+		var herr *httperror.HttpError
+		require.True(t, errors.As(err, &herr))
+		assert.Equal(t, http.StatusBadRequest, herr.StatusCode)
+	})
+
+	t.Run("forwards parsed params to the service", func(t *testing.T) {
+		t.Parallel()
+		var (
+			gotAddress string
+			gotNetwork string
+			gotParams  types.AccountHistoryParams
+		)
+		mockSvc := &utils.MockWalletBackendService{
+			GetAccountStateChangesFunc: func(_ context.Context, addr, network string, p types.AccountHistoryParams) (*types.PaginatedResponse[wbtypes.StateChangeNode], error) {
+				gotAddress = addr
+				gotNetwork = network
+				gotParams = p
+				return &types.PaginatedResponse[wbtypes.StateChangeNode]{Data: []wbtypes.StateChangeNode{}, Pagination: types.PaginationInfo{}}, nil
+			},
+		}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+
+		req := httptest.NewRequest(http.MethodGet, "/x?network=TESTNET&limit=5&cursor=abc&direction=prev&since=2026-01-01T00:00:00Z&until=2026-02-01T00:00:00Z", nil)
+		req.SetPathValue("address", testAddress)
+		require.NoError(t, h.GetAccountStateChanges(httptest.NewRecorder(), req))
+
+		assert.Equal(t, testAddress, gotAddress)
+		assert.Equal(t, "TESTNET", gotNetwork)
+		assert.EqualValues(t, 5, gotParams.Limit)
+		assert.Equal(t, types.PaginationDirectionPrev, gotParams.Direction)
+		require.NotNil(t, gotParams.Cursor)
+		assert.Equal(t, "abc", *gotParams.Cursor)
+		require.NotNil(t, gotParams.Since)
+		require.NotNil(t, gotParams.Until)
+	})
+
+	t.Run("empty data slice marshals as []", func(t *testing.T) {
+		t.Parallel()
+		mockSvc := &utils.MockWalletBackendService{
+			GetAccountStateChangesResult: &types.PaginatedResponse[wbtypes.StateChangeNode]{
+				Data:       []wbtypes.StateChangeNode{},
+				Pagination: types.PaginationInfo{HasNext: false, HasPrevious: false},
+			},
+		}
+		h, _ := NewAccountHistoryHandler(mockSvc, 20, 100)
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testAddress)
+		require.NoError(t, h.GetAccountStateChanges(rr, req))
+		assert.Contains(t, rr.Body.String(), `"data":[]`)
+	})
+}
