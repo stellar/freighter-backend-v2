@@ -98,6 +98,19 @@ jobs:
         id: ecr_login
         uses: stellar/actions/sdf-ecr-login@main
 
+      - name: Verify production ECR tag does not exist
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          if aws ecr describe-images \
+            --repository-name prd/freighter-backend-v2 \
+            --image-ids imageTag="$RELEASE_VERSION" \
+            --region us-east-1 >/dev/null 2>&1; then
+            echo "::error::ECR tag prd/freighter-backend-v2:$RELEASE_VERSION already exists."
+            exit 1
+          fi
+          echo "ECR tag $RELEASE_VERSION not present. Proceeding."
+
       - name: Re-tag image from staging to production ECR
         env:
           ECR_REGISTRY: ${{ steps.ecr_login.outputs.ecr-registry }}
