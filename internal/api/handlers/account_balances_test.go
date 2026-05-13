@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
@@ -116,7 +119,7 @@ func TestGetAccountBalances(t *testing.T) {
 
 		err := handler.GetAccountBalances(rr, req)
 		require.Error(t, err)
-		assert.EqualError(t, err, "invalid network: network must be PUBLIC, TESTNET or FUTURENET")
+		assert.EqualError(t, err, "invalid network: must be PUBLIC or TESTNET")
 	})
 
 	t.Run("should return error for empty addresses array", func(t *testing.T) {
@@ -273,4 +276,47 @@ func TestGetAccountBalances(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, rr.Code)
 	})
+}
+
+func TestGetAccountBalances_UpstreamErrorMapping(t *testing.T) {
+	t.Parallel()
+
+	const validBody = `{"addresses":["GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"]}`
+
+	cases := []struct {
+		name       string
+		mockErr    error
+		wantStatus int
+	}{
+		{"graphql_error -> 502", &metrics.UpstreamError{Kind: "graphql_error", Err: errors.New("schema bug")}, http.StatusBadGateway},
+		{"http_error -> 502", &metrics.UpstreamError{Kind: "http_error", Code: 503, Err: errors.New("upstream down")}, http.StatusBadGateway},
+		{"ctx deadline -> 504", context.DeadlineExceeded, http.StatusGatewayTimeout},
+		{"generic -> 500", errors.New("boom"), http.StatusInternalServerError},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			mockSvc := &utils.MockWalletBackendService{GetBalancesError: tc.mockErr}
+			h := NewAccountBalancesHandler(mockSvc, 100)
+			req := httptest.NewRequest("POST", "/api/v1/accounts/balances?network=PUBLIC", strings.NewReader(validBody))
+			rr := httptest.NewRecorder()
+			err := h.GetAccountBalances(rr, req)
+			var herr *httperror.HttpError
+			require.True(t, errors.As(err, &herr))
+			assert.Equal(t, tc.wantStatus, herr.StatusCode)
+		})
+	}
+}
+
+func TestGetAccountBalances_RejectsFuturenet(t *testing.T) {
+	t.Parallel()
+	mockSvc := &utils.MockWalletBackendService{}
+	h := NewAccountBalancesHandler(mockSvc, 100)
+	req := httptest.NewRequest("POST", "/api/v1/accounts/balances?network=FUTURENET", strings.NewReader(`{"addresses":["GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"]}`))
+	rr := httptest.NewRecorder()
+	err := h.GetAccountBalances(rr, req)
+	var herr *httperror.HttpError
+	require.True(t, errors.As(err, &herr))
+	assert.Equal(t, http.StatusBadRequest, herr.StatusCode)
 }

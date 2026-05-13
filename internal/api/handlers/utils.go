@@ -13,10 +13,6 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
-func isValidNetwork(network string) bool {
-	return network == types.PUBLIC || network == types.TESTNET || network == types.FUTURENET
-}
-
 // isValidWalletBackendNetwork reports whether network is one of the values
 // freighter-backend has a wallet-backend client configured for. WalletBackendConfig
 // only carries pubnet and testnet URL/signing-key fields, so FUTURENET (which is

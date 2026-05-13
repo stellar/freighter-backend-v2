@@ -13,7 +13,6 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
-	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
@@ -74,8 +73,8 @@ func (h *AccountBalancesHandler) GetAccountBalances(w http.ResponseWriter, r *ht
 	queryParams := r.URL.Query()
 	network := queryParams.Get("network")
 
-	if !isValidNetwork(network) {
-		return httperror.BadRequest(fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET), errors.New("invalid network"))
+	if !isValidWalletBackendNetwork(network) {
+		return httperror.BadRequest(fmt.Sprintf("invalid network: must be %s or %s", types.PUBLIC, types.TESTNET), errors.New("invalid network"))
 	}
 
 	req, validationErr := validateAccountBalancesRequest(r, h.MaxAddresses)
@@ -85,8 +84,12 @@ func (h *AccountBalancesHandler) GetAccountBalances(w http.ResponseWriter, r *ht
 
 	balances, err := h.WalletBackendService.GetBalancesByAccountAddresses(contextWithTimeout, req.Addresses, network)
 	if err != nil {
-		logger.ErrorWithContext(r.Context(), "getting account balances from wallet backend", "error", err)
-		return httperror.InternalServerError("Failed to get account balances", err)
+		// address is intentionally empty: this is a multi-address fan-out
+		// endpoint, and individual ErrAccountNotFound outcomes are already
+		// surfaced as per-address Error strings inside a 200 body. The top-level
+		// err here is only ever a systemic failure (graphql_error, http_error,
+		// connection, timeout, internal).
+		return translateServiceError(r.Context(), err, "account balances", "", network)
 	}
 
 	responseData := HttpResponse{
