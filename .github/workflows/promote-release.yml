@@ -102,14 +102,23 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
-          if aws ecr describe-images \
+          # Distinguish "tag absent" (ImageNotFoundException → proceed) from
+          # any other failure (auth/region/throttling/repo-missing → fail fast)
+          # so a misconfigured precheck cannot silently green-light a re-tag.
+          OUTPUT=$(aws ecr describe-images \
             --repository-name prd/freighter-backend-v2 \
             --image-ids imageTag="$RELEASE_VERSION" \
-            --region us-east-1 >/dev/null 2>&1; then
+            --region us-east-1 2>&1) && EXIT=0 || EXIT=$?
+          if [[ $EXIT -eq 0 ]]; then
             echo "::error::ECR tag prd/freighter-backend-v2:$RELEASE_VERSION already exists."
             exit 1
           fi
-          echo "ECR tag $RELEASE_VERSION not present. Proceeding."
+          if grep -q 'ImageNotFoundException' <<<"$OUTPUT"; then
+            echo "ECR tag $RELEASE_VERSION not present. Proceeding."
+          else
+            echo "::error::Unexpected error from aws ecr describe-images (exit $EXIT): $OUTPUT"
+            exit 1
+          fi
 
       - name: Re-tag image from staging to production ECR
         env:

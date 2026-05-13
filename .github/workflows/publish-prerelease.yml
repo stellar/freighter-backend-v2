@@ -68,14 +68,23 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          if aws ecr describe-images \
+          # Distinguish "tag absent" (ImageNotFoundException → proceed) from
+          # any other failure (auth/region/throttling/repo-missing → fail fast)
+          # so a misconfigured precheck cannot silently green-light a push.
+          OUTPUT=$(aws ecr describe-images \
             --repository-name stg/freighter-backend-v2 \
             --image-ids imageTag="$VERSION" \
-            --region us-east-1 >/dev/null 2>&1; then
+            --region us-east-1 2>&1) && EXIT=0 || EXIT=$?
+          if [[ $EXIT -eq 0 ]]; then
             echo "::error::ECR tag stg/freighter-backend-v2:$VERSION already exists."
             exit 1
           fi
-          echo "ECR tag $VERSION not present. Proceeding."
+          if grep -q 'ImageNotFoundException' <<<"$OUTPUT"; then
+            echo "ECR tag $VERSION not present. Proceeding."
+          else
+            echo "::error::Unexpected error from aws ecr describe-images (exit $EXIT): $OUTPUT"
+            exit 1
+          fi
 
       - name: Build and push prerelease image
         env:
