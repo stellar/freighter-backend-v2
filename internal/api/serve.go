@@ -110,6 +110,18 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
 	mux.HandleFunc("POST /api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances))
 
+	accountHistoryHandler, err := handlers.NewAccountHistoryHandler(
+		s.walletBackendService,
+		s.cfg.AppConfig.AccountHistoryDefaultLimit,
+		s.cfg.AppConfig.AccountHistoryMaxLimit,
+	)
+	if err != nil {
+		panic(fmt.Errorf("init account-history handler: %w", err))
+	}
+	mux.HandleFunc("GET /api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions))
+	mux.HandleFunc("GET /api/v1/accounts/{address}/operations", handlers.CustomHandler(accountHistoryHandler.GetAccountOperations))
+	mux.HandleFunc("GET /api/v1/accounts/{address}/state-changes", handlers.CustomHandler(accountHistoryHandler.GetAccountStateChanges))
+
 	return mux
 }
 

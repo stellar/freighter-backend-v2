@@ -54,7 +54,11 @@ func TestApiServer_initServices_RejectsNonPositiveBalanceConcurrency(t *testing.
 
 func TestApiServer_initHandlers(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	cfg := &config.Config{AppConfig: config.AppConfig{ProtocolsConfigPath: "testdata/protocols.json"}}
+	cfg := &config.Config{AppConfig: config.AppConfig{
+		ProtocolsConfigPath:        "testdata/protocols.json",
+		AccountHistoryDefaultLimit: 20,
+		AccountHistoryMaxLimit:     100,
+	}}
 	s := &ApiServer{cfg: cfg, registry: reg}
 	mux := s.initHandlers()
 	require.NotNil(t, mux)
@@ -67,7 +71,11 @@ func TestApiServer_initHandlers(t *testing.T) {
 
 func TestApiServer_initHandlers_DoesNotServeMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	cfg := &config.Config{AppConfig: config.AppConfig{ProtocolsConfigPath: "testdata/protocols.json"}}
+	cfg := &config.Config{AppConfig: config.AppConfig{
+		ProtocolsConfigPath:        "testdata/protocols.json",
+		AccountHistoryDefaultLimit: 20,
+		AccountHistoryMaxLimit:     100,
+	}}
 	s := &ApiServer{cfg: cfg, registry: reg}
 	mux := s.initHandlers()
 
@@ -113,6 +121,28 @@ func TestApiServer_initMiddleware(t *testing.T) {
 	mux := http.NewServeMux()
 	h := s.initMiddleware(mux)
 	require.NotNil(t, h)
+}
+
+func TestApiServer_initHandlers_RegistersAccountHistoryRoutes(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	cfg := &config.Config{AppConfig: config.AppConfig{
+		ProtocolsConfigPath:        "testdata/protocols.json",
+		AccountHistoryDefaultLimit: 20,
+		AccountHistoryMaxLimit:     100,
+	}}
+	s := &ApiServer{cfg: cfg, registry: reg}
+	mux := s.initHandlers()
+	require.NotNil(t, mux)
+
+	for _, path := range []string{
+		"/api/v1/accounts/GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF/transactions",
+		"/api/v1/accounts/GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF/operations",
+		"/api/v1/accounts/GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF/state-changes",
+	} {
+		handler, pattern := mux.Handler(&http.Request{Method: "GET", URL: mustParseURL(path)})
+		assert.NotNil(t, handler, "no handler registered for %s", path)
+		assert.NotEmpty(t, pattern, "no pattern matched for %s", path)
+	}
 }
 
 func mustParseURL(path string) *url.URL {
