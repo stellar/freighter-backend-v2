@@ -156,3 +156,23 @@ func TestFetchOwnerTokens_NonVecResponse(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "expected SCV_VEC result")
 }
+
+func TestIsValidWalletBackendNetwork(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		network string
+		want    bool
+	}{
+		{"PUBLIC", true},
+		{"TESTNET", true},
+		{"FUTURENET", false},
+		{"", false},
+		{"public", false}, // case-sensitive — matches existing isValidNetwork behavior
+	}
+	for _, tt := range tests {
+		t.Run(tt.network, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, isValidWalletBackendNetwork(tt.network))
+		})
+	}
+}

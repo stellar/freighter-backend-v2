@@ -17,6 +17,15 @@ func isValidNetwork(network string) bool {
 	return network == types.PUBLIC || network == types.TESTNET || network == types.FUTURENET
 }
 
+// isValidWalletBackendNetwork reports whether network is one of the values
+// freighter-backend has a wallet-backend client configured for. WalletBackendConfig
+// only carries pubnet and testnet URL/signing-key fields, so FUTURENET (which is
+// otherwise a valid Stellar network in this codebase) is intentionally rejected
+// to prevent silent fall-through to the pubnet client.
+func isValidWalletBackendNetwork(network string) bool {
+	return network == types.PUBLIC || network == types.TESTNET
+}
+
 type collection struct {
 	Name   string `json:"name"`
 	Symbol string `json:"symbol"`
