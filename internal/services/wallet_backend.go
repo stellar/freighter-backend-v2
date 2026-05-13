@@ -145,7 +145,7 @@ func (w *walletBackendService) configureNetworkClient(network string) *wbclient.
 	return w.pubnetClient
 }
 
-// GetBalancesByAccountAddresses fans out one wbclient.GetAccountBalances call
+// GetBalancesByAccountAddresses fans out one wbclient.GetAllAccountBalances call
 // per unique address using a per-request errgroup bounded by
 // maxBalanceConcurrency.
 //
