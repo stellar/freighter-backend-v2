@@ -26,7 +26,7 @@ type AppConfig struct {
 	MaxBalanceAddresses            int
 	MaxLedgerKeyAddresses          int
 	// WalletBackendBalanceConcurrency caps the number of concurrent wallet-backend
-	// fetches per single /api/v1/account-balances request. The handler fans out to
+	// fetches per single /api/v1/accounts/balances request. The handler fans out to
 	// the per-address accountByAddress query, and this knob bounds the goroutine
 	// count for that fan-out. The limit is enforced per-request via errgroup.SetLimit,
 	// so peak upstream load is concurrent_requests * WalletBackendBalanceConcurrency.

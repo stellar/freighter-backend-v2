@@ -1,4 +1,4 @@
-// ABOUTME: Response types for the wallet-backend-fronted /api/v1/account-balances endpoint.
+// ABOUTME: Response types for the wallet-backend-fronted /api/v1/accounts/balances endpoint.
 // ABOUTME: Defines the per-account fan-out result shape returned to API consumers.
 package types
 

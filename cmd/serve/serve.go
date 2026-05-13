@@ -59,7 +59,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().Int64Var(&s.Cfg.AppConfig.MaxRequestBodySize, "max-request-body-size", 1<<20, "Maximum request body size in bytes (default: 1MB)")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxBalanceAddresses, "max-balance-addresses", 100, "Maximum number of addresses allowed in account balances request")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxLedgerKeyAddresses, "max-ledger-key-addresses", 100, "Maximum number of public keys allowed in a ledger-key/accounts request")
-	cmd.Flags().IntVar(&s.Cfg.AppConfig.WalletBackendBalanceConcurrency, "wallet-backend-balance-concurrency", 10, "Per-request maximum number of concurrent wallet-backend balance fetches (the /account-balances handler fans out to one accountByAddress call per address)")
+	cmd.Flags().IntVar(&s.Cfg.AppConfig.WalletBackendBalanceConcurrency, "wallet-backend-balance-concurrency", 10, "Per-request maximum number of concurrent wallet-backend balance fetches (the /accounts/balances handler fans out to one accountByAddress call per address)")
 
 	// RPC Config
 	cmd.Flags().StringVar(&s.Cfg.RpcConfig.PubnetRpcUrl, "pubnet-rpc-url", "", "The Pubnet URL of the Pubnet RPC instance")
