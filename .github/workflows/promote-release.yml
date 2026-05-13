@@ -18,6 +18,10 @@ permissions:
   id-token: write
   contents: write
 
+concurrency:
+  group: promote-release-${{ inputs.release_version }}
+  cancel-in-progress: false
+
 jobs:
   promote:
     runs-on: ubuntu-latest
