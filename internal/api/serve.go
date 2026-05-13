@@ -108,7 +108,7 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags))
 
 	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
-	mux.HandleFunc("POST /api/v1/account-balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances))
+	mux.HandleFunc("POST /api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances))
 
 	return mux
 }

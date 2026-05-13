@@ -40,7 +40,7 @@ func TestGetAccountBalances(t *testing.T) {
 		body := `{
 			"addresses": ["GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"]
 		}`
-		req, _ := http.NewRequest("POST", "/api/v1/account-balances?network=PUBLIC", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/accounts/balances?network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetAccountBalances(rr, req)
@@ -94,7 +94,7 @@ func TestGetAccountBalances(t *testing.T) {
 				"GBKWMR7TJ7BBICOOXRY2SWXKCWPTOHZPI6MP4LNNE5A73VP3WADGG3CH"
 			]
 		}`
-		req, _ := http.NewRequest("POST", "/api/v1/account-balances?network=PUBLIC", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/accounts/balances?network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetAccountBalances(rr, req)
@@ -111,7 +111,7 @@ func TestGetAccountBalances(t *testing.T) {
 		body := `{
 			"addresses": ["GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"]
 		}`
-		req, _ := http.NewRequest("POST", "/api/v1/account-balances?network=INVALID", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/accounts/balances?network=INVALID", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetAccountBalances(rr, req)
@@ -128,7 +128,7 @@ func TestGetAccountBalances(t *testing.T) {
 		body := `{
 			"addresses": []
 		}`
-		req, _ := http.NewRequest("POST", "/api/v1/account-balances?network=PUBLIC", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/accounts/balances?network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetAccountBalances(rr, req)
@@ -143,7 +143,7 @@ func TestGetAccountBalances(t *testing.T) {
 		handler := NewAccountBalancesHandler(mockService, 100)
 
 		body := `invalid json`
-		req, _ := http.NewRequest("POST", "/api/v1/account-balances?network=PUBLIC", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/accounts/balances?network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetAccountBalances(rr, req)
@@ -160,7 +160,7 @@ func TestGetAccountBalances(t *testing.T) {
 		body := `{
 			"addresses": ["invalid-address"]
 		}`
-		req, _ := http.NewRequest("POST", "/api/v1/account-balances?network=PUBLIC", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/accounts/balances?network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetAccountBalances(rr, req)
@@ -180,7 +180,7 @@ func TestGetAccountBalances(t *testing.T) {
 		body := `{
 			"addresses": ["GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"]
 		}`
-		req, _ := http.NewRequest("POST", "/api/v1/account-balances?network=PUBLIC", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/accounts/balances?network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetAccountBalances(rr, req)
@@ -213,7 +213,7 @@ func TestGetAccountBalances(t *testing.T) {
 		body := `{
 			"addresses": ["GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"]
 		}`
-		req, _ := http.NewRequest("POST", "/api/v1/account-balances?network=TESTNET", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/accounts/balances?network=TESTNET", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetAccountBalances(rr, req)
@@ -233,7 +233,7 @@ func TestGetAccountBalances(t *testing.T) {
 				"GBKWMR7TJ7BBICOOXRY2SWXKCWPTOHZPI6MP4LNNE5A73VP3WADGG3CH"
 			]
 		}`
-		req, _ := http.NewRequest("POST", "/api/v1/account-balances?network=PUBLIC", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/accounts/balances?network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetAccountBalances(rr, req)
@@ -266,7 +266,7 @@ func TestGetAccountBalances(t *testing.T) {
 				"GBKWMR7TJ7BBICOOXRY2SWXKCWPTOHZPI6MP4LNNE5A73VP3WADGG3CH"
 			]
 		}`
-		req, _ := http.NewRequest("POST", "/api/v1/account-balances?network=PUBLIC", strings.NewReader(body))
+		req, _ := http.NewRequest("POST", "/api/v1/accounts/balances?network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
 		err := handler.GetAccountBalances(rr, req)
