@@ -1,5 +1,5 @@
 // ABOUTME: Wallet-backend service implementation that wraps the wbclient SDK and exposes the methods used by API handlers.
-// ABOUTME: Hosts the multi-account balances fan-out: per-request bounded concurrency over the per-address GraphQL query.
+// ABOUTME: Hosts the balances fan-out and the per-account history methods (transactions / operations / state-changes), sharing translate/page-info helpers.
 package services
 
 import (

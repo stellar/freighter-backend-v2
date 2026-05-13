@@ -248,10 +248,11 @@ func paginatedNativeBalanceResponse(amount, endCursor string, hasNext bool) stri
 	}`, amount, hasNext, cursorJSON)
 }
 
-// newFanoutTestService builds a walletBackendService directly,
-// bypassing NewWalletBackendService so we can wire a no-signer wbclient
-// pointed at the fake server. Tests live in the services package, so the
-// unexported struct is accessible.
+// newFanoutTestService builds a walletBackendService by direct struct construction
+// so the fan-out tests below can access internal atomics on fanoutFakeServer
+// (peak / calls / inflight). New tests that don't need direct struct access
+// should use newTestWalletBackendService instead — it exercises the real
+// NewWalletBackendService constructor and returns the interface type.
 func newFanoutTestService(baseURL string, maxConcurrency int) *walletBackendService {
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	client := wbclient.NewClient(baseURL, nil) // nil signer is fine — wbclient skips signing when nil
@@ -701,6 +702,9 @@ func TestGetAccountTransactions(t *testing.T) {
 	t.Run("forwards since and until to wbclient when provided", func(t *testing.T) {
 		t.Parallel()
 		server := newTxFakeServer(t, func(_ string, vars map[string]interface{}) (int, string) {
+			// wbclient marshals time.Time values into the GraphQL variables map as
+			// RFC3339 strings; after JSON round-trip through the fake server they
+			// come back as strings, not time.Time.
 			assert.Equal(t, "2026-01-01T00:00:00Z", vars["since"])
 			assert.Equal(t, "2026-02-01T00:00:00Z", vars["until"])
 			return 200, `{"data":{"accountByAddress":{"transactions":{"edges":[],"pageInfo":{"hasNextPage":false,"hasPreviousPage":false}}}}}`
