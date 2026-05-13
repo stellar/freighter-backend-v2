@@ -33,6 +33,9 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.AppConfig.WalletBackendBalanceConcurrency; n <= 0 {
 				return fmt.Errorf("--wallet-backend-balance-concurrency=%d must be positive", n)
 			}
+			if d, m := s.Cfg.AppConfig.AccountHistoryDefaultLimit, s.Cfg.AppConfig.AccountHistoryMaxLimit; d <= 0 || m <= 0 || d > m {
+				return fmt.Errorf("--account-history-default-limit=%d / --account-history-max-limit=%d must be positive and default <= max", d, m)
+			}
 			return nil
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -60,6 +63,8 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxBalanceAddresses, "max-balance-addresses", 100, "Maximum number of addresses allowed in account balances request")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxLedgerKeyAddresses, "max-ledger-key-addresses", 100, "Maximum number of public keys allowed in a ledger-key/accounts request")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.WalletBackendBalanceConcurrency, "wallet-backend-balance-concurrency", 10, "Per-request maximum number of concurrent wallet-backend balance fetches (the /accounts/balances handler fans out to one accountByAddress call per address)")
+	cmd.Flags().IntVar(&s.Cfg.AppConfig.AccountHistoryDefaultLimit, "account-history-default-limit", 20, "Default page size for /accounts/{address}/transactions, /operations, /state-changes")
+	cmd.Flags().IntVar(&s.Cfg.AppConfig.AccountHistoryMaxLimit, "account-history-max-limit", 100, "Maximum page size for the same account-history endpoints")
 
 	// RPC Config
 	cmd.Flags().StringVar(&s.Cfg.RpcConfig.PubnetRpcUrl, "pubnet-rpc-url", "", "The Pubnet URL of the Pubnet RPC instance")
