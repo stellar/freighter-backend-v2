@@ -287,6 +287,16 @@ func emptyTxPage() *types.PaginatedResponse[*wbtypes.GraphQLTransaction] {
 	}
 }
 
+// emptyOpPage is the empty-page response shape used when wallet-backend
+// returns a null operations connection on an existing account (schema-
+// valid per wallet-backend PR #616 — distinct from ErrAccountNotFound).
+func emptyOpPage() *types.PaginatedResponse[*wbtypes.Operation] {
+	return &types.PaginatedResponse[*wbtypes.Operation]{
+		Data:       []*wbtypes.Operation{},
+		Pagination: types.PaginationInfo{},
+	}
+}
+
 // GetAccountTransactions returns a paginated list of transactions for the given
 // account address and network. It translates the freighter-backend pagination
 // params into the (first/last/after/before) tuple expected by the wbclient SDK
@@ -327,9 +337,41 @@ func (w *walletBackendService) GetAccountTransactions(ctx context.Context, addre
 	}, nil
 }
 
-// GetAccountOperations is a temporary stub replaced by the real implementation in Task 7 (TDD).
-func (w *walletBackendService) GetAccountOperations(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[*wbtypes.Operation], error) {
-	return nil, fmt.Errorf("not implemented")
+// GetAccountOperations returns one page of an account's operations from
+// wallet-backend. See GetAccountTransactions for the shared semantics around
+// ErrAccountNotFound, null-connection-as-empty-page, and nil-node skipping.
+func (w *walletBackendService) GetAccountOperations(ctx context.Context, address, network string, p types.AccountHistoryParams) (_ *types.PaginatedResponse[*wbtypes.Operation], err error) {
+	start := time.Now()
+	defer func() { w.recordWBCall("GetAccountOperations", network, start, err) }()
+
+	client := w.configureNetworkClient(network)
+	if client == nil {
+		return nil, fmt.Errorf("wallet backend client not configured for network: %s", network)
+	}
+
+	first, last, after, before := translateParams(p)
+	conn, err := client.GetAccountOperations(ctx, address, p.Since, p.Until, first, last, after, before)
+	if err != nil {
+		if errors.Is(err, wbclient.ErrAccountNotFound) {
+			return nil, err
+		}
+		return nil, classifyWBError(err)
+	}
+	if conn == nil {
+		return emptyOpPage(), nil
+	}
+
+	nodes := make([]*wbtypes.Operation, 0, len(conn.Edges))
+	for _, e := range conn.Edges {
+		if e.Node == nil {
+			continue
+		}
+		nodes = append(nodes, e.Node)
+	}
+	return &types.PaginatedResponse[*wbtypes.Operation]{
+		Data:       nodes,
+		Pagination: toPaginationInfo(conn.PageInfo),
+	}, nil
 }
 
 // GetAccountStateChanges is a temporary stub replaced by the real implementation in Task 8 (TDD).

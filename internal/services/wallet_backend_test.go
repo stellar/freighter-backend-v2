@@ -831,6 +831,190 @@ func TestGetAccountTransactions(t *testing.T) {
 	})
 }
 
+func TestGetAccountOperations(t *testing.T) {
+	const addr = "GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"
+
+	// happyOpBody is the canonical single-operation response reused by several
+	// sub-tests that need a non-empty result.
+	const happyOpBody = `{"data":{"accountByAddress":{"operations":{` +
+		`"edges":[{"cursor":"op-1","node":{"id":1,"operationType":"PAYMENT","operationXdr":"AAAA","resultCode":"op_success","successful":true,"ledgerNumber":42,"ledgerCreatedAt":"2026-01-01T00:00:00Z","ingestedAt":"2026-01-01T00:00:01Z"}}],` +
+		`"pageInfo":{"startCursor":"op-1","endCursor":"op-1","hasNextPage":true,"hasPreviousPage":true}` +
+		`}}}}`
+
+	t.Run("happy path returns paginated response with translated cursors", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, vars map[string]interface{}) (int, string) {
+			// direction=next → first+after; no last/before
+			assert.EqualValues(t, 20, vars["first"])
+			assert.Equal(t, "cur-prev", vars["after"])
+			_, hasLast := vars["last"]
+			_, hasBefore := vars["before"]
+			assert.False(t, hasLast)
+			assert.False(t, hasBefore)
+			return 200, happyOpBody
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		cursor := "cur-prev"
+		got, err := svc.GetAccountOperations(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{
+			Limit:     20,
+			Cursor:    &cursor,
+			Direction: types.PaginationDirectionNext,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Len(t, got.Data, 1)
+		assert.Equal(t, int64(1), got.Data[0].ID)
+		assert.Equal(t, wbtypes.OperationTypePayment, got.Data[0].OperationType)
+		assert.True(t, got.Pagination.HasNext)
+		assert.True(t, got.Pagination.HasPrevious)
+		require.NotNil(t, got.Pagination.NextCursor)
+		assert.Equal(t, "op-1", *got.Pagination.NextCursor)
+	})
+
+	t.Run("direction=prev translates to last/before", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, vars map[string]interface{}) (int, string) {
+			assert.EqualValues(t, 5, vars["last"])
+			assert.Equal(t, "cur-end", vars["before"])
+			_, hasFirst := vars["first"]
+			_, hasAfter := vars["after"]
+			assert.False(t, hasFirst)
+			assert.False(t, hasAfter)
+			return 200, `{"data":{"accountByAddress":{"operations":{"edges":[],"pageInfo":{"hasNextPage":false,"hasPreviousPage":false}}}}}`
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		cursor := "cur-end"
+		_, err := svc.GetAccountOperations(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{
+			Limit:     5,
+			Cursor:    &cursor,
+			Direction: types.PaginationDirectionPrev,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("accountByAddress null returns ErrAccountNotFound", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 200, `{"data":{"accountByAddress":null}}`
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		_, err := svc.GetAccountOperations(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, wbclient.ErrAccountNotFound))
+	})
+
+	t.Run("GraphQL errors are wrapped as graphql_error", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 200, `{"errors":[{"message":"schema bug"}]}`
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		_, err := svc.GetAccountOperations(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
+		require.Error(t, err)
+		var upErr *metrics.UpstreamError
+		require.True(t, errors.As(err, &upErr))
+		assert.Equal(t, "graphql_error", upErr.Kind)
+	})
+
+	t.Run("HTTP 503 from upstream is wrapped as http_error with code", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 503, `service unavailable`
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		_, err := svc.GetAccountOperations(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
+		require.Error(t, err)
+		var upErr *metrics.UpstreamError
+		require.True(t, errors.As(err, &upErr))
+		assert.Equal(t, "http_error", upErr.Kind)
+		assert.Equal(t, 503, upErr.Code)
+	})
+
+	t.Run("null operations connection on existing account returns empty page", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 200, `{"data":{"accountByAddress":{"operations":null}}}`
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		got, err := svc.GetAccountOperations(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, []*wbtypes.Operation{}, got.Data)
+		assert.False(t, got.Pagination.HasNext)
+		assert.False(t, got.Pagination.HasPrevious)
+		assert.Nil(t, got.Pagination.NextCursor)
+		assert.Nil(t, got.Pagination.PrevCursor)
+	})
+
+	t.Run("edges with nil node entries are skipped", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 200, `{"data":{"accountByAddress":{"operations":{` +
+				`"edges":[` +
+				`{"cursor":"a","node":null},` +
+				`{"cursor":"b","node":{"id":1,"operationType":"PAYMENT","operationXdr":"AAAA","resultCode":"op_success","successful":true,"ledgerNumber":42,"ledgerCreatedAt":"2026-01-01T00:00:00Z","ingestedAt":"2026-01-01T00:00:01Z"}}` +
+				`],` +
+				`"pageInfo":{"hasNextPage":false,"hasPreviousPage":false}` +
+				`}}}}`
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		got, err := svc.GetAccountOperations(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Len(t, got.Data, 1)
+		assert.Equal(t, int64(1), got.Data[0].ID)
+	})
+
+	t.Run("nil edges slice returns empty page", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 200, `{"data":{"accountByAddress":{"operations":{` +
+				`"edges":null,` +
+				`"pageInfo":{"hasNextPage":false,"hasPreviousPage":false}` +
+				`}}}}`
+		})
+		defer server.Close()
+
+		svc := newTestWalletBackendService(t, server.URL)
+		got, err := svc.GetAccountOperations(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, []*wbtypes.Operation{}, got.Data)
+	})
+
+	t.Run("ErrAccountNotFound does not increment ErrorsTotal", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 200, `{"data":{"accountByAddress":null}}`
+		})
+		defer server.Close()
+
+		reg := prometheus.NewRegistry()
+		svcMetrics := metrics.NewService(reg)
+		svc := newTestWalletBackendServiceWithMetrics(t, server.URL, svcMetrics)
+		_, err := svc.GetAccountOperations(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, wbclient.ErrAccountNotFound))
+
+		assert.Equal(t, float64(1), testutilCounterValue(t, reg, "freighter_service_calls_total", map[string]string{"service": "wallet-backend", "method": "GetAccountOperations", "network": types.PUBLIC}))
+		assert.Equal(t, float64(0), testutilCounterValue(t, reg, "freighter_service_errors_total", nil))
+	})
+}
+
 // newTestWalletBackendService builds a walletBackendService configured against the
 // given pubnet URL, with no metrics (test helper for non-metrics tests).
 func newTestWalletBackendService(t *testing.T, pubnetURL string) types.WalletBackendService {
