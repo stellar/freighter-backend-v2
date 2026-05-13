@@ -171,3 +171,23 @@ func (h *AccountHistoryHandler) GetAccountTransactions(w http.ResponseWriter, r 
 	w.Header().Set("Content-Type", "application/json")
 	return response.OK(w, result)
 }
+
+// GetAccountOperations returns one page of an account's operations from
+// wallet-backend, in the PaginatedResponse[T] envelope.
+func (h *AccountHistoryHandler) GetAccountOperations(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := context.WithTimeout(r.Context(), AccountHistoryContextTimeout)
+	defer cancel()
+
+	address, network, params, herr := h.parseRequest(r)
+	if herr != nil {
+		return herr
+	}
+
+	result, err := h.WalletBackendService.GetAccountOperations(ctx, address, network, params)
+	if err != nil {
+		return translateServiceError(r.Context(), err, "account operations", address, network)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	return response.OK(w, result)
+}
