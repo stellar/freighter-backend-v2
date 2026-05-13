@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -115,6 +116,8 @@ func TestParseRequest(t *testing.T) {
 		assert.Equal(t, "abc", *p.Cursor)
 		require.NotNil(t, p.Since)
 		require.NotNil(t, p.Until)
+		assert.Equal(t, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), *p.Since)
+		assert.Equal(t, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), *p.Until)
 	})
 
 	rejection := []struct {
