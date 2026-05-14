@@ -266,9 +266,7 @@ func (p *pricesService) resolveMisses(ctx context.Context, network, cacheNet str
 // not-found/malformed assets resolve to nil; transient failures and budget
 // exhaustion leave the token eligible for stale fallback. The asset and
 // candles calls run concurrently; on a terminal asset error the candles
-// call is cancelled so unknown assets don't double upstream load. Native
-// XLM has no candle data upstream, so the candles call is skipped and the
-// price7d fallback computes the 24h change.
+// call is cancelled so unknown assets don't double upstream load.
 func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, canonical string) (_ *types.PriceEntry, resolved bool) {
 	stellarExpertID := assetid.ToStellarExpert(canonical)
 
@@ -282,8 +280,6 @@ func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, ca
 
 	fetchCtx, cancelFetch := context.WithCancel(ctx)
 	defer cancelFetch()
-
-	skipCandles := canonical == assetid.NativeCanonical
 
 	var (
 		asset      *types.StellarExpertAsset
@@ -300,13 +296,11 @@ func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, ca
 			cancelFetch()
 		}
 	}()
-	if !skipCandles {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			candles, candlesErr = p.stellarExpert.GetAssetCandles(fetchCtx, network, stellarExpertID, from, to, candlesResolutionSec)
-		}()
-	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		candles, candlesErr = p.stellarExpert.GetAssetCandles(fetchCtx, network, stellarExpertID, from, to, candlesResolutionSec)
+	}()
 	wg.Wait()
 
 	if assetErr != nil {
@@ -349,10 +343,10 @@ func changeFromCandlesOrFallback(asset *types.StellarExpertAsset, candles []type
 }
 
 // change24hFromCandles computes the 24h percentage delta between currentPrice
-// and the open of the oldest candle. Returns nil when the upstream is empty
-// (e.g. native XLM has no candles), the open is zero, or the oldest returned
-// candle is too far from 24h before `to` to credibly represent a 24h window
-// (sparse trading or anomalous upstream return).
+// and the open of the oldest candle. Returns nil when the upstream is empty,
+// the open is zero, or the oldest returned candle is too far from 24h before
+// `to` to credibly represent a 24h window (sparse trading or anomalous
+// upstream return).
 func change24hFromCandles(currentPrice float64, candles []types.StellarExpertCandle, to time.Time) *string {
 	if len(candles) == 0 {
 		return nil

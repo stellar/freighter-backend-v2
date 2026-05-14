@@ -182,7 +182,7 @@ func TestStellarExpert_GetAssetCandles_Success(t *testing.T) {
 	assert.Equal(t, int64(1739707200), candles[0].TS())
 }
 
-func TestStellarExpert_GetAssetCandles_EmptyForNativeXLM(t *testing.T) {
+func TestStellarExpert_GetAssetCandles_EmptyResponse(t *testing.T) {
 	t.Parallel()
 
 	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -190,7 +190,7 @@ func TestStellarExpert_GetAssetCandles_EmptyForNativeXLM(t *testing.T) {
 		_, _ = w.Write([]byte(`[]`))
 	}))
 
-	candles, err := svc.GetAssetCandles(context.Background(), types.PUBLIC, "XLM", time.Now().Add(-time.Hour), time.Now(), 3600)
+	candles, err := svc.GetAssetCandles(context.Background(), types.PUBLIC, "USDC-G..-1", time.Now().Add(-time.Hour), time.Now(), 3600)
 	require.NoError(t, err)
 	assert.Empty(t, candles)
 }

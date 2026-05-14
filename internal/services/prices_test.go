@@ -137,8 +137,8 @@ func (f *fakeStellarExpert) GetAssetCandles(ctx context.Context, network, assetI
 		return nil, err
 	}
 	if !ok {
-		// No candles configured: return empty (the native XLM shape) rather
-		// than an error so the prices service's fallback path is exercised.
+		// No candles configured: return empty so the prices service's
+		// price7d fallback path is exercised.
 		return nil, nil
 	}
 	return rows, nil
@@ -242,12 +242,38 @@ func TestPrices_CandlesEmptyFallsBackToPrice7d(t *testing.T) {
 
 	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
-	// XLM has no candles upstream; the service skips the call and uses
-	// price7d to derive the 24h change.
+	// Candles unset on the fake → returns empty. Service must still call
+	// candles and then fall back to price7d for the 24h change.
+	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
+		Price:   1.10,
+		Price7d: recentDailyCandles(now, 1.0, 1.099),
+	})
+
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
+	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
+	require.NoError(t, err)
+
+	usdc := got["USDC:"+testIssuer]
+	require.NotNil(t, usdc)
+	assert.Equal(t, "1.1", usdc.CurrentPrice)
+	require.NotNil(t, usdc.PercentagePriceChange24h)
+	// price7d-derived: (1.10 - 1.0) / 1.0 * 100 = 10
+	assert.Equal(t, "10", *usdc.PercentagePriceChange24h)
+	assert.Equal(t, 1, stellarExpert.CandleCallCount("USDC-"+testIssuer+"-1"), "candles call is made even when empty; price7d drives the fallback")
+}
+
+func TestPrices_XLM_UsesCandles(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	stellarExpert := newFakeStellarExpert()
+	// price7d would yield ~0.63% if used; candles yield ~-2.02 — verify candles win.
 	stellarExpert.Set("XLM", &types.StellarExpertAsset{
 		Price:   0.16,
-		Price7d: recentDailyCandles(now, 0.158, 0.16),
+		Price7d: recentDailyCandles(now, 0.159, 0.16),
 	})
+	// oldest open=0.1633 → (0.16 - 0.1633) / 0.1633 * 100 ≈ -2.02
+	stellarExpert.SetCandles("XLM", hourlyCandlesAged(now, 24*time.Hour, 0.1633, 0.1625))
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
@@ -257,8 +283,8 @@ func TestPrices_CandlesEmptyFallsBackToPrice7d(t *testing.T) {
 	require.NotNil(t, xlm)
 	assert.Equal(t, "0.16", xlm.CurrentPrice)
 	require.NotNil(t, xlm.PercentagePriceChange24h)
-	assert.Equal(t, "1.27", *xlm.PercentagePriceChange24h)
-	assert.Equal(t, 0, stellarExpert.CandleCallCount("XLM"), "candles call is skipped for native XLM")
+	assert.Equal(t, "-2.02", *xlm.PercentagePriceChange24h)
+	assert.Equal(t, 1, stellarExpert.CandleCallCount("XLM"))
 }
 
 func TestPrices_CandlesErrorFallsBackToPrice7d(t *testing.T) {

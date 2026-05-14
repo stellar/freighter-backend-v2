@@ -136,8 +136,8 @@ func (s *stellarExpertService) GetAsset(ctx context.Context, network, assetID st
 
 // GetAssetCandles fetches OHLC candles for one asset over [from, to] at the
 // given resolution (seconds). assetID must already be in Stellar Expert wire
-// format. Native XLM has no candle data; the upstream returns an empty array
-// and this method propagates that as a nil-error empty slice.
+// format. An empty upstream response (no trades in the window) is propagated
+// as a nil-error empty slice; callers fall back to price7d for 24h change.
 func (s *stellarExpertService) GetAssetCandles(ctx context.Context, network, assetID string, from, to time.Time, resolutionSec int) (_ []types.StellarExpertCandle, err error) {
 	start := time.Now()
 	defer func() {
