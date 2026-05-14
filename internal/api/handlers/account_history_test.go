@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -68,6 +69,7 @@ func TestNewAccountHistoryHandler_Validation(t *testing.T) {
 		{"maxLimit zero", 20, 0, true},
 		{"maxLimit negative", 20, -1, true},
 		{"default greater than max", 200, 100, true},
+		{"maxLimit exceeds int32", 20, math.MaxInt32 + 1, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

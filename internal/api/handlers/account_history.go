@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -80,6 +81,9 @@ func NewAccountHistoryHandler(svc types.WalletBackendService, defaultLimit, maxL
 	if maxLimit <= 0 {
 		return nil, fmt.Errorf("account-history max limit must be > 0, got %d", maxLimit)
 	}
+	if maxLimit > math.MaxInt32 {
+		return nil, fmt.Errorf("account-history max limit must be <= %d, got %d", math.MaxInt32, maxLimit)
+	}
 	if defaultLimit > maxLimit {
 		return nil, fmt.Errorf("account-history default limit (%d) must be <= max limit (%d)", defaultLimit, maxLimit)
 	}
@@ -111,7 +115,7 @@ func (h *AccountHistoryHandler) parseRequest(r *http.Request) (address, network 
 		if err != nil {
 			return "", "", types.AccountHistoryParams{}, httperror.BadRequest(fmt.Sprintf("invalid limit %q: not an integer", s), err)
 		}
-		if n < 1 || n > h.MaxLimit {
+		if n < 1 || n > h.MaxLimit || n > math.MaxInt32 {
 			return "", "", types.AccountHistoryParams{}, httperror.BadRequest(fmt.Sprintf("invalid limit %d: must be between 1 and %d", n, h.MaxLimit), errors.New("limit out of range"))
 		}
 		limit = n
