@@ -77,6 +77,7 @@ func (s *ApiServer) initServices() error {
 		s.cfg.WalletBackendConfig.TestnetUrl,
 		s.cfg.WalletBackendConfig.PubnetSigningKey,
 		s.cfg.WalletBackendConfig.TestnetSigningKey,
+		s.cfg.AppConfig.WalletBackendBalanceConcurrency,
 		s.appMetrics.Service,
 	)
 	if err != nil {
@@ -126,7 +127,7 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags))
 
 	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
-	mux.HandleFunc("POST /api/v1/account-balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances))
+	mux.HandleFunc("POST /api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances))
 
 	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest)
 	mux.HandleFunc("POST /api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices))
