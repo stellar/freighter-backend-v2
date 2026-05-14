@@ -246,8 +246,13 @@ func translateParams(p types.AccountHistoryParams) (first, last *int32, after, b
 
 // toPaginationInfo copies an upstream PageInfo into the freighter-backend
 // response envelope shape. Cursors that the SDK omits (HasNextPage=false /
-// HasPreviousPage=false) are returned as nil pointers per the spec.
+// HasPreviousPage=false) are returned as nil pointers per the spec. A nil pi
+// returns a zero-value PaginationInfo (defense-in-depth: the SDK's connection
+// validators reject null pageInfo, but the nil-safe path costs one line).
 func toPaginationInfo(pi *wbtypes.PageInfo) types.PaginationInfo {
+	if pi == nil {
+		return types.PaginationInfo{}
+	}
 	out := types.PaginationInfo{
 		HasNext:     pi.HasNextPage,
 		HasPrevious: pi.HasPreviousPage,

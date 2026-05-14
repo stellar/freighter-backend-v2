@@ -1267,3 +1267,9 @@ func testutilCounterValue(t *testing.T, g prometheus.Gatherer, name string, labe
 	}
 	return 0
 }
+
+func TestToPaginationInfo_NilSafe(t *testing.T) {
+	t.Parallel()
+	got := toPaginationInfo(nil)
+	assert.Equal(t, types.PaginationInfo{}, got, "nil pi must return zero PaginationInfo")
+}
