@@ -2,6 +2,7 @@ package serve
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/spf13/cobra"
 
@@ -33,8 +34,8 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.AppConfig.WalletBackendBalanceConcurrency; n <= 0 {
 				return fmt.Errorf("--wallet-backend-balance-concurrency=%d must be positive", n)
 			}
-			if d, m := s.Cfg.AppConfig.AccountHistoryDefaultLimit, s.Cfg.AppConfig.AccountHistoryMaxLimit; d <= 0 || m <= 0 || d > m {
-				return fmt.Errorf("--account-history-default-limit=%d / --account-history-max-limit=%d must be positive and default <= max", d, m)
+			if d, m := s.Cfg.AppConfig.AccountHistoryDefaultLimit, s.Cfg.AppConfig.AccountHistoryMaxLimit; d <= 0 || m <= 0 || d > m || m > math.MaxInt32 {
+				return fmt.Errorf("--account-history-default-limit=%d / --account-history-max-limit=%d must be positive, default <= max, and max <= %d", d, m, math.MaxInt32)
 			}
 			return nil
 		},

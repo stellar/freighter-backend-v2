@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -112,4 +113,23 @@ func TestServeCmd_AcceptsMaxLedgerKeyAddressesAtUpstreamCeiling(t *testing.T) {
 	cmd.SetArgs([]string{"--max-ledger-key-addresses", fmt.Sprintf("%d", services.MaxLedgerEntryKeys)})
 
 	require.NoError(t, cmd.Execute())
+}
+
+func TestServeCmd_RejectsAccountHistoryMaxLimitAboveMaxInt32(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	// math.MaxInt32+1 overflows int on 32-bit but is safe on 64-bit (our target).
+	cmd.SetArgs([]string{
+		"--account-history-default-limit", "20",
+		"--account-history-max-limit", fmt.Sprintf("%d", math.MaxInt32+1),
+	})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), fmt.Sprintf("max <= %d", math.MaxInt32))
 }
