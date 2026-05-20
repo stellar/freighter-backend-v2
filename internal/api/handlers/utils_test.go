@@ -192,7 +192,7 @@ func TestTranslateServiceError(t *testing.T) {
 	}{
 		{"account not found -> 404", wbclient.ErrAccountNotFound, http.StatusNotFound},
 		{"ctx deadline -> 504", context.DeadlineExceeded, http.StatusGatewayTimeout},
-		{"ctx canceled -> 504", context.Canceled, http.StatusGatewayTimeout},
+		{"ctx canceled -> 503", context.Canceled, http.StatusServiceUnavailable},
 		{"graphql_error -> 502", &metrics.UpstreamError{Kind: "graphql_error", Err: errors.New("schema bug")}, http.StatusBadGateway},
 		{"http_error -> 502", &metrics.UpstreamError{Kind: "http_error", Code: 503, Err: errors.New("upstream down")}, http.StatusBadGateway},
 		{"url.Error -> 502", &url.Error{Op: "Post", URL: "http://wb/graphql", Err: errors.New("dial tcp: connection refused")}, http.StatusBadGateway},

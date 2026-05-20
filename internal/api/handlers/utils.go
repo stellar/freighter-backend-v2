@@ -35,7 +35,8 @@ func isValidWalletBackendNetwork(network string) bool {
 //
 // Status mapping:
 //   - wbclient.ErrAccountNotFound       -> 404
-//   - context.DeadlineExceeded/Canceled -> 504
+//   - context.DeadlineExceeded          -> 504 (server-side timeout)
+//   - context.Canceled                  -> 503 (client disconnect / parent abort)
 //   - *metrics.UpstreamError (any Kind) -> 502 (graphql_error, http_error)
 //   - *url.Error / *net.OpError         -> 502 (transport / DNS / dial)
 //   - anything else                     -> 500
@@ -43,9 +44,12 @@ func translateServiceError(ctx context.Context, err error, resource, address, ne
 	switch {
 	case errors.Is(err, wbclient.ErrAccountNotFound):
 		return httperror.NotFound(fmt.Sprintf("%s not found", resource), err)
-	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+	case errors.Is(err, context.DeadlineExceeded):
 		logger.ErrorWithContext(ctx, "wallet-backend call timed out", "resource", resource, "address", address, "network", network, "error", err)
 		return httperror.GatewayTimeout(fmt.Sprintf("Failed to get %s", resource), err)
+	case errors.Is(err, context.Canceled):
+		logger.ErrorWithContext(ctx, "wallet-backend call canceled by client", "resource", resource, "address", address, "network", network, "error", err)
+		return httperror.ServiceUnavailable(fmt.Sprintf("Failed to get %s", resource), err)
 	}
 	var upErr *metrics.UpstreamError
 	if errors.As(err, &upErr) {
