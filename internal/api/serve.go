@@ -123,8 +123,6 @@ func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 		return nil, fmt.Errorf("init account-history handler: %w", err)
 	}
 	mux.HandleFunc("GET /api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions))
-	mux.HandleFunc("GET /api/v1/accounts/{address}/operations", handlers.CustomHandler(accountHistoryHandler.GetAccountOperations))
-	mux.HandleFunc("GET /api/v1/accounts/{address}/state-changes", handlers.CustomHandler(accountHistoryHandler.GetAccountStateChanges))
 
 	return mux, nil
 }

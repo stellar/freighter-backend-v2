@@ -1,5 +1,5 @@
-// ABOUTME: HTTP handlers for the account-history endpoints (transactions / operations / state-changes).
-// ABOUTME: Shares parseRequest and translateServiceError helpers, all going through wallet-backend's GraphQL API.
+// ABOUTME: HTTP handler for the account-transactions history endpoint (transactions with embedded ops + state changes).
+// ABOUTME: Validates the request via parseRequest and maps service errors via translateServiceError, all through wallet-backend's GraphQL API.
 package handlers
 
 import (
@@ -18,12 +18,12 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
-// AccountHistoryContextTimeout caps each /accounts/{address}/{...} request
+// AccountHistoryContextTimeout caps each /accounts/{address}/transactions request
 // at 10s. Matches AccountBalancesContextTimeout.
 const AccountHistoryContextTimeout = 10 * time.Second
 
-// AccountHistoryHandler serves the three account-scoped paginated history
-// endpoints. All three methods route through parseRequest and translateServiceError.
+// AccountHistoryHandler serves the single account-scoped transactions history
+// endpoint. GetAccountTransactions routes through parseRequest and translateServiceError.
 type AccountHistoryHandler struct {
 	WalletBackendService types.WalletBackendService
 	DefaultLimit         int
@@ -129,48 +129,6 @@ func (h *AccountHistoryHandler) GetAccountTransactions(w http.ResponseWriter, r 
 	result, err := h.WalletBackendService.GetAccountTransactions(ctx, address, network, params)
 	if err != nil {
 		return translateServiceError(r.Context(), err, "account transactions", address, network)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	return response.OK(w, result)
-}
-
-// GetAccountOperations returns one page of an account's operations from
-// wallet-backend, in the PaginatedResponse[T] envelope.
-func (h *AccountHistoryHandler) GetAccountOperations(w http.ResponseWriter, r *http.Request) error {
-	ctx, cancel := context.WithTimeout(r.Context(), AccountHistoryContextTimeout)
-	defer cancel()
-
-	address, network, params, herr := h.parseRequest(r)
-	if herr != nil {
-		return herr
-	}
-
-	result, err := h.WalletBackendService.GetAccountOperations(ctx, address, network, params)
-	if err != nil {
-		return translateServiceError(r.Context(), err, "account operations", address, network)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	return response.OK(w, result)
-}
-
-// GetAccountStateChanges returns one page of an account's state changes from
-// wallet-backend, in the PaginatedResponse[T] envelope. The Data slice elements
-// are polymorphic wbtypes.StateChangeNode values (concrete type determined by
-// the upstream __typename discriminator).
-func (h *AccountHistoryHandler) GetAccountStateChanges(w http.ResponseWriter, r *http.Request) error {
-	ctx, cancel := context.WithTimeout(r.Context(), AccountHistoryContextTimeout)
-	defer cancel()
-
-	address, network, params, herr := h.parseRequest(r)
-	if herr != nil {
-		return herr
-	}
-
-	result, err := h.WalletBackendService.GetAccountStateChanges(ctx, address, network, params)
-	if err != nil {
-		return translateServiceError(r.Context(), err, "account state changes", address, network)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

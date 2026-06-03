@@ -3,8 +3,6 @@ package types
 import (
 	"context"
 
-	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
-
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
 )
@@ -44,7 +42,5 @@ type RPCService interface {
 type WalletBackendService interface {
 	Service
 	GetBalancesByAccountAddresses(ctx context.Context, addresses []string, network string) (interface{}, error)
-	GetAccountTransactions(ctx context.Context, address, network string, params AccountHistoryParams) (*PaginatedResponse[*wbtypes.GraphQLTransaction], error)
-	GetAccountOperations(ctx context.Context, address, network string, params AccountHistoryParams) (*PaginatedResponse[*wbtypes.Operation], error)
-	GetAccountStateChanges(ctx context.Context, address, network string, params AccountHistoryParams) (*PaginatedResponse[wbtypes.StateChangeNode], error)
+	GetAccountTransactions(ctx context.Context, address, network string, params AccountHistoryParams) (*PaginatedResponse[*AccountTransaction], error)
 }

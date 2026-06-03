@@ -39,24 +39,42 @@ func TestMapStateChange_AllVariants(t *testing.T) {
 		in   wbtypes.StateChangeNode
 		want types.StateChange
 	}{
-		{"standard_balance", &wbtypes.StandardBalanceChange{BaseStateChangeFields: base, TokenID: "native", Amount: "10"},
-			&types.StandardBalanceChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, StandardBalanceTokenID: "native", Amount: "10"}},
-		{"account", &wbtypes.AccountChange{BaseStateChangeFields: base, FunderAddress: &s},
-			&types.AccountChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, FunderAddress: &s}},
-		{"signer", &wbtypes.SignerChange{BaseStateChangeFields: base, SignerAddress: &s, SignerWeights: &s},
-			&types.SignerChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, SignerAddress: &s, SignerWeights: &s}},
-		{"signer_thresholds", &wbtypes.SignerThresholdsChange{BaseStateChangeFields: base, Thresholds: "1,2,3"},
-			&types.SignerThresholdsChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, Thresholds: "1,2,3"}},
-		{"metadata", &wbtypes.MetadataChange{BaseStateChangeFields: base, KeyValue: "k=v"},
-			&types.MetadataChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, MetadataKeyValue: "k=v"}},
-		{"flags", &wbtypes.FlagsChange{BaseStateChangeFields: base, Flags: []string{"AUTH"}},
-			&types.FlagsChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, Flags: []string{"AUTH"}}},
-		{"trustline", &wbtypes.TrustlineChange{BaseStateChangeFields: base, TokenID: &s, Limit: &s, LiquidityPoolID: &s},
-			&types.TrustlineChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, TrustlineTokenID: &s, Limit: &s, TrustlineLiquidityPoolID: &s}},
-		{"reserves", &wbtypes.ReservesChange{BaseStateChangeFields: base, SponsoredAddress: &s, SponsorAddress: &s, SponsoredData: &s, SponsoredTrustline: &s, ClaimableBalanceID: &s, LiquidityPoolID: &s},
-			&types.ReservesChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, SponsoredAddress: &s, SponsorAddress: &s, SponsoredData: &s, SponsoredTrustline: &s, ClaimableBalanceID: &s, LiquidityPoolID: &s}},
-		{"balance_authorization", &wbtypes.BalanceAuthorizationChange{BaseStateChangeFields: base, TokenID: &s, LiquidityPoolID: &s, Flags: []string{"X"}},
-			&types.BalanceAuthorizationChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, BalanceAuthTokenID: &s, BalanceAuthLiquidityPoolID: &s, Flags: []string{"X"}}},
+		{
+			"standard_balance", &wbtypes.StandardBalanceChange{BaseStateChangeFields: base, TokenID: "native", Amount: "10"},
+			&types.StandardBalanceChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, StandardBalanceTokenID: "native", Amount: "10"},
+		},
+		{
+			"account", &wbtypes.AccountChange{BaseStateChangeFields: base, FunderAddress: &s},
+			&types.AccountChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, FunderAddress: &s},
+		},
+		{
+			"signer", &wbtypes.SignerChange{BaseStateChangeFields: base, SignerAddress: &s, SignerWeights: &s},
+			&types.SignerChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, SignerAddress: &s, SignerWeights: &s},
+		},
+		{
+			"signer_thresholds", &wbtypes.SignerThresholdsChange{BaseStateChangeFields: base, Thresholds: "1,2,3"},
+			&types.SignerThresholdsChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, Thresholds: "1,2,3"},
+		},
+		{
+			"metadata", &wbtypes.MetadataChange{BaseStateChangeFields: base, KeyValue: "k=v"},
+			&types.MetadataChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, MetadataKeyValue: "k=v"},
+		},
+		{
+			"flags", &wbtypes.FlagsChange{BaseStateChangeFields: base, Flags: []string{"AUTH"}},
+			&types.FlagsChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, Flags: []string{"AUTH"}},
+		},
+		{
+			"trustline", &wbtypes.TrustlineChange{BaseStateChangeFields: base, TokenID: &s, Limit: &s, LiquidityPoolID: &s},
+			&types.TrustlineChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, TrustlineTokenID: &s, Limit: &s, TrustlineLiquidityPoolID: &s},
+		},
+		{
+			"reserves", &wbtypes.ReservesChange{BaseStateChangeFields: base, SponsoredAddress: &s, SponsorAddress: &s, SponsoredData: &s, SponsoredTrustline: &s, ClaimableBalanceID: &s, LiquidityPoolID: &s},
+			&types.ReservesChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, SponsoredAddress: &s, SponsorAddress: &s, SponsoredData: &s, SponsoredTrustline: &s, ClaimableBalanceID: &s, LiquidityPoolID: &s},
+		},
+		{
+			"balance_authorization", &wbtypes.BalanceAuthorizationChange{BaseStateChangeFields: base, TokenID: &s, LiquidityPoolID: &s, Flags: []string{"X"}},
+			&types.BalanceAuthorizationChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, BalanceAuthTokenID: &s, BalanceAuthLiquidityPoolID: &s, Flags: []string{"X"}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

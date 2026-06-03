@@ -137,15 +137,10 @@ func TestApiServer_initHandlers_RegistersAccountHistoryRoutes(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, mux)
 
-	for _, path := range []string{
-		"/api/v1/accounts/GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF/transactions",
-		"/api/v1/accounts/GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF/operations",
-		"/api/v1/accounts/GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF/state-changes",
-	} {
-		handler, pattern := mux.Handler(&http.Request{Method: "GET", URL: mustParseURL(path)})
-		assert.NotNil(t, handler, "no handler registered for %s", path)
-		assert.NotEmpty(t, pattern, "no pattern matched for %s", path)
-	}
+	path := "/api/v1/accounts/GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF/transactions"
+	handler, pattern := mux.Handler(&http.Request{Method: "GET", URL: mustParseURL(path)})
+	assert.NotNil(t, handler, "no handler registered for %s", path)
+	assert.NotEmpty(t, pattern, "no pattern matched for %s", path)
 }
 
 func TestApiServer_initHandlers_ReturnsErrorOnInvalidConfig(t *testing.T) {

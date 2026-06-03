@@ -1,5 +1,5 @@
 // ABOUTME: Wallet-backend service implementation that wraps the wbclient SDK and exposes the methods used by API handlers.
-// ABOUTME: Hosts the balances fan-out and the per-account history methods (transactions / operations / state-changes), sharing translate/page-info helpers.
+// ABOUTME: Hosts the balances fan-out and the single account-transactions history method (with embedded ops + state changes), sharing translate/page-info helpers.
 package services
 
 import (
@@ -285,40 +285,18 @@ func (w *walletBackendService) recordWBCall(method, network string, start time.T
 // emptyTxPage is the empty-page response shape used when wallet-backend
 // returns a null transactions connection on an existing account (schema-
 // valid per wallet-backend PR #616 — distinct from ErrAccountNotFound).
-func emptyTxPage() *types.PaginatedResponse[*wbtypes.GraphQLTransaction] {
-	return &types.PaginatedResponse[*wbtypes.GraphQLTransaction]{
-		Data:       []*wbtypes.GraphQLTransaction{},
+func emptyTxPage() *types.PaginatedResponse[*types.AccountTransaction] {
+	return &types.PaginatedResponse[*types.AccountTransaction]{
+		Data:       []*types.AccountTransaction{},
 		Pagination: types.PaginationInfo{},
 	}
 }
 
-// emptyOpPage is the empty-page response shape used when wallet-backend
-// returns a null operations connection on an existing account (schema-
-// valid per wallet-backend PR #616 — distinct from ErrAccountNotFound).
-func emptyOpPage() *types.PaginatedResponse[*wbtypes.Operation] {
-	return &types.PaginatedResponse[*wbtypes.Operation]{
-		Data:       []*wbtypes.Operation{},
-		Pagination: types.PaginationInfo{},
-	}
-}
-
-// emptyStateChangePage is the empty-page response shape used when wallet-backend
-// returns a null stateChanges connection on an existing account (schema-valid
-// per wallet-backend PR #616 — distinct from ErrAccountNotFound).
-func emptyStateChangePage() *types.PaginatedResponse[wbtypes.StateChangeNode] {
-	return &types.PaginatedResponse[wbtypes.StateChangeNode]{
-		Data:       []wbtypes.StateChangeNode{},
-		Pagination: types.PaginationInfo{},
-	}
-}
-
-// GetAccountTransactions returns a paginated list of transactions for the given
-// account address and network. It translates the freighter-backend pagination
-// params into the (first/last/after/before) tuple expected by the wbclient SDK
-// and maps the upstream TransactionConnection into the shared PaginatedResponse
-// envelope. ErrAccountNotFound is returned unwrapped so callers can distinguish
-// a missing account from systemic upstream failures.
-func (w *walletBackendService) GetAccountTransactions(ctx context.Context, address, network string, p types.AccountHistoryParams) (_ *types.PaginatedResponse[*wbtypes.GraphQLTransaction], err error) {
+// GetAccountTransactions returns one page of an account's transactions, each
+// embedding that account's operations and state changes, via the wallet-backend
+// single nested GraphQL call. ErrAccountNotFound is returned unwrapped so callers
+// can distinguish a missing account from systemic upstream failures.
+func (w *walletBackendService) GetAccountTransactions(ctx context.Context, address, network string, p types.AccountHistoryParams) (_ *types.PaginatedResponse[*types.AccountTransaction], err error) {
 	start := time.Now()
 	defer func() { w.recordWBCall("GetAccountTransactions", network, start, err) }()
 
@@ -328,7 +306,7 @@ func (w *walletBackendService) GetAccountTransactions(ctx context.Context, addre
 	}
 
 	first, last, after, before := translateParams(p)
-	conn, err := client.GetAccountTransactions(ctx, address, p.Since, p.Until, first, last, after, before)
+	conn, err := client.GetAccountTransactionsWithOpsAndStateChanges(ctx, address, p.Since, p.Until, first, last, after, before)
 	if err != nil {
 		if errors.Is(err, wbclient.ErrAccountNotFound) {
 			return nil, err
@@ -339,91 +317,15 @@ func (w *walletBackendService) GetAccountTransactions(ctx context.Context, addre
 		return emptyTxPage(), nil
 	}
 
-	nodes := make([]*wbtypes.GraphQLTransaction, 0, len(conn.Edges))
+	items := make([]*types.AccountTransaction, 0, len(conn.Edges))
 	for _, e := range conn.Edges {
-		if e.Node == nil {
+		if e == nil || e.Node == nil {
 			continue
 		}
-		nodes = append(nodes, e.Node)
+		items = append(items, mapAccountTransactionEdge(e))
 	}
-	return &types.PaginatedResponse[*wbtypes.GraphQLTransaction]{
-		Data:       nodes,
-		Pagination: toPaginationInfo(conn.PageInfo),
-	}, nil
-}
-
-// GetAccountOperations returns one page of an account's operations from
-// wallet-backend. See GetAccountTransactions for the shared semantics around
-// ErrAccountNotFound, null-connection-as-empty-page, and nil-node skipping.
-func (w *walletBackendService) GetAccountOperations(ctx context.Context, address, network string, p types.AccountHistoryParams) (_ *types.PaginatedResponse[*wbtypes.Operation], err error) {
-	start := time.Now()
-	defer func() { w.recordWBCall("GetAccountOperations", network, start, err) }()
-
-	client := w.configureNetworkClient(network)
-	if client == nil {
-		return nil, fmt.Errorf("wallet backend client not configured for network: %s", network)
-	}
-
-	first, last, after, before := translateParams(p)
-	conn, err := client.GetAccountOperations(ctx, address, p.Since, p.Until, first, last, after, before)
-	if err != nil {
-		if errors.Is(err, wbclient.ErrAccountNotFound) {
-			return nil, err
-		}
-		return nil, classifyWBError(err)
-	}
-	if conn == nil {
-		return emptyOpPage(), nil
-	}
-
-	nodes := make([]*wbtypes.Operation, 0, len(conn.Edges))
-	for _, e := range conn.Edges {
-		if e.Node == nil {
-			continue
-		}
-		nodes = append(nodes, e.Node)
-	}
-	return &types.PaginatedResponse[*wbtypes.Operation]{
-		Data:       nodes,
-		Pagination: toPaginationInfo(conn.PageInfo),
-	}, nil
-}
-
-// GetAccountStateChanges returns one page of an account's state changes from
-// wallet-backend. See GetAccountTransactions for the shared semantics around
-// ErrAccountNotFound, null-connection-as-empty-page, and nil-node skipping.
-// The SDK's state-change-specific filter args (transactionHash, operationID,
-// category, reason) are passed as nil — v1 does not expose them.
-func (w *walletBackendService) GetAccountStateChanges(ctx context.Context, address, network string, p types.AccountHistoryParams) (_ *types.PaginatedResponse[wbtypes.StateChangeNode], err error) {
-	start := time.Now()
-	defer func() { w.recordWBCall("GetAccountStateChanges", network, start, err) }()
-
-	client := w.configureNetworkClient(network)
-	if client == nil {
-		return nil, fmt.Errorf("wallet backend client not configured for network: %s", network)
-	}
-
-	first, last, after, before := translateParams(p)
-	conn, err := client.GetAccountStateChanges(ctx, address, nil, nil, nil, nil, p.Since, p.Until, first, last, after, before)
-	if err != nil {
-		if errors.Is(err, wbclient.ErrAccountNotFound) {
-			return nil, err
-		}
-		return nil, classifyWBError(err)
-	}
-	if conn == nil {
-		return emptyStateChangePage(), nil
-	}
-
-	nodes := make([]wbtypes.StateChangeNode, 0, len(conn.Edges))
-	for _, e := range conn.Edges {
-		if e.Node == nil {
-			continue
-		}
-		nodes = append(nodes, e.Node)
-	}
-	return &types.PaginatedResponse[wbtypes.StateChangeNode]{
-		Data:       nodes,
+	return &types.PaginatedResponse[*types.AccountTransaction]{
+		Data:       items,
 		Pagination: toPaginationInfo(conn.PageInfo),
 	}, nil
 }
