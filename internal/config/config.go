@@ -32,12 +32,12 @@ type AppConfig struct {
 	// so peak upstream load is concurrent_requests * WalletBackendBalanceConcurrency.
 	WalletBackendBalanceConcurrency int
 	// AccountHistoryDefaultLimit is the default page size for the
-	// /api/v1/accounts/{address}/transactions, /operations, and /state-changes
-	// endpoints when the client does not pass ?limit=. Must be > 0 and
-	// <= AccountHistoryMaxLimit.
+	// GET /api/v1/accounts/{address}/transactions endpoint when the client
+	// does not pass ?limit=. Must be > 0 and <= AccountHistoryMaxLimit.
 	AccountHistoryDefaultLimit int
-	// AccountHistoryMaxLimit is the maximum page size accepted by the same
-	// endpoints. Requests above this limit are rejected with 400. Must be > 0.
+	// AccountHistoryMaxLimit is the maximum page size accepted by that
+	// endpoint. Requests above it are rejected with 400. Must be > 0 and
+	// <= 100 (the wallet-backend upstream page-size cap).
 	AccountHistoryMaxLimit int
 }
 

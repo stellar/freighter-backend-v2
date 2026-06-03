@@ -22,6 +22,11 @@ import (
 // at 10s. Matches AccountBalancesContextTimeout.
 const AccountHistoryContextTimeout = 10 * time.Second
 
+// AccountHistoryUpstreamMaxLimit is the wallet-backend page-size ceiling (it
+// returns BAD_USER_INPUT beyond 100). freighter rejects a larger configured
+// max limit so a misconfiguration fails fast instead of 502-ing at request time.
+const AccountHistoryUpstreamMaxLimit = 100
+
 // AccountHistoryHandler serves the single account-scoped transactions history
 // endpoint. GetAccountTransactions routes through parseRequest and translateServiceError.
 type AccountHistoryHandler struct {
@@ -40,8 +45,8 @@ func NewAccountHistoryHandler(svc types.WalletBackendService, defaultLimit, maxL
 	if maxLimit <= 0 {
 		return nil, fmt.Errorf("account-history max limit must be > 0, got %d", maxLimit)
 	}
-	if maxLimit > math.MaxInt32 {
-		return nil, fmt.Errorf("account-history max limit must be <= %d, got %d", math.MaxInt32, maxLimit)
+	if maxLimit > AccountHistoryUpstreamMaxLimit {
+		return nil, fmt.Errorf("account-history max limit must be <= %d, got %d", AccountHistoryUpstreamMaxLimit, maxLimit)
 	}
 	if defaultLimit > maxLimit {
 		return nil, fmt.Errorf("account-history default limit (%d) must be <= max limit (%d)", defaultLimit, maxLimit)
