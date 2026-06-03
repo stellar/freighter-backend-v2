@@ -40,9 +40,9 @@ const (
 )
 
 // AccountHistoryParams carries pagination and time-range filters for the
-// account-scoped history endpoints (transactions / operations / state-changes).
-// Cursor is opaque (forwarded verbatim to wallet-backend). All time pointers
-// are nil when the caller omits the corresponding query param.
+// account-scoped transactions history endpoint. Cursor is opaque (forwarded
+// verbatim to wallet-backend). All time pointers are nil when the caller omits
+// the corresponding query param.
 type AccountHistoryParams struct {
 	Limit     int32
 	Cursor    *string
