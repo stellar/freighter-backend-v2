@@ -64,8 +64,8 @@ func NewAccountHistoryHandler(svc types.WalletBackendService, defaultLimit, maxL
 // (always status 400) on any validation failure.
 func (h *AccountHistoryHandler) parseRequest(r *http.Request) (address, network string, p types.AccountHistoryParams, herr *httperror.HttpError) {
 	address = r.PathValue("address")
-	if _, err := strkey.Decode(strkey.VersionByteAccountID, address); err != nil {
-		return "", "", types.AccountHistoryParams{}, httperror.BadRequest(fmt.Sprintf("invalid Stellar address %s: %s", address, err.Error()), err)
+	if !isValidStellarAddress(address) {
+		return "", "", types.AccountHistoryParams{}, httperror.BadRequest(fmt.Sprintf("invalid Stellar address %s: must be an account (G...) or contract (C...) address", address), errors.New("invalid address"))
 	}
 
 	network = r.URL.Query().Get("network")
@@ -118,6 +118,16 @@ func (h *AccountHistoryHandler) parseRequest(r *http.Request) (address, network 
 	}
 
 	return address, network, p, nil
+}
+
+// isValidStellarAddress accepts ed25519 account (G...) and contract (C...)
+// strkeys, mirroring wallet-backend's accountByAddress validation
+// (IsValidStellarAddress in wallet-backend internal/utils) so freighter
+// doesn't reject addresses the upstream can serve.
+func isValidStellarAddress(address string) bool {
+	_, errAccount := strkey.Decode(strkey.VersionByteAccountID, address)
+	_, errContract := strkey.Decode(strkey.VersionByteContract, address)
+	return errAccount == nil || errContract == nil
 }
 
 // GetAccountTransactions returns one page of an account's transactions from
