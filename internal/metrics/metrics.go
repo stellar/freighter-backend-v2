@@ -63,8 +63,8 @@ func NewHTTP(reg prometheus.Registerer) *HTTP {
 			Help: "Total number of HTTP requests.",
 		}, []string{"handler", "method", "code"}),
 		RequestDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name: "freighter_http_request_duration_seconds",
-			Help: "Duration of HTTP requests in seconds.",
+			Name:    "freighter_http_request_duration_seconds",
+			Help:    "Duration of HTTP requests in seconds.",
 			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.25, 0.35, 0.5, 0.75, 1, 2.5, 5, 10, 30},
 		}, []string{"handler", "method", "code"}),
 		InFlightRequests: prometheus.NewGauge(prometheus.GaugeOpts{
@@ -96,8 +96,8 @@ func NewService(reg prometheus.Registerer) *Service {
 			Help: "Total number of external service calls.",
 		}, []string{"service", "method", "network"}),
 		CallDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name: "freighter_service_call_duration_seconds",
-			Help: "Duration of external service calls in seconds.",
+			Name:    "freighter_service_call_duration_seconds",
+			Help:    "Duration of external service calls in seconds.",
 			Buckets: []float64{0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.25, 0.35, 0.5, 0.75, 1, 2.5, 5, 10, 30},
 		}, []string{"service", "method", "network"}),
 		ErrorsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
