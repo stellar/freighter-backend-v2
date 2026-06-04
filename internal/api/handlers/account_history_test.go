@@ -23,6 +23,10 @@ import (
 
 const testAddress = "GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"
 
+// testContractAddress is a valid contract (C...) strkey — the Meridian Pay
+// treasure-hunt contract from the dev environment config.
+const testContractAddress = "CCRIDTVINSOTNYOY6QNZ7JDCXWPOFF4SS3XXOIJIEPGVDGQ7UJP3DMJS"
+
 func TestNewAccountHistoryHandler_Validation(t *testing.T) {
 	t.Parallel()
 	mockSvc := &utils.MockWalletBackendService{}
@@ -75,6 +79,17 @@ func TestParseRequest(t *testing.T) {
 		assert.Nil(t, p.Until)
 	})
 
+	t.Run("happy path contract address", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodGet, "/x?network=PUBLIC", nil)
+		req.SetPathValue("address", testContractAddress)
+		addr, network, p, herr := h.parseRequest(req)
+		require.Nil(t, herr)
+		assert.Equal(t, testContractAddress, addr)
+		assert.Equal(t, "PUBLIC", network)
+		assert.EqualValues(t, 20, p.Limit) // default
+	})
+
 	t.Run("all params parsed", func(t *testing.T) {
 		t.Parallel()
 		req := httptest.NewRequest(http.MethodGet, "/x?network=TESTNET&limit=10&cursor=abc&direction=prev&since=2026-01-01T00:00:00Z&until=2026-02-01T00:00:00Z", nil)
@@ -107,6 +122,7 @@ func TestParseRequest(t *testing.T) {
 		{"since garbage", "network=PUBLIC&since=not-a-time", testAddress},
 		{"until garbage", "network=PUBLIC&until=not-a-time", testAddress},
 		{"since after until", "network=PUBLIC&since=2026-02-01T00:00:00Z&until=2026-01-01T00:00:00Z", testAddress},
+		{"muxed address", "network=PUBLIC", "MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVAAAAAAAAAAAAAJLK"},
 	}
 	for _, tc := range rejection {
 		t.Run("rejects "+tc.name, func(t *testing.T) {
