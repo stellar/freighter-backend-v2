@@ -65,10 +65,6 @@ func NewHTTP(reg prometheus.Registerer) *HTTP {
 		RequestDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: "freighter_http_request_duration_seconds",
 			Help: "Duration of HTTP requests in seconds.",
-			// 0.075/0.15/0.35/0.75 subdivide the 50ms-1s range where the
-			// account-history endpoint's distribution lives; without them,
-			// histogram_quantile interpolates p95/p99 across buckets up to
-			// 500ms wide and the reported tail swings by hundreds of ms.
 			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.25, 0.35, 0.5, 0.75, 1, 2.5, 5, 10, 30},
 		}, []string{"handler", "method", "code"}),
 		InFlightRequests: prometheus.NewGauge(prometheus.GaugeOpts{
@@ -102,9 +98,6 @@ func NewService(reg prometheus.Registerer) *Service {
 		CallDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: "freighter_service_call_duration_seconds",
 			Help: "Duration of external service calls in seconds.",
-			// Mirrors the HTTP histogram's 0.075-0.75 additions so the
-			// wallet-backend leg can be compared against end-to-end handler
-			// latency at the same resolution (tail attribution).
 			Buckets: []float64{0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.25, 0.35, 0.5, 0.75, 1, 2.5, 5, 10, 30},
 		}, []string{"service", "method", "network"}),
 		ErrorsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
