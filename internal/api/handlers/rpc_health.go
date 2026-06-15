@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
@@ -31,6 +33,17 @@ func (h *RPCHealthHandler) CheckRPCHealth(w http.ResponseWriter, r *http.Request
 	network := r.URL.Query().Get("network")
 	if network == "" {
 		network = types.PUBLIC
+	}
+
+	// Validate against the finite set of supported networks before passing the
+	// value downstream. The value flows into Prometheus metric labels, so an
+	// unbounded, caller-controlled network would create unbounded label
+	// cardinality and unbounded memory growth.
+	if !isValidNetwork(network) {
+		return httperror.BadRequest(
+			fmt.Sprintf("invalid network: network must be %s, %s or %s", types.PUBLIC, types.TESTNET, types.FUTURENET),
+			errors.New("invalid network"),
+		)
 	}
 
 	// Get RPC health status
