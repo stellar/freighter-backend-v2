@@ -86,6 +86,29 @@ func TestRPCHealthHandler_CheckRPCHealth(t *testing.T) {
 		assert.Equal(t, types.PUBLIC, capturedNetwork)
 	})
 
+	t.Run("should reject an invalid network without calling the RPC service", func(t *testing.T) {
+		t.Parallel()
+		called := false
+		mockRPC := &utils.MockRPCService{
+			GetHealthFunc: func(network string) (types.GetHealthResponse, error) {
+				called = true
+				return types.GetHealthResponse{Status: types.StatusHealthy}, nil
+			},
+		}
+		handler := NewRPCHealthHandler(mockRPC)
+
+		req, err := http.NewRequest("GET", "/rpc-health?network=ATTACK_0001", nil)
+		require.NoError(t, err)
+		rr := httptest.NewRecorder()
+
+		err = handler.CheckRPCHealth(rr, req)
+		require.Error(t, err)
+		httpErr, ok := err.(*httperror.HttpError)
+		require.True(t, ok, "error should be an HttpError")
+		assert.Equal(t, http.StatusBadRequest, httpErr.StatusCode)
+		assert.False(t, called, "RPC service must not be called for an invalid network")
+	})
+
 	t.Run("should return unhealthy status on RPC service failure", func(t *testing.T) {
 		t.Parallel()
 		mockRPC := &utils.MockRPCService{
