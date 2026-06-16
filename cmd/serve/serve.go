@@ -43,6 +43,11 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if err := s.Cfg.DatabaseConfig.Validate(); err != nil {
 				return err
 			}
+			// serve sources the pool tuning from flags, so validate them here
+			// (migrate uses package defaults and skips this).
+			if err := s.Cfg.DatabaseConfig.ValidatePoolConfig(); err != nil {
+				return err
+			}
 			return nil
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {

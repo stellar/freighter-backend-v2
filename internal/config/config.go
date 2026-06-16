@@ -2,6 +2,8 @@ package config
 
 import (
 	"errors"
+	"fmt"
+	"math"
 	"time"
 )
 
@@ -77,6 +79,25 @@ type DatabaseConfig struct {
 func (c DatabaseConfig) Validate() error {
 	if c.URL == "" {
 		return errors.New("--database-url (env DATABASE_URL) is required")
+	}
+	return nil
+}
+
+// ValidatePoolConfig checks the pgx pool tuning knobs. Called only by `serve`,
+// which sources these from flags; `migrate` opens a short-lived pool with the
+// package defaults and so does not need it. The bounds prevent a pool that pgx
+// would reject at startup (or that would silently misbehave once the int fields
+// are narrowed to the int32 the pgx API takes).
+func (c DatabaseConfig) ValidatePoolConfig() error {
+	switch {
+	case c.MaxConns < 1:
+		return fmt.Errorf("--db-max-conns=%d must be >= 1", c.MaxConns)
+	case c.MaxConns > math.MaxInt32:
+		return fmt.Errorf("--db-max-conns=%d exceeds the maximum of %d", c.MaxConns, math.MaxInt32)
+	case c.MinConns < 0:
+		return fmt.Errorf("--db-min-conns=%d must be >= 0", c.MinConns)
+	case c.MinConns > c.MaxConns:
+		return fmt.Errorf("--db-min-conns=%d must be <= --db-max-conns=%d", c.MinConns, c.MaxConns)
 	}
 	return nil
 }

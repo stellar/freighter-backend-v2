@@ -69,8 +69,12 @@ case "$action" in
       echo "ERROR: could not read username/password from secret ${SECRET} in ns ${ns} (is the cluster provisioned there, and is your kubectl context set to ${env}?)." >&2
       exit 1
     fi
-    # sslmode=require: CNPG serves TLS; we encrypt but don't verify the hostname
-    # (the cert is for the in-cluster name, not localhost).
+    # sslmode=require encrypts the connection but does NOT verify the server
+    # certificate or hostname — it protects against passive eavesdropping only,
+    # not an active MITM. That's acceptable here because the connection goes
+    # through a kubectl port-forward straight to the cluster. For full
+    # verification use sslmode=verify-full with the cluster CA secret
+    # (freighter-backend-v2-db-ca).
     echo "export DATABASE_URL='postgres://${user}:$(urlencode "$pass")@localhost:${LOCAL_PORT}/${DBNAME}?sslmode=require'"
     ;;
   *)

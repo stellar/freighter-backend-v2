@@ -13,7 +13,7 @@ import (
 func TestMigrate_InvalidDSN(t *testing.T) {
 	t.Parallel()
 
-	// Migration on boot must fail fast on an unparseable connection string.
+	// `migrate up` must fail fast on an unparseable connection string.
 	_, err := Migrate(context.Background(), "postgres://u:p@localhost:notaport/db", migrate.Up, 0)
 	require.Error(t, err)
 }
