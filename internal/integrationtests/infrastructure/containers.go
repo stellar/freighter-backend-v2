@@ -32,6 +32,13 @@ const (
 	FreighterContainerTag   = "integration-test"
 	FreighterDockerfilePath = "deployments/Dockerfile"
 
+	// App database: a dedicated Postgres for freighter-backend-v2 (separate from
+	// the Stellar Core DB above). serve requires DATABASE_URL and pings it on
+	// boot, so the integration harness must provide a reachable database.
+	AppPostgresContainerName = "freighter-postgres"
+	AppPostgresImage         = "postgres:16-alpine"
+	AppDatabaseURL           = "postgres://freighter:freighter@freighter-postgres:5432/freighter?sslmode=disable"
+
 	RPCHealthTimeout       = 120 * time.Second
 	DefaultProtocolVersion = 24
 )
@@ -191,6 +198,38 @@ func createPostgresContainer(ctx context.Context, testNetwork *testcontainers.Do
 	return &TestContainer{Container: container, MappedPortStr: "5432"}, nil
 }
 
+// createAppPostgresContainer starts the Postgres that freighter-backend-v2 itself
+// connects to (DATABASE_URL). serve opens a pool and pings it on boot, so without
+// this the freighter container fails fast and never serves /api/v1/ping.
+func createAppPostgresContainer(ctx context.Context, testNetwork *testcontainers.DockerNetwork) (*TestContainer, error) {
+	containerRequest := testcontainers.ContainerRequest{
+		Name:  AppPostgresContainerName,
+		Image: AppPostgresImage,
+		Labels: map[string]string{
+			"org.testcontainers.session-id": "freighter-integration-tests",
+		},
+		Env: map[string]string{
+			"POSTGRES_USER":     "freighter",
+			"POSTGRES_PASSWORD": "freighter",
+			"POSTGRES_DB":       "freighter",
+		},
+		Networks:     []string{testNetwork.Name},
+		ExposedPorts: []string{"5432/tcp"},
+		WaitingFor:   wait.ForListeningPort("5432/tcp"),
+	}
+
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: containerRequest,
+		Reuse:            true,
+		Started:          true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating app postgres container: %w", err)
+	}
+
+	return &TestContainer{Container: container, MappedPortStr: "5432"}, nil
+}
+
 // createStellarCoreContainer starts a Stellar Core container in standalone mode.
 func createStellarCoreContainer(ctx context.Context, testNetwork *testcontainers.DockerNetwork) (*TestContainer, error) {
 	_, filename, _, _ := runtime.Caller(0)
@@ -340,6 +379,7 @@ func createFreighterContainer(ctx context.Context, name string, imageName string
 			"METRICS_PORT":           FreighterMetricsPort,
 			"REDIS_HOST":             RedisContainerName,
 			"REDIS_PORT":             RedisContainerPort,
+			"DATABASE_URL":           AppDatabaseURL,
 			"PUBNET_RPC_URL":         "http://stellar-rpc:8000",
 			"TESTNET_RPC_URL":        "http://horizon-testnet.stellar.org",
 			"FUTURENET_RPC_URL":      "http://horizon-futurenet.stellar.org",

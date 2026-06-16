@@ -26,7 +26,7 @@ func Migrate(ctx context.Context, databaseURL string, direction migrate.Migratio
 
 	source := migrate.HttpFileSystemMigrationSource{FileSystem: http.FS(migrations.FS)}
 
-	applied, err := migrate.ExecMax(sqlDB, "postgres", source, direction, count)
+	applied, err := migrate.ExecMaxContext(ctx, sqlDB, "postgres", source, direction, count)
 	if err != nil {
 		return applied, fmt.Errorf("applying migrations: %w", err)
 	}
