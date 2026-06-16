@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -17,6 +18,7 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
 	"github.com/stellar/freighter-backend-v2/internal/config"
+	"github.com/stellar/freighter-backend-v2/internal/db"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/services"
@@ -29,11 +31,16 @@ const (
 	DefaultWriteTimeout   = 10 * time.Second
 	DefaultIdleTimeout    = 120 * time.Second
 	ServerShutdownTimeout = 10 * time.Second
+	// DatabaseConnectTimeout bounds the boot-time connect + ping so a reachable
+	// but unresponsive database (LB misroute, network blackhole) fails startup
+	// fast instead of hanging the process indefinitely.
+	DatabaseConnectTimeout = 30 * time.Second
 )
 
 type ApiServer struct {
 	cfg                  *config.Config
 	redis                *store.RedisStore
+	dbPool               *pgxpool.Pool
 	rpcService           types.RPCService
 	walletBackendService types.WalletBackendService
 	registry             *prometheus.Registry
@@ -55,6 +62,15 @@ func (s *ApiServer) Start() error {
 		logger.Error("Failed to initialize services", "error", err)
 		return err
 	}
+
+	// The database is initialized separately from initServices because it eagerly
+	// connects (to fail fast), whereas the other clients are lazy. Keeping it out
+	// of initServices keeps that function unit-testable without real infrastructure.
+	if err := s.initDatabase(); err != nil {
+		logger.Error("Failed to initialize database", "error", err)
+		return err
+	}
+	defer s.closeServices()
 
 	mux, err := s.initHandlers()
 	if err != nil {
@@ -88,16 +104,51 @@ func (s *ApiServer) initServices() error {
 	return nil
 }
 
+// initDatabase opens the long-lived connection pool and pings it so a
+// misconfigured or unreachable database aborts startup. Migrations are NOT run
+// here: they are applied out-of-band via the `migrate` subcommand (a deploy Job
+// or a manual step), so booting serve never mutates a shared database's schema.
+func (s *ApiServer) initDatabase() error {
+	ctx, cancel := context.WithTimeout(context.Background(), DatabaseConnectTimeout)
+	defer cancel()
+
+	pool, err := db.OpenDBConnectionPool(ctx, s.cfg.DatabaseConfig.URL, db.PoolConfig{
+		MaxConns:        int32(s.cfg.DatabaseConfig.MaxConns), //nolint:gosec // operator-supplied pool size, within int32
+		MinConns:        int32(s.cfg.DatabaseConfig.MinConns), //nolint:gosec // operator-supplied pool size, within int32
+		MaxConnLifetime: s.cfg.DatabaseConfig.MaxConnLifetime,
+		MaxConnIdleTime: s.cfg.DatabaseConfig.MaxConnIdleTime,
+	})
+	if err != nil {
+		logger.Error("Failed to open database connection pool", "error", err)
+		return fmt.Errorf("opening database connection pool: %w", err)
+	}
+	s.dbPool = pool
+
+	return nil
+}
+
+// closeServices releases service-level resources during shutdown.
+func (s *ApiServer) closeServices() {
+	if s.dbPool != nil {
+		s.dbPool.Close()
+	}
+}
+
 func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 	mux := http.NewServeMux()
 
-	// Initialize health check handler
+	// Initialize health check handler (dependency-free liveness signal)
 	healthHandler := handlers.NewHealthHandler()
 	mux.HandleFunc("GET /api/v1/ping", handlers.CustomHandler(healthHandler.CheckHealth))
 
 	// Initialize RPC health check handler
 	rpcHealthHandler := handlers.NewRPCHealthHandler(s.rpcService)
 	mux.HandleFunc("GET /api/v1/rpc-health", handlers.CustomHandler(rpcHealthHandler.CheckRPCHealth))
+
+	// Initialize DB health check handler (reports connectivity in the body; never
+	// fails the request, so it can't restart or depool a pod over a DB outage)
+	dbHealthHandler := handlers.NewDBHealthHandler(s.dbPool)
+	mux.HandleFunc("GET /api/v1/db-health", handlers.CustomHandler(dbHealthHandler.CheckDBHealth))
 
 	protocolsHandler := handlers.NewProtocolsHandler(s.cfg.AppConfig.ProtocolsConfigPath)
 	mux.HandleFunc("GET /api/v1/protocols", handlers.CustomHandler(protocolsHandler.GetProtocols))

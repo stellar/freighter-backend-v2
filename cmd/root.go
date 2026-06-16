@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/stellar/freighter-backend-v2/cmd/migrate"
 	"github.com/stellar/freighter-backend-v2/cmd/serve"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
@@ -34,6 +35,9 @@ func NewRootCmd() *RootCmd {
 
 	subcommands := []SubCommand{
 		&serve.ServeCmd{
+			Cfg: &config.Config{},
+		},
+		&migrate.MigrateCmd{
 			Cfg: &config.Config{},
 		},
 	}

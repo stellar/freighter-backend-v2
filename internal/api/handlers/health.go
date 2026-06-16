@@ -22,7 +22,10 @@ func NewHealthHandler() *HealthHandler {
 	return &HealthHandler{}
 }
 
-// CheckHealth handles health check requests.
+// CheckHealth handles health check requests. This is a dependency-free liveness
+// signal: it reports only that the process is up and serving HTTP. Dependency
+// health (DB, RPC) is reported by dedicated endpoints so that a downstream
+// outage never causes this liveness check to restart or depool the pod.
 func (h *HealthHandler) CheckHealth(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 

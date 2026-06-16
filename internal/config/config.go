@@ -1,9 +1,15 @@
 package config
 
+import (
+	"errors"
+	"time"
+)
+
 type Config struct {
 	AppConfig           AppConfig
 	RpcConfig           RPCConfig
 	RedisConfig         RedisConfig
+	DatabaseConfig      DatabaseConfig
 	HorizonConfig       HorizonConfig
 	PricesConfig        PricesConfig
 	BlockaidConfig      BlockaidConfig
@@ -53,6 +59,26 @@ type RedisConfig struct {
 	Host           string
 	Port           int
 	Password       string
+}
+
+// DatabaseConfig holds the PostgreSQL connection string and pgx pool tunables.
+// URL is sourced from DATABASE_URL (via ExternalSecrets in deployed envs).
+type DatabaseConfig struct {
+	URL             string
+	MaxConns        int
+	MinConns        int
+	MaxConnLifetime time.Duration
+	MaxConnIdleTime time.Duration
+}
+
+// Validate checks required database configuration. The database is a hard
+// dependency, so an empty URL is rejected. Shared by the `serve` and `migrate`
+// commands so both fail fast with the same message.
+func (c DatabaseConfig) Validate() error {
+	if c.URL == "" {
+		return errors.New("--database-url (env DATABASE_URL) is required")
+	}
+	return nil
 }
 
 type HorizonConfig struct {

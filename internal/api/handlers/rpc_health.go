@@ -10,11 +10,6 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
-// RPCHealthResponse contains the health status of the RPC service.
-type RPCHealthResponse struct {
-	Status string `json:"status"`
-}
-
 type RPCHealthHandler struct {
 	rpcService types.RPCService
 }
@@ -50,7 +45,7 @@ func (h *RPCHealthHandler) CheckRPCHealth(w http.ResponseWriter, r *http.Request
 	health, err := h.rpcService.GetHealth(r.Context(), network)
 	if err != nil {
 		// Return unhealthy status on error instead of failing the request
-		resp := RPCHealthResponse{
+		resp := types.GetHealthResponse{
 			Status: types.StatusUnhealthy,
 		}
 		if err := response.JSON(w, http.StatusOK, resp); err != nil {
@@ -59,7 +54,7 @@ func (h *RPCHealthHandler) CheckRPCHealth(w http.ResponseWriter, r *http.Request
 		return nil
 	}
 
-	resp := RPCHealthResponse{
+	resp := types.GetHealthResponse{
 		Status: health.Status,
 	}
 

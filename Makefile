@@ -103,7 +103,7 @@ unit-test-coverage: ## Run unit tests with coverage
 
 integration-test: ## Run integration tests
 	@echo "==> Running integration tests..."
-	ENABLE_INTEGRATION_TESTS=true go test -v ./internal/integrationtests/...
+	ENABLE_INTEGRATION_TESTS=true go test -v ./internal/integrationtests/... ./internal/db/...
 
 test-all: unit-test-coverage integration-test ## Run all tests
 	@echo "✅ All tests completed successfully"
@@ -152,3 +152,17 @@ docker-push: ## Push tagged docker image
 	$(SUDO) docker push $(TAG)
 
 docker-build-up: docker-build-local docker-up ## Build locally and start containers
+
+# ==================================================================================== #
+# DATABASE
+# ==================================================================================== #
+# Switch between local and a hosted CNPG env by changing only DATABASE_URL.
+# ENV selects the hosted environment (dev|stg|prd). LOCAL_PORT overrides the
+# local forwarded port (default 5432). See scripts/db-connect.sh.
+ENV ?= dev
+
+db-forward: ## Port-forward the hosted CNPG primary for ENV to localhost (blocking)
+	./scripts/db-connect.sh forward $(ENV)
+
+db-url: ## Print `export DATABASE_URL=...` for the hosted CNPG ENV (use: eval "$$(make -s db-url ENV=dev)")
+	@./scripts/db-connect.sh url $(ENV)
