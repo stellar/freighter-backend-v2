@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
 	migrate "github.com/rubenv/sql-migrate"
 
 	"github.com/stellar/freighter-backend-v2/internal/db/migrations"
@@ -15,7 +16,13 @@ import (
 // number of migrations actually applied, which is 0 on a re-run once the schema
 // is up to date — i.e. the operation is idempotent.
 func Migrate(ctx context.Context, databaseURL string, direction migrate.MigrationDirection, count int) (int, error) {
-	pool, err := OpenDBConnectionPool(ctx, databaseURL)
+	// Use the same PgBouncer-safe exec mode serve uses: a deploy migrate Job may
+	// share serve's DATABASE_URL (pointing at the CNPG Pooler in transaction
+	// mode), where the default statement-cache mode throws 42P05. Default sizing
+	// is fine for a one-shot migration.
+	poolCfg := DefaultPoolConfig()
+	poolCfg.QueryExecMode = pgx.QueryExecModeExec
+	pool, err := OpenDBConnectionPool(ctx, databaseURL, poolCfg)
 	if err != nil {
 		return 0, fmt.Errorf("connecting to the database: %w", err)
 	}
