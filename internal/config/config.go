@@ -31,6 +31,14 @@ type AppConfig struct {
 	// count for that fan-out. The limit is enforced per-request via errgroup.SetLimit,
 	// so peak upstream load is concurrent_requests * WalletBackendBalanceConcurrency.
 	WalletBackendBalanceConcurrency int
+	// AccountHistoryDefaultLimit is the default page size for the
+	// GET /api/v1/accounts/{address}/transactions endpoint when the client
+	// does not pass ?limit=. Must be > 0 and <= AccountHistoryMaxLimit.
+	AccountHistoryDefaultLimit int
+	// AccountHistoryMaxLimit is the maximum page size accepted by that
+	// endpoint. Requests above it are rejected with 400. Must be > 0 and
+	// <= 100 (the wallet-backend upstream page-size cap).
+	AccountHistoryMaxLimit int
 }
 
 type RPCConfig struct {

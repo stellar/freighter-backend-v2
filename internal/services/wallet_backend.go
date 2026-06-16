@@ -1,5 +1,5 @@
 // ABOUTME: Wallet-backend service implementation that wraps the wbclient SDK and exposes the methods used by API handlers.
-// ABOUTME: Hosts the multi-account balances fan-out: per-request bounded concurrency over the per-address GraphQL query.
+// ABOUTME: Hosts the balances fan-out and the single account-transactions history method (with embedded ops + state changes), sharing translate/page-info helpers.
 package services
 
 import (
@@ -230,6 +230,104 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 		return nil, waitErr
 	}
 	return results, nil
+}
+
+// translateParams converts AccountHistoryParams into the (first, last, after,
+// before) tuple the wbclient SDK methods take. PaginationDirectionPrev maps
+// to (last, before); anything else (including the default "next") maps to
+// (first, after). Cursor is opaque and forwarded verbatim.
+func translateParams(p types.AccountHistoryParams) (first, last *int32, after, before *string) {
+	limit := p.Limit
+	if p.Direction == types.PaginationDirectionPrev {
+		return nil, &limit, nil, p.Cursor
+	}
+	return &limit, nil, p.Cursor, nil
+}
+
+// toPaginationInfo copies an upstream PageInfo into the freighter-backend
+// response envelope shape. Cursors that the SDK omits (HasNextPage=false /
+// HasPreviousPage=false) are returned as nil pointers per the spec. A nil pi
+// returns a zero-value PaginationInfo (defense-in-depth: the SDK's connection
+// validators reject null pageInfo, but the nil-safe path costs one line).
+func toPaginationInfo(pi *wbtypes.PageInfo) types.PaginationInfo {
+	if pi == nil {
+		return types.PaginationInfo{}
+	}
+	out := types.PaginationInfo{
+		HasNext:     pi.HasNextPage,
+		HasPrevious: pi.HasPreviousPage,
+	}
+	if pi.HasNextPage {
+		out.NextCursor = pi.EndCursor
+	}
+	if pi.HasPreviousPage {
+		out.PrevCursor = pi.StartCursor
+	}
+	return out
+}
+
+// recordWBCall records call metrics with one carve-out: ErrAccountNotFound
+// is a normal client outcome (the account doesn't exist in wallet-backend's
+// view), not a service failure, so the ErrorsTotal counter is not incremented
+// for it. CallsTotal and CallDuration always record.
+func (w *walletBackendService) recordWBCall(method, network string, start time.Time, err error) {
+	if w.svcMetrics == nil {
+		return
+	}
+	dur := time.Since(start).Seconds()
+	w.svcMetrics.CallsTotal.WithLabelValues(walletBackendServiceName, method, network).Inc()
+	w.svcMetrics.CallDuration.WithLabelValues(walletBackendServiceName, method, network).Observe(dur)
+	if err != nil && !errors.Is(err, wbclient.ErrAccountNotFound) {
+		w.svcMetrics.ErrorsTotal.WithLabelValues(walletBackendServiceName, method, network, metrics.ClassifyError(err)).Inc()
+	}
+}
+
+// emptyTxPage is the empty-page response shape used when wallet-backend
+// returns a null transactions connection on an existing account (schema-
+// valid per wallet-backend PR #616 — distinct from ErrAccountNotFound).
+func emptyTxPage() *types.PaginatedResponse[*types.AccountTransaction] {
+	return &types.PaginatedResponse[*types.AccountTransaction]{
+		Data:       []*types.AccountTransaction{},
+		Pagination: types.PaginationInfo{},
+	}
+}
+
+// GetAccountTransactions returns one page of an account's transactions, each
+// embedding that account's operations and state changes, via the wallet-backend
+// single nested GraphQL call. ErrAccountNotFound is returned unwrapped so callers
+// can distinguish a missing account from systemic upstream failures.
+func (w *walletBackendService) GetAccountTransactions(ctx context.Context, address, network string, p types.AccountHistoryParams) (_ *types.PaginatedResponse[*types.AccountTransaction], err error) {
+	start := time.Now()
+	defer func() { w.recordWBCall("GetAccountTransactions", network, start, err) }()
+
+	client := w.configureNetworkClient(network)
+	if client == nil {
+		return nil, fmt.Errorf("wallet backend client not configured for network: %s", network)
+	}
+
+	first, last, after, before := translateParams(p)
+	conn, err := client.GetAccountTransactionsWithOpsAndStateChanges(ctx, address, p.Since, p.Until, first, last, after, before)
+	if err != nil {
+		if errors.Is(err, wbclient.ErrAccountNotFound) {
+			return nil, err
+		}
+		return nil, classifyWBError(err)
+	}
+	if conn == nil {
+		return emptyTxPage(), nil
+	}
+
+	items := make([]*types.AccountTransaction, 0, len(conn.Edges))
+	for _, e := range conn.Edges {
+		if e == nil || e.Node == nil {
+			continue
+		}
+		items = append(items, mapAccountTransactionEdge(e))
+	}
+	return &types.PaginatedResponse[*types.AccountTransaction]{
+		Data:       items,
+		Pagination: toPaginationInfo(conn.PageInfo),
+	}, nil
 }
 
 // classifyWBError wraps a systemic wbclient error with an UpstreamError so

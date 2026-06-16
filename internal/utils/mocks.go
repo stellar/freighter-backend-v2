@@ -108,6 +108,18 @@ func (m *MockRPCService) GetLedgerEntries(ctx context.Context, keys []string, ne
 type MockWalletBackendService struct {
 	GetBalancesOverride interface{}
 	GetBalancesError    error
+
+	// Result/Error are the default response when Func is nil. When Func is
+	// set it takes precedence and the test owns the entire response shape —
+	// useful for asserting that parsed query params were forwarded correctly.
+
+	// GetAccountTransactionsResult is returned by GetAccountTransactions when
+	// GetAccountTransactionsFunc is nil and GetAccountTransactionsError is nil.
+	GetAccountTransactionsResult *types.PaginatedResponse[*types.AccountTransaction]
+	// GetAccountTransactionsError is returned when GetAccountTransactionsFunc is nil.
+	GetAccountTransactionsError error
+	// GetAccountTransactionsFunc overrides Result/Error when set.
+	GetAccountTransactionsFunc func(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[*types.AccountTransaction], error)
 }
 
 func (m *MockWalletBackendService) Name() string {
@@ -128,4 +140,15 @@ func (m *MockWalletBackendService) GetBalancesByAccountAddresses(ctx context.Con
 	}
 
 	return nil, nil
+}
+
+// GetAccountTransactions returns a stubbed paginated transaction list.
+func (m *MockWalletBackendService) GetAccountTransactions(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[*types.AccountTransaction], error) {
+	if m.GetAccountTransactionsFunc != nil {
+		return m.GetAccountTransactionsFunc(ctx, address, network, params)
+	}
+	if m.GetAccountTransactionsError != nil {
+		return nil, m.GetAccountTransactionsError
+	}
+	return m.GetAccountTransactionsResult, nil
 }

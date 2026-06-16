@@ -42,4 +42,5 @@ type RPCService interface {
 type WalletBackendService interface {
 	Service
 	GetBalancesByAccountAddresses(ctx context.Context, addresses []string, network string) (interface{}, error)
+	GetAccountTransactions(ctx context.Context, address, network string, params AccountHistoryParams) (*PaginatedResponse[*AccountTransaction], error)
 }
