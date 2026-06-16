@@ -113,8 +113,11 @@ kubectl exec -it deploy/<freighter-backend-deployment> -n <namespace> -- printen
 ### Running locally against a hosted DB (the common case)
 
 Two `make` targets wrap the CNPG mechanics so switching to a hosted env is one
-command each. CNPG generates a `<cluster>-app` secret containing a ready-made
-connection `uri`; the helper reads it and rewrites the host to your local tunnel.
+command each. `db-url` reads the cluster's basic-auth creds secret
+(`freighter-backend-v2-db-app-creds` — `username`/`password`) and builds a
+`DATABASE_URL` pointed at your local tunnel, with `sslmode=require`.
+
+First make sure your `kubectl` context points at the target environment, then:
 
 ```sh
 # terminal 1 — open the tunnel to the CNPG primary (blocking; leave it running)
@@ -127,9 +130,17 @@ make run
 
 `ENV` is `dev` | `stg` | `prd`; `LOCAL_PORT` overrides the local port (default 5432).
 
-> The `ENV → namespace / cluster` mapping lives in `scripts/db-connect.sh` and is
-> currently **placeholder** — the database exists only in **wallet-eng-dev** today,
-> and exact names land with the "Provision Postgres" work. Fill them in there.
+> **`dev` is wired** (`wallet-eng-dev` / cluster `freighter-backend-v2-db`). The
+> database currently exists **only** in `wallet-eng-dev`; `stg`/`prd` are
+> provisioned by the "Provision Postgres" work and `db-url` will error clearly
+> there until they exist.
+
+Verify a hosted connection works:
+
+```sh
+freighter-backend migrate up                 # → "Applied migrations up count=N" (0 on re-run)
+curl -s localhost:3002/api/v1/db-health       # → {"status":"healthy"} once `serve` is up
+```
 
 To just read the value already injected into a running pod:
 

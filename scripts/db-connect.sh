@@ -9,75 +9,69 @@
 #   scripts/db-connect.sh forward <dev|stg|prd>   # blocking: port-forward CNPG primary
 #   scripts/db-connect.sh url     <dev|stg|prd>   # prints: export DATABASE_URL=...
 #
-# Typical flow (two terminals):
+# Typical flow (two terminals; make sure your kubectl context points at the env):
 #   term 1:  make db-forward ENV=dev
 #   term 2:  eval "$(make -s db-url ENV=dev)" && make run
 #
-# CNPG auto-generates a secret "<cluster>-app" containing a ready-made `uri` key;
-# `url` reads it and rewrites the host:port to the local forwarded port.
+# The freighter-backend-v2 CNPG cluster uses a basic-auth creds secret
+# (username/password — NOT the default CNPG `-app` secret with a `uri` key), so
+# `url` builds the connection string from those fields against the local tunnel.
 set -euo pipefail
 
-# ---------------------------------------------------------------------------
-# ENV -> (namespace, CNPG cluster) mapping.
-# TODO: fill these in once the Provision Postgres work lands. The DB currently
-# exists only in wallet-eng-dev; stg/prd are placeholders.
-# ---------------------------------------------------------------------------
+# ENV -> namespace. The CNPG cluster, creds secret, database, and user names are
+# the same across environments (one cluster per service), so only the namespace
+# varies. The database currently exists only in wallet-eng-dev; stg/prd are
+# provisioned by the "Provision Postgres" work and may not exist yet.
 env_namespace() {
   case "$1" in
-    dev) echo "REPLACE_ME_dev_namespace" ;;
-    stg) echo "REPLACE_ME_stg_namespace" ;;
-    prd) echo "REPLACE_ME_prd_namespace" ;;
-    *) return 1 ;;
-  esac
-}
-env_cluster() {
-  case "$1" in
-    dev) echo "REPLACE_ME_dev_cnpg_cluster" ;;
-    stg) echo "REPLACE_ME_stg_cnpg_cluster" ;;
-    prd) echo "REPLACE_ME_prd_cnpg_cluster" ;;
+    dev) echo "wallet-eng-dev" ;;
+    stg) echo "wallet-eng-stg" ;;
+    prd) echo "wallet-eng-prd" ;;
     *) return 1 ;;
   esac
 }
 
+CLUSTER="freighter-backend-v2-db"
+SECRET="freighter-backend-v2-db-app-creds" # basic-auth: username + password
+DBNAME="freighter-backend-v2"
+RW_SVC="${CLUSTER}-rw"
 LOCAL_PORT="${LOCAL_PORT:-5432}"
 
 usage() { echo "usage: $0 {forward|url} <dev|stg|prd>" >&2; exit 1; }
 
 [ $# -eq 2 ] || usage
 action="$1"; env="$2"
-
 ns="$(env_namespace "$env")" || usage
-cluster="$(env_cluster "$env")" || usage
-
-# Fail clearly if the ENV->namespace/cluster mapping is still the placeholder,
-# instead of passing a literal REPLACE_ME name to kubectl and getting an opaque
-# "not found" error.
-case "$ns$cluster" in
-  *REPLACE_ME*)
-    echo "ERROR: ENV '$env' is not configured yet — fill in the namespace/cluster mapping in $0 (see the TODO block)." >&2
-    exit 1
-    ;;
-esac
 
 # b64decode reads stdin; tries GNU (--decode) then falls back to BSD (-D).
 b64decode() { local s; s="$(cat)"; printf '%s' "$s" | base64 --decode 2>/dev/null || printf '%s' "$s" | base64 -D; }
 
+# urlencode percent-encodes a string for safe inclusion in a URL (CNPG-generated
+# passwords can contain '/', '+', '=', etc.).
+urlencode() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
+  else
+    echo "WARN: python3 not found — password not URL-encoded; special characters may break DATABASE_URL." >&2
+    printf '%s' "$1"
+  fi
+}
+
 case "$action" in
   forward)
-    echo "Port-forwarding ${cluster}-rw (ns ${ns}) to localhost:${LOCAL_PORT} — leave this running." >&2
-    exec kubectl -n "$ns" port-forward "svc/${cluster}-rw" "${LOCAL_PORT}:5432"
+    echo "Port-forwarding ${RW_SVC} (ns ${ns}) to localhost:${LOCAL_PORT} — leave this running." >&2
+    exec kubectl -n "$ns" port-forward "svc/${RW_SVC}" "${LOCAL_PORT}:5432"
     ;;
   url)
-    uri="$(kubectl -n "$ns" get secret "${cluster}-app" -o jsonpath='{.data.uri}' | b64decode)"
-    if [ -z "$uri" ]; then
-      echo "ERROR: secret ${cluster}-app in ns ${ns} has no 'uri' key (or it is empty)." >&2
+    user="$(kubectl -n "$ns" get secret "$SECRET" -o jsonpath='{.data.username}' | b64decode)"
+    pass="$(kubectl -n "$ns" get secret "$SECRET" -o jsonpath='{.data.password}' | b64decode)"
+    if [ -z "$user" ] || [ -z "$pass" ]; then
+      echo "ERROR: could not read username/password from secret ${SECRET} in ns ${ns} (is the cluster provisioned there, and is your kubectl context set to ${env}?)." >&2
       exit 1
     fi
-    # Rewrite only the @host:port segment to the local tunnel, preserving creds,
-    # dbname and query params. [^@/?]+ stops at '/', '?', or end, so it works
-    # whether or not a /dbname path follows and never consumes the query string.
-    rewritten="$(printf '%s' "$uri" | sed -E "s#@[^@/?]+#@localhost:${LOCAL_PORT}#")"
-    echo "export DATABASE_URL='${rewritten}'"
+    # sslmode=require: CNPG serves TLS; we encrypt but don't verify the hostname
+    # (the cert is for the in-cluster name, not localhost).
+    echo "export DATABASE_URL='postgres://${user}:$(urlencode "$pass")@localhost:${LOCAL_PORT}/${DBNAME}?sslmode=require'"
     ;;
   *)
     usage
