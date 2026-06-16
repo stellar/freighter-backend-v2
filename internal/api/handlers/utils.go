@@ -29,6 +29,18 @@ func isValidWalletBackendNetwork(network string) bool {
 	return network == types.PUBLIC || network == types.TESTNET
 }
 
+// isValidNetwork reports whether network is one of the Stellar networks the RPC
+// health check supports (pubnet, testnet, futurenet). Used by rpc-health to
+// reject caller-controlled networks before they reach a Prometheus label.
+//
+// NOTE: this restores a helper that #109 (metric-cardinality DoS guard) relies
+// on but #100 (account-history) removed when it renamed the validator to the
+// wallet-backend-specific variant above, leaving rpc_health.go's call site
+// dangling — i.e. main currently does not compile. See the PR discussion.
+func isValidNetwork(network string) bool {
+	return network == types.PUBLIC || network == types.TESTNET || network == types.FUTURENET
+}
+
 // translateServiceError maps a service-layer error to a typed HttpError per
 // the spec's REST-honest mapping. Logs all non-404 errors with context;
 // account-not-found is a normal client outcome and is not logged.
