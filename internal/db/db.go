@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 )
@@ -30,6 +31,12 @@ type PoolConfig struct {
 	MinConns        int32
 	MaxConnLifetime time.Duration
 	MaxConnIdleTime time.Duration
+	// QueryExecMode overrides pgx's default query execution mode. The zero value
+	// leaves pgx's default (CacheStatement). Set QueryExecModeExec when connecting
+	// through a PgBouncer / CNPG Pooler in transaction pooling mode: the default
+	// mode caches server-side prepared statements, which collide across pooled
+	// backends and surface as SQLSTATE 42P05 ("prepared statement already exists").
+	QueryExecMode pgx.QueryExecMode
 }
 
 // DefaultPoolConfig returns a PoolConfig populated with the default values.
@@ -52,10 +59,10 @@ func resolvePoolConfig(configs []PoolConfig) PoolConfig {
 	return DefaultPoolConfig()
 }
 
-// OpenDBConnectionPool parses the data source name, opens a pgx connection pool,
-// and pings it so a bad connection string or unreachable database fails fast at
-// startup rather than on the first request.
-func OpenDBConnectionPool(ctx context.Context, dataSourceName string, poolConfigs ...PoolConfig) (*pgxpool.Pool, error) {
+// buildPoolConfig parses the data source name and overlays the resolved pool
+// settings onto it. Split out from OpenDBConnectionPool so the mapping (incl.
+// the PgBouncer-safe QueryExecMode) is unit-testable without a live database.
+func buildPoolConfig(dataSourceName string, poolConfigs ...PoolConfig) (*pgxpool.Config, error) {
 	poolCfg := resolvePoolConfig(poolConfigs)
 
 	cfg, err := pgxpool.ParseConfig(dataSourceName)
@@ -66,6 +73,20 @@ func OpenDBConnectionPool(ctx context.Context, dataSourceName string, poolConfig
 	cfg.MinConns = poolCfg.MinConns
 	cfg.MaxConnLifetime = poolCfg.MaxConnLifetime
 	cfg.MaxConnIdleTime = poolCfg.MaxConnIdleTime
+	if poolCfg.QueryExecMode != 0 {
+		cfg.ConnConfig.DefaultQueryExecMode = poolCfg.QueryExecMode
+	}
+	return cfg, nil
+}
+
+// OpenDBConnectionPool parses the data source name, opens a pgx connection pool,
+// and pings it so a bad connection string or unreachable database fails fast at
+// startup rather than on the first request.
+func OpenDBConnectionPool(ctx context.Context, dataSourceName string, poolConfigs ...PoolConfig) (*pgxpool.Pool, error) {
+	cfg, err := buildPoolConfig(dataSourceName, poolConfigs...)
+	if err != nil {
+		return nil, err
+	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
