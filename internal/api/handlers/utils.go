@@ -33,10 +33,9 @@ func isValidWalletBackendNetwork(network string) bool {
 // health check supports (pubnet, testnet, futurenet). Used by rpc-health to
 // reject caller-controlled networks before they reach a Prometheus label.
 //
-// NOTE: this restores a helper that #109 (metric-cardinality DoS guard) relies
-// on but #100 (account-history) removed when it renamed the validator to the
-// wallet-backend-specific variant above, leaving rpc_health.go's call site
-// dangling — i.e. main currently does not compile. See the PR discussion.
+// NOTE: This validator is intentionally distinct from isValidWalletBackendNetwork:
+// rpc-health supports FUTURENET, but the wallet-backend client is only configured
+// for PUBLIC and TESTNET.
 func isValidNetwork(network string) bool {
 	return network == types.PUBLIC || network == types.TESTNET || network == types.FUTURENET
 }
