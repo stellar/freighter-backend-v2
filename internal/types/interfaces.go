@@ -55,12 +55,11 @@ type StellarExpertAsset struct {
 
 // StellarExpertCandle is one row of /asset/{id}/candles.
 // Wire shape per Stellar Expert API docs: [ts, open, low, high, close,
-// quote_volume, base_volume, trades]. Native XLM returns no candles.
+// quote_volume, base_volume, trades].
 type StellarExpertCandle [8]float64
 
-func (c StellarExpertCandle) TS() int64      { return int64(c[0]) }
-func (c StellarExpertCandle) Open() float64  { return c[1] }
-func (c StellarExpertCandle) Close() float64 { return c[4] }
+func (c StellarExpertCandle) TS() int64     { return int64(c[0]) }
+func (c StellarExpertCandle) Open() float64 { return c[1] }
 
 type StellarExpertService interface {
 	Service

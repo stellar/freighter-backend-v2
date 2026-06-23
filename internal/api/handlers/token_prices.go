@@ -31,6 +31,9 @@ type TokenPricesRequest struct {
 type validatedTokenPricesRequest struct {
 	originalInputs []string
 	canonicalIDs   []string
+	// canonicalByOriginal maps each raw client input to its canonical id so the
+	// response loop can echo the original key without re-normalizing.
+	canonicalByOriginal map[string]string
 }
 
 func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedTokenPricesRequest, *httperror.HttpError) {
@@ -47,12 +50,14 @@ func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedToken
 	}
 
 	canonicalIDs := make([]string, 0, len(req.Tokens))
+	canonicalByOriginal := make(map[string]string, len(req.Tokens))
 	seen := make(map[string]struct{}, len(req.Tokens))
 	for _, t := range req.Tokens {
 		canonical, err := assetid.Normalize(t)
 		if err != nil {
 			return nil, httperror.BadRequest("invalid token id", err)
 		}
+		canonicalByOriginal[t] = canonical
 		if _, dup := seen[canonical]; !dup {
 			seen[canonical] = struct{}{}
 			canonicalIDs = append(canonicalIDs, canonical)
@@ -69,8 +74,9 @@ func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedToken
 	}
 
 	return &validatedTokenPricesRequest{
-		originalInputs: req.Tokens,
-		canonicalIDs:   canonicalIDs,
+		originalInputs:      req.Tokens,
+		canonicalIDs:        canonicalIDs,
+		canonicalByOriginal: canonicalByOriginal,
 	}, nil
 }
 
@@ -99,11 +105,11 @@ func (h *TokenPricesHandler) GetPrices(w http.ResponseWriter, r *http.Request) e
 	}
 
 	// Build response keyed by the *original* client input, preserving v1's
-	// echo behavior (so a request for "native" returns "native": ...).
+	// echo behavior (so a request for "native" returns "native": ...). The
+	// canonical id was already resolved during validation.
 	out := make(map[string]*types.PriceEntry, len(req.originalInputs))
 	for _, original := range req.originalInputs {
-		canonical, _ := assetid.Normalize(original)
-		out[original] = prices[canonical]
+		out[original] = prices[req.canonicalByOriginal[original]]
 	}
 
 	w.Header().Set("Content-Type", "application/json")

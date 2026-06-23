@@ -178,7 +178,7 @@ func TestStellarExpert_GetAssetCandles_Success(t *testing.T) {
 	assert.Contains(t, gotQuery, "order=asc")
 	assert.Equal(t, "https://stellar.expert", gotOrigin)
 	assert.InDelta(t, 0.001, candles[0].Open(), 1e-9)
-	assert.InDelta(t, 0.00106, candles[1].Close(), 1e-9)
+	assert.InDelta(t, 0.00106, candles[1][4], 1e-9)
 	assert.Equal(t, int64(1739707200), candles[0].TS())
 }
 

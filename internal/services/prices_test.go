@@ -446,6 +446,43 @@ func TestPrices_ConcurrencyCapHonored(t *testing.T) {
 		"expected at most 8 concurrent upstream calls (2× workers), observed %d", stellarExpert.maxConcurrent.Load())
 }
 
+func TestPrices_CoalescesConcurrentFetches(t *testing.T) {
+	t.Parallel()
+
+	stellarExpert := newFakeStellarExpert()
+	// A delay wide enough that all goroutines are in-flight at DoChan before
+	// the shared fetch completes, so singleflight coalesces them.
+	stellarExpert.delay = 50 * time.Millisecond
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
+
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
+
+	const n = 10
+	var wg sync.WaitGroup
+	results := make([]*types.PriceEntry, n)
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+			errs[i] = err
+			if err == nil {
+				results[i] = got["XLM"]
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	assert.Equal(t, 1, stellarExpert.CallCount("XLM"),
+		"concurrent fetches for the same token should coalesce to a single upstream call")
+	for i := range results {
+		require.NoError(t, errs[i])
+		require.NotNil(t, results[i], "every caller receives the shared result")
+		assert.Equal(t, "0.16", results[i].CurrentPrice)
+	}
+}
+
 func TestPrices_MissFetchTimeoutReturnsBestEffortWithoutError(t *testing.T) {
 	t.Parallel()
 

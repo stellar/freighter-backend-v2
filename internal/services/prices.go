@@ -10,6 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
+
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/store"
@@ -71,6 +74,10 @@ type pricesService struct {
 	cfg           PricesServiceConfig
 	svcMetrics    *metrics.Service
 	pricesMetrics *metrics.Prices
+	// fetchGroup coalesces concurrent upstream fetches for the same cache key
+	// so a thundering herd on a hot token (e.g. XLM at TTL expiry) issues one
+	// Stellar Expert call instead of one per in-flight request.
+	fetchGroup singleflight.Group
 }
 
 // NewPricesService wires the orchestrator. redis may be nil; if so, every
@@ -197,58 +204,60 @@ func (p *pricesService) recordCacheOutcome(network, outcome string, n int) {
 }
 
 func (p *pricesService) resolveMisses(ctx context.Context, network, cacheNet string, misses []string, result map[string]*types.PriceEntry, resultMu *sync.Mutex) {
-	workers := min(len(misses), p.cfg.MaxConcurrent)
-	if workers == 0 {
-		return
-	}
-
-	jobs := make(chan string)
-	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case canonical, ok := <-jobs:
-					if !ok {
-						return
-					}
-					entry, resolved := p.fetchAndCache(ctx, network, cacheNet, canonical)
-					if !resolved {
-						continue
-					}
-					resultMu.Lock()
-					result[canonical] = entry
-					resultMu.Unlock()
-				}
-			}
-		}()
-	}
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(p.cfg.MaxConcurrent)
 
 	for _, canonical := range misses {
-		select {
-		case <-ctx.Done():
-			close(jobs)
-			wg.Wait()
-			return
-		case jobs <- canonical:
-		}
+		g.Go(func() error {
+			entry, resolved := p.fetchAndCache(gctx, network, cacheNet, canonical)
+			if resolved {
+				resultMu.Lock()
+				result[canonical] = entry
+				resultMu.Unlock()
+			}
+			// A single token's transient failure must not cancel its siblings;
+			// cancellation only propagates from the parent ctx via gctx.
+			return nil
+		})
 	}
-	close(jobs)
-	wg.Wait()
+	_ = g.Wait()
 }
 
-// fetchAndCache hits Stellar Expert for one canonical asset id, writes a
-// successful result to Redis, and returns the response entry. The boolean
-// reports whether the token was authoritatively resolved for this request:
-// not-found/malformed assets resolve to nil; transient failures and budget
-// exhaustion leave the token eligible for stale fallback. The asset and
-// candles calls run concurrently; on a terminal asset error the candles
-// call is cancelled so unknown assets don't double upstream load.
-func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, canonical string) (_ *types.PriceEntry, resolved bool) {
+// fetchOutcome is the singleflight-shared result of one upstream fetch.
+type fetchOutcome struct {
+	entry    *types.PriceEntry
+	resolved bool
+}
+
+// fetchAndCache returns the priced entry for one canonical asset id, coalescing
+// concurrent requests for the same cache key through singleflight so a hot
+// token issues a single upstream fetch. The boolean reports whether the token
+// was authoritatively resolved for this request: not-found/malformed assets
+// resolve to (nil, true); transient failures and budget exhaustion return
+// (nil, false). The caller's ctx only bounds how long this request waits — the
+// shared fetch runs under its own budget so one caller's cancellation can't
+// poison other in-flight waiters.
+func (p *pricesService) fetchAndCache(ctx context.Context, network, cacheNet, canonical string) (*types.PriceEntry, bool) {
+	ch := p.fetchGroup.DoChan(cacheKey(cacheNet, canonical), func() (any, error) {
+		fctx, cancel := context.WithTimeout(context.Background(), p.cfg.MissFetchTimeout)
+		defer cancel()
+		entry, resolved := p.fetchFromUpstream(fctx, network, cacheNet, canonical)
+		return fetchOutcome{entry: entry, resolved: resolved}, nil
+	})
+	select {
+	case <-ctx.Done():
+		return nil, false
+	case res := <-ch:
+		out, _ := res.Val.(fetchOutcome)
+		return out.entry, out.resolved
+	}
+}
+
+// fetchFromUpstream performs the actual Stellar Expert fetch for one canonical
+// asset id and writes a successful result to Redis. The asset and candles
+// calls run concurrently; on a terminal asset error the candles call is
+// cancelled so unknown assets don't double upstream load.
+func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet, canonical string) (_ *types.PriceEntry, resolved bool) {
 	stellarExpertID := assetid.ToStellarExpert(canonical)
 
 	// Truncate to the candle resolution so `from` and `to` align to bucket
