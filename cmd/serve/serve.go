@@ -33,8 +33,8 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.AppConfig.WalletBackendBalanceConcurrency; n <= 0 {
 				return fmt.Errorf("--wallet-backend-balance-concurrency=%d must be positive", n)
 			}
-			if n := s.Cfg.PricesConfig.MaxTokensPerRequest; n > services.MaxTokensPerPriceRequest {
-				return fmt.Errorf("--max-tokens-per-request=%d exceeds price service ceiling of %d tokens per request", n, services.MaxTokensPerPriceRequest)
+			if n := s.Cfg.PricesConfig.MaxTokensPerRequest; n <= 0 {
+				return fmt.Errorf("--max-tokens-per-request=%d must be positive", n)
 			}
 			if n := s.Cfg.PricesConfig.PriceFetchTimeoutSeconds; n < 0 {
 				return fmt.Errorf("--price-fetch-timeout-seconds=%d must be >= 0", n)
