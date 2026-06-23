@@ -142,21 +142,6 @@ func TestServeCmd_AcceptsMaxTokensPerRequestAtCeiling(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 }
 
-func TestServeCmd_RejectsPriceStaleCacheTTLBelowFreshTTL(t *testing.T) {
-	t.Parallel()
-
-	serveCmd := &ServeCmd{Cfg: &config.Config{}}
-	cmd := serveCmd.Command()
-	cmd.RunE = func(*cobra.Command, []string) error { return nil }
-	cmd.SetOut(io.Discard)
-	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"--price-cache-ttl-seconds", "30", "--price-stale-cache-ttl-seconds", "29"})
-
-	err := cmd.Execute()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "--price-stale-cache-ttl-seconds=29 must be >=")
-}
-
 func TestServeCmd_RejectsNegativePriceFetchTimeout(t *testing.T) {
 	t.Parallel()
 

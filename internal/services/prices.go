@@ -22,7 +22,6 @@ const (
 
 	defaultMaxConcurrent = 25
 	defaultCacheTTL      = 30 * time.Second
-	defaultStaleCacheTTL = 2 * time.Minute
 	defaultMissFetchTTL  = 9 * time.Second
 
 	cacheKeyPrefix = "prices:v1"
@@ -62,7 +61,6 @@ const (
 // defaults so callers can construct a service with PricesServiceConfig{}.
 type PricesServiceConfig struct {
 	CacheTTL         time.Duration
-	StaleCacheTTL    time.Duration
 	MissFetchTimeout time.Duration
 	MaxConcurrent    int
 }
@@ -85,12 +83,6 @@ func NewPricesService(stellarExpert types.StellarExpertService, redis *store.Red
 	if cfg.CacheTTL <= 0 {
 		cfg.CacheTTL = defaultCacheTTL
 	}
-	if cfg.StaleCacheTTL <= 0 {
-		cfg.StaleCacheTTL = defaultStaleCacheTTL
-	}
-	if cfg.StaleCacheTTL < cfg.CacheTTL {
-		cfg.StaleCacheTTL = cfg.CacheTTL
-	}
 	if cfg.MissFetchTimeout <= 0 {
 		cfg.MissFetchTimeout = defaultMissFetchTTL
 	}
@@ -100,11 +92,11 @@ func NewPricesService(stellarExpert types.StellarExpertService, redis *store.Red
 func (p *pricesService) Name() string { return pricesServiceName }
 
 // cachedPriceEntry is the on-disk shape in Redis. Only positive results are
-// cached; FetchedAt lets us distinguish fresh hits from bounded stale fallbacks.
+// cached; Redis expiry (CacheTTL) alone governs freshness, so any entry that
+// MGET returns is a live hit.
 type cachedPriceEntry struct {
 	CurrentPrice             string  `json:"currentPrice,omitempty"`
 	PercentagePriceChange24h *string `json:"percentagePriceChange24h,omitempty"`
-	FetchedAt                string  `json:"fetchedAt,omitempty"`
 }
 
 // GetPrices fetches a snapshot for each canonical token id. The returned map
@@ -134,8 +126,7 @@ func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network 
 		tokenByCacheKey[cacheKeys[i]] = c
 	}
 
-	freshHits, staleFallback := p.loadCachedPrices(ctx, cacheKeys, tokenByCacheKey, network, start)
-	for token, entry := range freshHits {
+	for token, entry := range p.loadCachedPrices(ctx, cacheKeys, tokenByCacheKey, network) {
 		result[token] = entry
 	}
 
@@ -158,54 +149,44 @@ func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network 
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	staleServed := completeMissingResults(canonical, result, staleFallback)
-	if staleServed > 0 && p.pricesMetrics != nil {
-		p.pricesMetrics.StaleFallbackServed.WithLabelValues(network).Inc()
-	}
+	completeMissingResults(canonical, result)
 	return result, nil
 }
 
-func (p *pricesService) loadCachedPrices(ctx context.Context, cacheKeys []string, tokenByCacheKey map[string]string, network string, now time.Time) (map[string]*types.PriceEntry, map[string]*types.PriceEntry) {
-	fresh := make(map[string]*types.PriceEntry, len(cacheKeys))
-	stale := make(map[string]*types.PriceEntry, len(cacheKeys))
+// loadCachedPrices returns the cached entries for cacheKeys. Redis expiry
+// (CacheTTL) governs freshness, so every entry MGET returns is a live hit and
+// any absent key is a miss.
+func (p *pricesService) loadCachedPrices(ctx context.Context, cacheKeys []string, tokenByCacheKey map[string]string, network string) map[string]*types.PriceEntry {
+	hits := make(map[string]*types.PriceEntry, len(cacheKeys))
 	if p.redis == nil {
 		p.recordCacheOutcome(network, "miss", len(cacheKeys))
-		return fresh, stale
+		return hits
 	}
 
-	hits, mgetErr := p.redis.MGetJSON(ctx, cacheKeys, func() any { return new(cachedPriceEntry) })
+	cached, mgetErr := p.redis.MGetJSON(ctx, cacheKeys, func() any { return new(cachedPriceEntry) })
 	if mgetErr != nil {
 		logger.Warn("prices: redis MGet failed; bypassing cache", "error", mgetErr)
 		if p.pricesMetrics != nil {
 			p.pricesMetrics.RedisErrors.WithLabelValues("mget").Inc()
 		}
 		p.recordCacheOutcome(network, "miss", len(cacheKeys))
-		return fresh, stale
+		return hits
 	}
 
 	for _, k := range cacheKeys {
-		v, present := hits[k]
+		v, present := cached[k]
 		entry, _ := v.(*cachedPriceEntry)
 		if !present || entry == nil {
 			p.recordCacheOutcome(network, "miss", 1)
 			continue
 		}
-		priceEntry := &types.PriceEntry{
+		hits[tokenByCacheKey[k]] = &types.PriceEntry{
 			CurrentPrice:             entry.CurrentPrice,
 			PercentagePriceChange24h: entry.PercentagePriceChange24h,
 		}
-		switch entry.freshness(now, p.cfg.CacheTTL, p.cfg.StaleCacheTTL) {
-		case cacheFresh:
-			fresh[tokenByCacheKey[k]] = priceEntry
-			p.recordCacheOutcome(network, "hit_fresh", 1)
-		case cacheStale:
-			stale[tokenByCacheKey[k]] = priceEntry
-			p.recordCacheOutcome(network, "hit_stale", 1)
-		case cacheMissing:
-			p.recordCacheOutcome(network, "miss", 1)
-		}
+		p.recordCacheOutcome(network, "hit", 1)
 	}
-	return fresh, stale
+	return hits
 }
 
 func (p *pricesService) recordCacheOutcome(network, outcome string, n int) {
@@ -376,9 +357,8 @@ func (p *pricesService) cachePositive(ctx context.Context, cacheNet, canonical s
 	value := cachedPriceEntry{
 		CurrentPrice:             entry.CurrentPrice,
 		PercentagePriceChange24h: entry.PercentagePriceChange24h,
-		FetchedAt:                time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), value, p.cfg.StaleCacheTTL); err != nil {
+	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), value, p.cfg.CacheTTL); err != nil {
 		logger.Warn("prices: redis SET failed", "asset", canonical, "error", err)
 		if p.pricesMetrics != nil {
 			p.pricesMetrics.RedisErrors.WithLabelValues("set").Inc()
@@ -428,35 +408,6 @@ func compute24hChange(currentPrice float64, dailyCandles [][2]float64, now time.
 	return &formatted
 }
 
-type cacheFreshness int
-
-const (
-	cacheMissing cacheFreshness = iota
-	cacheFresh
-	cacheStale
-)
-
-func (c *cachedPriceEntry) freshness(now time.Time, freshTTL, staleTTL time.Duration) cacheFreshness {
-	if c == nil || c.FetchedAt == "" {
-		return cacheMissing
-	}
-	fetchedAt, err := time.Parse(time.RFC3339Nano, c.FetchedAt)
-	if err != nil {
-		return cacheMissing
-	}
-	age := now.Sub(fetchedAt)
-	if age < 0 {
-		age = 0
-	}
-	if age <= freshTTL {
-		return cacheFresh
-	}
-	if age <= staleTTL {
-		return cacheStale
-	}
-	return cacheMissing
-}
-
 func missingTokens(tokens []string, result map[string]*types.PriceEntry) []string {
 	misses := make([]string, 0, len(tokens))
 	for _, token := range tokens {
@@ -467,24 +418,15 @@ func missingTokens(tokens []string, result map[string]*types.PriceEntry) []strin
 	return misses
 }
 
-// completeMissingResults fills nil entries for unresolved tokens, drawing
-// from the stale fallback when available. Returns the count of tokens
-// served from the stale fallback so the caller can emit a degraded-mode
-// metric.
-func completeMissingResults(tokens []string, result, staleFallback map[string]*types.PriceEntry) int {
-	stale := 0
+// completeMissingResults fills nil entries for any token that was neither a
+// cache hit nor resolved upstream, so the response carries an explicit
+// unpriceable marker for every requested token.
+func completeMissingResults(tokens []string, result map[string]*types.PriceEntry) {
 	for _, token := range tokens {
-		if _, ok := result[token]; ok {
-			continue
+		if _, ok := result[token]; !ok {
+			result[token] = nil
 		}
-		if fallback, ok := staleFallback[token]; ok {
-			result[token] = fallback
-			stale++
-			continue
-		}
-		result[token] = nil
 	}
-	return stale
 }
 
 func dedupePreserveOrder(tokens []string) []string {

@@ -484,44 +484,20 @@ func TestPrices_PreservesPartialOnContextCancel(t *testing.T) {
 	assert.NotNil(t, got)
 }
 
-func TestCachedPriceEntryFreshness(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-	entry := cachedPriceEntry{
-		CurrentPrice: "1",
-		FetchedAt:    now.Add(-20 * time.Second).Format(time.RFC3339Nano),
-	}
-	assert.Equal(t, cacheFresh, entry.freshness(now, 30*time.Second, 2*time.Minute))
-
-	entry.FetchedAt = now.Add(-45 * time.Second).Format(time.RFC3339Nano)
-	assert.Equal(t, cacheStale, entry.freshness(now, 30*time.Second, 2*time.Minute))
-
-	entry.FetchedAt = now.Add(-3 * time.Minute).Format(time.RFC3339Nano)
-	assert.Equal(t, cacheMissing, entry.freshness(now, 30*time.Second, 2*time.Minute))
-
-	entry.FetchedAt = "not-a-time"
-	assert.Equal(t, cacheMissing, entry.freshness(now, 30*time.Second, 2*time.Minute))
-}
-
-func TestCompleteMissingResultsUsesStaleFallback(t *testing.T) {
+func TestCompleteMissingResultsFillsNil(t *testing.T) {
 	t.Parallel()
 
 	tokens := []string{"XLM", "USDC:" + testIssuer, "BOGUS:" + testIssuer}
 	result := map[string]*types.PriceEntry{
-		"XLM": nil,
-	}
-	staleFallback := map[string]*types.PriceEntry{
 		"USDC:" + testIssuer: {CurrentPrice: "1", PercentagePriceChange24h: ptrStr("0")},
 	}
 
-	staleServed := completeMissingResults(tokens, result, staleFallback)
+	completeMissingResults(tokens, result)
 	require.Len(t, result, len(tokens))
 	assert.Nil(t, result["XLM"])
+	assert.Nil(t, result["BOGUS:"+testIssuer])
 	require.NotNil(t, result["USDC:"+testIssuer])
 	assert.Equal(t, "1", result["USDC:"+testIssuer].CurrentPrice)
-	assert.Nil(t, result["BOGUS:"+testIssuer])
-	assert.Equal(t, 1, staleServed, "one token took the stale fallback")
 }
 
 func TestCompute24hChange(t *testing.T) {
@@ -607,8 +583,7 @@ func TestPrices_CacheOutcomes_NilRedisCountsAllAsMisses(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, float64(2), testutil.ToFloat64(pm.CacheOutcomes.WithLabelValues(types.PUBLIC, "miss")))
-	assert.Equal(t, float64(0), testutil.ToFloat64(pm.CacheOutcomes.WithLabelValues(types.PUBLIC, "hit_fresh")))
-	assert.Equal(t, float64(0), testutil.ToFloat64(pm.CacheOutcomes.WithLabelValues(types.PUBLIC, "hit_stale")))
+	assert.Equal(t, float64(0), testutil.ToFloat64(pm.CacheOutcomes.WithLabelValues(types.PUBLIC, "hit")))
 }
 
 func TestPrices_MissBudgetExhausted_EmitsMetric(t *testing.T) {

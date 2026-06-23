@@ -58,7 +58,6 @@ type PricesConfig struct {
 	StellarExpertAPIKey       string
 	StellarExpertOrigin       string
 	PriceCacheTTLSeconds      int
-	PriceStaleCacheTTLSeconds int
 	PriceFetchTimeoutSeconds  int
 	MaxTokensPerRequest       int
 	MaxConcurrentPriceFetches int
