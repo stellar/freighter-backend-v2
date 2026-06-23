@@ -44,14 +44,6 @@ const (
 	// would make the result not represent a 24h window.
 	minCandleWindow = 23 * time.Hour
 	maxCandleWindow = 25 * time.Hour
-
-	// maxPrice7dFallbackAge bounds how stale the last price7d daily candle
-	// may be before we suppress the fallback 24h change. Daily candles align
-	// to ~24h UTC boundaries, so the last entry is at most ~24h old in
-	// normal operation; 26h adds a 2h cushion for upstream lag and clock
-	// skew. Beyond that, the daily bucket has rolled over without a new
-	// entry — the asset has stopped trading or upstream is stale.
-	maxPrice7dFallbackAge = 26 * time.Hour
 )
 
 // PricesServiceConfig tunes the orchestrator. Zero values fall back to safe
@@ -298,7 +290,19 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 		return nil, false
 	}
 
-	change24h := changeFromCandlesOrFallback(asset, candles, candlesErr, stellarExpertID, to)
+	// The 24h change comes only from the hourly candles window, which can pin
+	// a true trailing 24h (±1h). When candles are unavailable or can't cover
+	// ~24h we return null rather than a mislabeled day-over-day delta from the
+	// daily price7d series.
+	var change24h *string
+	if candlesErr != nil {
+		if !errors.Is(candlesErr, context.DeadlineExceeded) && !errors.Is(candlesErr, context.Canceled) &&
+			!errors.Is(candlesErr, ErrAssetNotFound) && !errors.Is(candlesErr, ErrAssetMalformed) {
+			logger.Warn("prices: candles fetch failed; 24h change unavailable", "asset", stellarExpertID, "error", candlesErr)
+		}
+	} else {
+		change24h = change24hFromCandles(asset.Price, candles, to)
+	}
 
 	entry := &types.PriceEntry{
 		CurrentPrice:             formatPrice(asset.Price),
@@ -306,24 +310,6 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 	}
 	p.cachePositive(ctx, cacheNet, canonical, entry)
 	return entry, true
-}
-
-// changeFromCandlesOrFallback picks the best 24h-change source: the candles
-// window when it covers ~24h with a non-zero open, otherwise the daily
-// price7d fallback. Candles errors that aren't context-related fall back to
-// price7d after a single warning log.
-func changeFromCandlesOrFallback(asset *types.StellarExpertAsset, candles []types.StellarExpertCandle, candlesErr error, stellarExpertID string, to time.Time) *string {
-	if candlesErr != nil {
-		if !errors.Is(candlesErr, context.DeadlineExceeded) && !errors.Is(candlesErr, context.Canceled) &&
-			!errors.Is(candlesErr, ErrAssetNotFound) && !errors.Is(candlesErr, ErrAssetMalformed) {
-			logger.Warn("prices: candles fetch failed; falling back to price7d", "asset", stellarExpertID, "error", candlesErr)
-		}
-		return compute24hChange(asset.Price, asset.Price7d, time.Now().UTC())
-	}
-	if change := change24hFromCandles(asset.Price, candles, to); change != nil {
-		return change
-	}
-	return compute24hChange(asset.Price, asset.Price7d, time.Now().UTC())
 }
 
 // change24hFromCandles computes the 24h percentage delta between currentPrice
@@ -381,34 +367,6 @@ func formatPrice(v float64) string {
 		return "0"
 	}
 	return strconv.FormatFloat(v, 'f', -1, 64)
-}
-
-// compute24hChange returns the percentage delta between the latest reported
-// price and the candle one day prior. Returns nil when there is insufficient
-// history, the prior price is zero (avoids divide-by-zero), or the most
-// recent daily candle is older than maxPrice7dFallbackAge — in which case
-// the result would no longer credibly approximate a 24h change.
-func compute24hChange(currentPrice float64, dailyCandles [][2]float64, now time.Time) *string {
-	if len(dailyCandles) < 2 {
-		return nil
-	}
-	lastTs := dailyCandles[len(dailyCandles)-1][0]
-	if now.Sub(time.Unix(int64(lastTs), 0)) > maxPrice7dFallbackAge {
-		return nil
-	}
-	priorPrice := dailyCandles[len(dailyCandles)-2][1]
-	if priorPrice == 0 {
-		return nil
-	}
-	percentChange := (currentPrice - priorPrice) / priorPrice * 100
-	rounded := math.Round(percentChange*100) / 100
-	if rounded == 0 {
-		// Collapse negative zero to "0" so the JSON is byte-stable for tiny
-		// downward drifts ("-0" surprises clients that string-compare).
-		rounded = 0
-	}
-	formatted := strconv.FormatFloat(rounded, 'f', -1, 64)
-	return &formatted
 }
 
 func missingTokens(tokens []string, result map[string]*types.PriceEntry) []string {

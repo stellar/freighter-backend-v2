@@ -49,8 +49,7 @@ type WalletBackendService interface {
 // StellarExpertAsset is the subset of the Stellar Expert /asset/{id} response
 // we care about for pricing.
 type StellarExpertAsset struct {
-	Price   float64      `json:"price"`
-	Price7d [][2]float64 `json:"price7d"`
+	Price float64 `json:"price"`
 }
 
 // StellarExpertCandle is one row of /asset/{id}/candles.

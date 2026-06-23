@@ -43,8 +43,6 @@ func TestStellarExpert_GetAsset_Success(t *testing.T) {
 	assert.Equal(t, "Bearer test-key", gotAuth)
 	assert.Equal(t, "https://stellar.expert", gotOrigin)
 	assert.InDelta(t, 0.15968, asset.Price, 1e-9)
-	require.Len(t, asset.Price7d, 2)
-	assert.InDelta(t, 0.1597, asset.Price7d[1][1], 1e-9)
 }
 
 func TestStellarExpert_GetAsset_OmitsAuthHeaderWhenKeyEmpty(t *testing.T) {

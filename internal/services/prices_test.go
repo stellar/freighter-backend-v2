@@ -20,19 +20,6 @@ import (
 
 const testIssuer = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
 
-// recentDailyCandles builds a [ts, close] price7d-shaped slice whose last
-// entry's timestamp is `now` and whose entries step back 24h each. Closes
-// are passed oldest-first. Used so tests aren't tied to wall-clock dates.
-func recentDailyCandles(now time.Time, closes ...float64) [][2]float64 {
-	out := make([][2]float64, len(closes))
-	latest := now.Unix()
-	for i, c := range closes {
-		ts := latest - int64(len(closes)-1-i)*86400
-		out[i] = [2]float64{float64(ts), c}
-	}
-	return out
-}
-
 // hourlyCandlesAged builds hourly candles whose first entry's timestamp is
 // `oldestAge` before `now` (truncated to the hour) and whose subsequent
 // entries step forward 1h. `opens` supplies the open price for each
@@ -185,14 +172,12 @@ func TestPrices_HappyPath_NoCache(t *testing.T) {
 
 	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
-	stellarExpert.Set("XLM", &types.StellarExpertAsset{
-		Price:   0.16,
-		Price7d: recentDailyCandles(now, 0.18, 0.17, 0.169, 0.17, 0.165, 0.161, 0.158, 0.159),
-	})
-	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
-		Price:   1.0,
-		Price7d: recentDailyCandles(now, 1.0, 1.0),
-	})
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
+	// oldest open=0.158 → (0.16-0.158)/0.158*100 ≈ 1.27
+	stellarExpert.SetCandles("XLM", hourlyCandlesAged(now, 24*time.Hour, 0.158, 0.159))
+	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 1.0})
+	// flat → 0%
+	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", hourlyCandlesAged(now, 24*time.Hour, 1.0, 1.0))
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"XLM", "USDC:" + testIssuer}, types.PUBLIC)
@@ -217,11 +202,7 @@ func TestPrices_UsesCandlesWhenAvailable(t *testing.T) {
 
 	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
-	// price7d would yield 1% if used. Candles yield -10% — verify candles win.
-	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
-		Price:   1.10,
-		Price7d: recentDailyCandles(now, 1.0, 1.089), // 1.01% if computed from price7d
-	})
+	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 1.10})
 	// oldest open=1.222 → (1.10-1.222)/1.222*100 ≈ -9.98 → -9.98
 	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", hourlyCandlesAged(now, 24*time.Hour, 1.222, 1.21))
 
@@ -237,17 +218,14 @@ func TestPrices_UsesCandlesWhenAvailable(t *testing.T) {
 	assert.Equal(t, 1, stellarExpert.CandleCallCount("USDC-"+testIssuer+"-1"))
 }
 
-func TestPrices_CandlesEmptyFallsBackToPrice7d(t *testing.T) {
+// When /candles returns empty (no recent trades), the price is still served
+// but the 24h change is null — we no longer synthesize one from price7d.
+func TestPrices_CandlesEmpty_NoChange(t *testing.T) {
 	t.Parallel()
 
-	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
-	// Candles unset on the fake → returns empty. Service must still call
-	// candles and then fall back to price7d for the 24h change.
-	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
-		Price:   1.10,
-		Price7d: recentDailyCandles(now, 1.0, 1.099),
-	})
+	// Candles unset on the fake → returns empty.
+	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 1.10})
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
@@ -256,10 +234,8 @@ func TestPrices_CandlesEmptyFallsBackToPrice7d(t *testing.T) {
 	usdc := got["USDC:"+testIssuer]
 	require.NotNil(t, usdc)
 	assert.Equal(t, "1.1", usdc.CurrentPrice)
-	require.NotNil(t, usdc.PercentagePriceChange24h)
-	// price7d-derived: (1.10 - 1.0) / 1.0 * 100 = 10
-	assert.Equal(t, "10", *usdc.PercentagePriceChange24h)
-	assert.Equal(t, 1, stellarExpert.CandleCallCount("USDC-"+testIssuer+"-1"), "candles call is made even when empty; price7d drives the fallback")
+	assert.Nil(t, usdc.PercentagePriceChange24h, "empty candles → null 24h change")
+	assert.Equal(t, 1, stellarExpert.CandleCallCount("USDC-"+testIssuer+"-1"), "candles call is still made")
 }
 
 func TestPrices_XLM_UsesCandles(t *testing.T) {
@@ -267,11 +243,7 @@ func TestPrices_XLM_UsesCandles(t *testing.T) {
 
 	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
-	// price7d would yield ~0.63% if used; candles yield ~-2.02 — verify candles win.
-	stellarExpert.Set("XLM", &types.StellarExpertAsset{
-		Price:   0.16,
-		Price7d: recentDailyCandles(now, 0.159, 0.16),
-	})
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
 	// oldest open=0.1633 → (0.16 - 0.1633) / 0.1633 * 100 ≈ -2.02
 	stellarExpert.SetCandles("XLM", hourlyCandlesAged(now, 24*time.Hour, 0.1633, 0.1625))
 
@@ -287,17 +259,13 @@ func TestPrices_XLM_UsesCandles(t *testing.T) {
 	assert.Equal(t, 1, stellarExpert.CandleCallCount("XLM"))
 }
 
-func TestPrices_CandlesErrorFallsBackToPrice7d(t *testing.T) {
+// A transient candles error leaves the price intact but yields a null 24h
+// change — there is no price7d fallback.
+func TestPrices_CandlesError_NoChange(t *testing.T) {
 	t.Parallel()
 
-	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
-	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
-		Price: 1.0,
-		// compute24hChange reads price7d[len-2], i.e. 0.95 here:
-		// (1.0 - 0.95) / 0.95 * 100 ≈ 5.26
-		Price7d: recentDailyCandles(now, 0.95, 0.97),
-	})
+	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 1.0})
 	stellarExpert.SetCandleErr("USDC-"+testIssuer+"-1", errors.New("transient candles boom"))
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
@@ -306,23 +274,19 @@ func TestPrices_CandlesErrorFallsBackToPrice7d(t *testing.T) {
 
 	usdc := got["USDC:"+testIssuer]
 	require.NotNil(t, usdc)
-	require.NotNil(t, usdc.PercentagePriceChange24h)
-	assert.Equal(t, "5.26", *usdc.PercentagePriceChange24h)
+	assert.Equal(t, "1", usdc.CurrentPrice)
+	assert.Nil(t, usdc.PercentagePriceChange24h, "candles error → null 24h change")
 }
 
 // Sparse upstream data: candles return 2 buckets but the oldest is only
-// 6h old. The coverage check must reject this so the service falls back
-// to the price7d path rather than labeling a 6h change as "24h".
-func TestPrices_SparseCandles_FallsBackToPrice7d(t *testing.T) {
+// 6h old. The coverage check rejects this, so the 24h change is null rather
+// than a 6h change mislabeled as "24h".
+func TestPrices_SparseCandles_NoChange(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
-	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
-		Price: 1.0,
-		// Fresh price7d; (1.0-0.95)/0.95*100 ≈ 5.26
-		Price7d: recentDailyCandles(now, 0.95, 0.97),
-	})
+	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 1.0})
 	// Only 6h of coverage — outside [23h, 25h] from `to`.
 	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", hourlyCandlesAged(now, 6*time.Hour, 0.5, 0.6))
 
@@ -332,38 +296,15 @@ func TestPrices_SparseCandles_FallsBackToPrice7d(t *testing.T) {
 
 	usdc := got["USDC:"+testIssuer]
 	require.NotNil(t, usdc)
-	require.NotNil(t, usdc.PercentagePriceChange24h)
-	assert.Equal(t, "5.26", *usdc.PercentagePriceChange24h, "sparse candles must fall through to price7d, not produce a 6h change")
-}
-
-// When /candles is empty AND price7d's last daily candle is older than
-// maxPrice7dFallbackAge, the entry is still returned with a real price but
-// percentagePriceChange24h is suppressed rather than computed off stale data.
-func TestPrices_StalePrice7d_SuppressesFallbackChange(t *testing.T) {
-	t.Parallel()
-
-	stalePast := time.Now().UTC().Add(-3 * 24 * time.Hour)
-	stellarExpert := newFakeStellarExpert()
-	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{
-		Price:   1.0,
-		Price7d: recentDailyCandles(stalePast, 0.95, 0.97),
-	})
-
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
-	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
-	require.NoError(t, err)
-
-	usdc := got["USDC:"+testIssuer]
-	require.NotNil(t, usdc)
 	assert.Equal(t, "1", usdc.CurrentPrice)
-	assert.Nil(t, usdc.PercentagePriceChange24h, "stale price7d must not produce a 24h change")
+	assert.Nil(t, usdc.PercentagePriceChange24h, "sparse candles → null, not a 6h change")
 }
 
 func TestPrices_NotFound_ReturnsNull(t *testing.T) {
 	t.Parallel()
 
 	stellarExpert := newFakeStellarExpert()
-	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"XLM", "BOGUS:" + testIssuer}, types.PUBLIC)
@@ -404,7 +345,7 @@ func TestPrices_DedupesDuplicateTokens(t *testing.T) {
 	t.Parallel()
 
 	stellarExpert := newFakeStellarExpert()
-	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	_, err := svc.GetPrices(context.Background(), []string{"XLM", "XLM", "XLM"}, types.PUBLIC)
@@ -431,7 +372,7 @@ func TestPrices_ConcurrencyCapHonored(t *testing.T) {
 		// Use distinct codes (4 chars) so each canonical id is unique.
 		code := []byte{'A', 'A', 'A', byte('A' + i)}
 		stellarExpertID := string(code) + "-" + testIssuer + "-1"
-		stellarExpert.Set(stellarExpertID, &types.StellarExpertAsset{Price: 1.0, Price7d: [][2]float64{{1, 1}, {2, 1}}})
+		stellarExpert.Set(stellarExpertID, &types.StellarExpertAsset{Price: 1.0})
 		tokens[i] = string(code) + ":" + testIssuer
 	}
 
@@ -453,7 +394,7 @@ func TestPrices_CoalescesConcurrentFetches(t *testing.T) {
 	// A delay wide enough that all goroutines are in-flight at DoChan before
 	// the shared fetch completes, so singleflight coalesces them.
 	stellarExpert.delay = 50 * time.Millisecond
-	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 
@@ -506,7 +447,7 @@ func TestPrices_PreservesPartialOnContextCancel(t *testing.T) {
 
 	stellarExpert := newFakeStellarExpert()
 	stellarExpert.delay = 100 * time.Millisecond
-	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
@@ -537,64 +478,6 @@ func TestCompleteMissingResultsFillsNil(t *testing.T) {
 	assert.Equal(t, "1", result["USDC:"+testIssuer].CurrentPrice)
 }
 
-func TestCompute24hChange(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-	fresh := func(closes ...float64) [][2]float64 { return recentDailyCandles(now, closes...) }
-
-	cases := []struct {
-		name    string
-		current float64
-		candles [][2]float64
-		want    *string
-	}{
-		{"no candles", 1.0, nil, nil},
-		{"single candle", 1.0, fresh(1), nil},
-		{"zero prior denom", 1.0, fresh(0, 0.5), nil},
-		{"+10% rise vs prior", 1.10, fresh(1.0, 1.05), ptrStr("10")},
-		{"-25% drop vs prior", 0.90, fresh(1.2, 1.0), ptrStr("-25")},
-		{"8 candles uses index len-2", 0.16, fresh(0.18, 0.17, 0.169, 0.17, 0.165, 0.161, 0.158, 0.159), ptrStr("1.27")},
-		{"rounding to 2 decimals", 1.0001, fresh(1.0, 0.999), ptrStr("0.01")},
-		{"negative zero collapses to 0", 0.999999, fresh(1.0, 1.0), ptrStr("0")},
-	}
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := compute24hChange(tc.current, tc.candles, now)
-			if tc.want == nil {
-				assert.Nil(t, got)
-				return
-			}
-			require.NotNil(t, got)
-			assert.Equal(t, *tc.want, *got)
-		})
-	}
-}
-
-func TestCompute24hChange_StalePrice7d_ReturnsNil(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-	// Last candle is 48h old — beyond the 26h freshness threshold.
-	stale := recentDailyCandles(now.Add(-48*time.Hour), 0.95, 0.97)
-	assert.Nil(t, compute24hChange(1.0, stale, now))
-}
-
-func TestCompute24hChange_FreshPrice7d_ComputesChange(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-	// Last candle 12h old — well within the 26h threshold.
-	fresh := recentDailyCandles(now.Add(-12*time.Hour), 0.95, 0.97)
-	got := compute24hChange(1.0, fresh, now)
-	require.NotNil(t, got)
-	// (1.0 - 0.95) / 0.95 * 100 ≈ 5.26
-	assert.Equal(t, "5.26", *got)
-}
-
 func TestFormatPrice(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "0.15968791272173", formatPrice(0.15968791272173))
@@ -609,8 +492,8 @@ func TestPrices_CacheOutcomes_NilRedisCountsAllAsMisses(t *testing.T) {
 	t.Parallel()
 
 	stellarExpert := newFakeStellarExpert()
-	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
-	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 1.0, Price7d: [][2]float64{{1, 1}, {2, 1}}})
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
+	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 1.0})
 
 	reg := prometheus.NewRegistry()
 	pm := metrics.NewPrices(reg)
@@ -651,7 +534,7 @@ func TestPrices_RedisErrors_MGetUnreachable_Increments(t *testing.T) {
 
 	redisStore := store.NewRedisStore("localhost", 1, "") // port 1 = no listener
 	stellarExpert := newFakeStellarExpert()
-	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
 
 	reg := prometheus.NewRegistry()
 	pm := metrics.NewPrices(reg)
@@ -669,7 +552,7 @@ func TestPrices_NilMetrics_NoOps(t *testing.T) {
 	t.Parallel()
 
 	stellarExpert := newFakeStellarExpert()
-	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Price7d: [][2]float64{{1, 0.15}, {2, 0.16}}})
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
