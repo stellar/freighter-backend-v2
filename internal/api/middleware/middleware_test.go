@@ -3,7 +3,6 @@ package middleware
 import (
 	"bytes"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
@@ -57,12 +57,11 @@ func TestMiddleware_Chain(t *testing.T) {
 }
 
 func TestMiddleware_Logging(t *testing.T) {
-	// Capture stdout to check log output. This approach has limitations
-	// because it relies on manipulating global state (os.Stdout) and
-	// assumes the global logger hasn't been initialized elsewhere.
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
+	// Capture log output via the logger's output seam so the test is independent
+	// of when the global logger was first initialized.
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(func() { logger.SetOutput(os.Stdout) })
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -75,15 +74,6 @@ func TestMiddleware_Logging(t *testing.T) {
 
 	chain.ServeHTTP(rec, req)
 
-	// Restore logger and read output
-	err := w.Close()
-	require.NoError(t, err)
-	os.Stdout = oldStdout // Restore the real stdout
-
-	// Read captured output from the reader end of the pipe
-	var buf bytes.Buffer
-	_, err = io.Copy(&buf, r)
-	require.NoError(t, err)
 	logOutput := buf.String()
 
 	assert.Equal(t, http.StatusOK, rec.Code)

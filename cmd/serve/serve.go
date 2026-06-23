@@ -7,6 +7,7 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/api"
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
+	"github.com/stellar/freighter-backend-v2/internal/auth"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/services"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
@@ -37,6 +38,9 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if d, m := s.Cfg.AppConfig.AccountHistoryDefaultLimit, s.Cfg.AppConfig.AccountHistoryMaxLimit; d <= 0 || m <= 0 || d > m || m > handlers.AccountHistoryUpstreamMaxLimit {
 				return fmt.Errorf("--account-history-default-limit=%d / --account-history-max-limit=%d must be positive, default <= max, and max <= %d", d, m, handlers.AccountHistoryUpstreamMaxLimit)
 			}
+			if _, err := auth.ParseMode(s.Cfg.AppConfig.AuthMode); err != nil {
+				return fmt.Errorf("--auth-mode: %w", err)
+			}
 			return nil
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -55,6 +59,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.MetricsHost, "metrics-host", "localhost", "The host of the internal metrics server (Prometheus /metrics)")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MetricsPort, "metrics-port", 9090, "The port of the internal metrics server (Prometheus /metrics)")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.Mode, "mode", "development", "The mode of the server")
+	cmd.Flags().StringVar(&s.Cfg.AppConfig.AuthMode, "auth-mode", "permissive", "JWT auth enforcement for gated routes: \"permissive\" (allow no-token requests, reject invalid tokens) or \"strict\" (require a valid token)")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.SentryKey, "sentry-key", "", "The Sentry key")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.ProtocolsConfigPath, "protocols-config-path", "/app/config/protocols.json", "The path to the protocols config file while lists all supported protocols in Freighter")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.MeridianPayTreasureHuntAddress, "meridian-pay-treasure-hunt-address", "", "The Meridian Pay Treasure Hunt collection address")

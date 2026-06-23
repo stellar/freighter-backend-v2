@@ -52,6 +52,7 @@ func (e *UpstreamError) Unwrap() error { return e.Err }
 type Metrics struct {
 	HTTP    *HTTP
 	Service *Service
+	Auth    *Auth
 }
 
 // NewMetrics creates and registers all application metrics with the given registerer.
@@ -59,7 +60,40 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	return &Metrics{
 		HTTP:    NewHTTP(reg),
 		Service: NewService(reg),
+		Auth:    NewAuth(reg),
 	}
+}
+
+// Auth holds JWT authentication metrics. During the client rollout these track
+// adoption (authenticated vs anonymous) and rejection reasons.
+type Auth struct {
+	// RequestsTotal counts auth-checked requests, labeled by outcome and reason.
+	//   result: "authenticated" | "anonymous" | "rejected"
+	//   reason: "ok" | "no_token" | "expired" | "bad_signature" | "bad_timing" |
+	//           "bad_method_path" | "bad_body_hash" | "bad_subject" | "malformed" |
+	//           "invalid" | "internal"
+	RequestsTotal *prometheus.CounterVec
+}
+
+// NewAuth creates and registers auth metrics with the given registerer.
+func NewAuth(reg prometheus.Registerer) *Auth {
+	a := &Auth{
+		RequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_auth_requests_total",
+			Help: "Total number of auth-checked HTTP requests, by result and reason.",
+		}, []string{"result", "reason"}),
+	}
+	reg.MustRegister(a.RequestsTotal)
+	return a
+}
+
+// RecordAuth records the outcome of an auth check. It is nil-safe so the
+// middleware and its tests can run without a metrics registry.
+func RecordAuth(a *Auth, result, reason string) {
+	if a == nil {
+		return
+	}
+	a.RequestsTotal.WithLabelValues(result, reason).Inc()
 }
 
 // HTTP holds HTTP request metrics.

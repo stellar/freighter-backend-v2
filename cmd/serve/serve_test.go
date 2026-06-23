@@ -131,3 +131,31 @@ func TestServeCmd_RejectsAccountHistoryMaxLimitAbove100(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "max <= 100")
 }
+
+func TestServeCmd_RejectsInvalidAuthMode(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--auth-mode", "bogus"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid auth mode")
+}
+
+func TestServeCmd_AcceptsStrictAuthMode(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--auth-mode", "strict"})
+
+	require.NoError(t, cmd.Execute())
+}

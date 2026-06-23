@@ -12,11 +12,15 @@ type Config struct {
 }
 
 type AppConfig struct {
-	FreighterBackendHost           string
-	FreighterBackendPort           int
-	MetricsHost                    string
-	MetricsPort                    int
-	Mode                           string
+	FreighterBackendHost string
+	FreighterBackendPort int
+	MetricsHost          string
+	MetricsPort          int
+	Mode                 string
+	// AuthMode selects JWT enforcement for gated routes: "permissive" (allow
+	// requests with no token through, reject invalid tokens) or "strict"
+	// (require a valid token). Parsed via auth.ParseMode; validated at startup.
+	AuthMode                       string
 	SentryKey                      string
 	ProtocolsConfigPath            string
 	MeridianPayTreasureHuntAddress string
