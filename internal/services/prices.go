@@ -17,6 +17,7 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/store"
 	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/freighter-backend-v2/internal/utils/assetid"
 )
 
@@ -108,7 +109,7 @@ func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network 
 	}
 	cacheNet := strings.ToLower(network)
 
-	canonical := dedupePreserveOrder(tokens)
+	canonical := utils.DedupePreserveOrder(tokens)
 	result := make(map[string]*types.PriceEntry, len(canonical))
 	var resultMu sync.Mutex
 
@@ -390,15 +391,3 @@ func completeMissingResults(tokens []string, result map[string]*types.PriceEntry
 	}
 }
 
-func dedupePreserveOrder(tokens []string) []string {
-	seen := make(map[string]struct{}, len(tokens))
-	out := make([]string, 0, len(tokens))
-	for _, t := range tokens {
-		if _, ok := seen[t]; ok {
-			continue
-		}
-		seen[t] = struct{}{}
-		out = append(out, t)
-	}
-	return out
-}

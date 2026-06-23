@@ -17,8 +17,6 @@ import (
 
 const (
 	stellarExpertServiceName = "stellar-expert"
-	stellarExpertNetPubnet   = "public"
-	stellarExpertNetTestnet  = "testnet"
 
 	stellarExpertHTTPTimeout = 15 * time.Second
 
@@ -102,42 +100,18 @@ func (s *stellarExpertService) GetAsset(ctx context.Context, network, assetID st
 	if err != nil {
 		return nil, err
 	}
-	reqURL := fmt.Sprintf("%s/asset/%s", baseURL, assetID)
 
-	req, err := s.newRequest(ctx, reqURL)
-	if err != nil {
+	var asset types.StellarExpertAsset
+	if err := s.doJSON(ctx, fmt.Sprintf("%s/asset/%s", baseURL, assetID), "asset", &asset); err != nil {
 		return nil, err
 	}
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, &metrics.UpstreamError{Kind: "http_error", Err: err}
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-		var asset types.StellarExpertAsset
-		if err := json.NewDecoder(resp.Body).Decode(&asset); err != nil {
-			return nil, fmt.Errorf("decoding stellar expert response: %w", err)
-		}
-		return &asset, nil
-	case http.StatusNotFound:
-		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil, ErrAssetNotFound
-	case http.StatusBadRequest:
-		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil, ErrAssetMalformed
-	default:
-		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil, &metrics.UpstreamError{Kind: "http_error", Code: resp.StatusCode, Err: fmt.Errorf("stellar expert status %d", resp.StatusCode)}
-	}
+	return &asset, nil
 }
 
 // GetAssetCandles fetches OHLC candles for one asset over [from, to] at the
 // given resolution (seconds). assetID must already be in Stellar Expert wire
 // format. An empty upstream response (no trades in the window) is propagated
-// as a nil-error empty slice; callers fall back to price7d for 24h change.
+// as a nil-error empty slice; callers then report a null 24h change.
 func (s *stellarExpertService) GetAssetCandles(ctx context.Context, network, assetID string, from, to time.Time, resolutionSec int) (_ []types.StellarExpertCandle, err error) {
 	start := time.Now()
 	defer func() {
@@ -156,33 +130,45 @@ func (s *stellarExpertService) GetAssetCandles(ctx context.Context, network, ass
 	query.Set("order", "asc")
 	reqURL := fmt.Sprintf("%s/asset/%s/candles?%s", baseURL, assetID, query.Encode())
 
+	var candles []types.StellarExpertCandle
+	if err := s.doJSON(ctx, reqURL, "candles", &candles); err != nil {
+		return nil, err
+	}
+	return candles, nil
+}
+
+// doJSON issues a GET to reqURL and decodes a 200 response body into dest. It
+// maps 404 → ErrAssetNotFound and 400 → ErrAssetMalformed so callers treat
+// unknown/invalid assets as unpriceable without retry, and any other non-200
+// to an UpstreamError. label ("asset"/"candles") disambiguates the endpoint in
+// decode/status error messages.
+func (s *stellarExpertService) doJSON(ctx context.Context, reqURL, label string, dest any) error {
 	req, err := s.newRequest(ctx, reqURL)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return nil, &metrics.UpstreamError{Kind: "http_error", Err: err}
+		return &metrics.UpstreamError{Kind: "http_error", Err: err}
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		var candles []types.StellarExpertCandle
-		if err := json.NewDecoder(resp.Body).Decode(&candles); err != nil {
-			return nil, fmt.Errorf("decoding stellar expert candles response: %w", err)
+		if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
+			return fmt.Errorf("decoding stellar expert %s response: %w", label, err)
 		}
-		return candles, nil
+		return nil
 	case http.StatusNotFound:
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil, ErrAssetNotFound
+		return ErrAssetNotFound
 	case http.StatusBadRequest:
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil, ErrAssetMalformed
+		return ErrAssetMalformed
 	default:
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil, &metrics.UpstreamError{Kind: "http_error", Code: resp.StatusCode, Err: fmt.Errorf("stellar expert candles status %d", resp.StatusCode)}
+		return &metrics.UpstreamError{Kind: "http_error", Code: resp.StatusCode, Err: fmt.Errorf("stellar expert %s status %d", label, resp.StatusCode)}
 	}
 }
 

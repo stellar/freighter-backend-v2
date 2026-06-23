@@ -20,6 +20,7 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 const (
@@ -177,16 +178,7 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 		return nil, fmt.Errorf("wallet backend client not configured for network: %s", network)
 	}
 
-	// Dedupe while preserving first-seen order.
-	seen := make(map[string]struct{}, len(addresses))
-	unique := make([]string, 0, len(addresses))
-	for _, a := range addresses {
-		if _, ok := seen[a]; ok {
-			continue
-		}
-		seen[a] = struct{}{}
-		unique = append(unique, a)
-	}
+	unique := utils.DedupePreserveOrder(addresses)
 
 	results := make([]*types.AccountBalances, len(unique))
 	g, gctx := errgroup.WithContext(ctx)

@@ -125,7 +125,7 @@ func (f *fakeStellarExpert) GetAssetCandles(ctx context.Context, network, assetI
 	}
 	if !ok {
 		// No candles configured: return empty so the prices service's
-		// price7d fallback path is exercised.
+		// empty-candles → null-change path is exercised.
 		return nil, nil
 	}
 	return rows, nil

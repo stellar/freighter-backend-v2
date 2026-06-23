@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/stellar/go/strkey"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 const (
@@ -43,7 +43,7 @@ func Normalize(input string) (string, error) {
 	if !isValidAssetCode(code) {
 		return "", fmt.Errorf("%w: invalid asset code %q", ErrMalformed, code)
 	}
-	if _, err := strkey.Decode(strkey.VersionByteAccountID, issuer); err != nil {
+	if !utils.IsValidStellarPublicKey(issuer) {
 		return "", fmt.Errorf("%w: invalid issuer %q", ErrMalformed, issuer)
 	}
 
