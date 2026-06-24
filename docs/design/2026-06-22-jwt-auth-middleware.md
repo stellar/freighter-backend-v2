@@ -109,9 +109,10 @@ risk silently truncating the bytes it hashes.
 2. `claims.Validate(methodAndPath, body, MaxTokenLifetime)`:
    - `exp` and `iat` set; `exp - iat ≤ MaxTokenLifetime`;
    - `methodAndPath` matches `"<METHOD> <RequestURI>"` (binds query string);
-   - `bodyHash == HashBody(body)`;
-   - `Subject` is valid hex decoding to exactly `ed25519.PublicKeySize` (32) bytes.
-3. Decode `Subject` → `ed25519.PublicKey`.
+   - `bodyHash == HashBody(body)`.
+3. Decode `Subject` → `ed25519.PublicKey` (valid hex decoding to exactly
+   `ed25519.PublicKeySize` (32) bytes; performed in `ParseJWT` after `Validate`,
+   not inside `Claims.Validate`).
 4. `jwtgo.ParseWithClaims(..., keyfunc→pubKey, jwtgo.WithValidMethods([]string{"EdDSA"}), jwtgo.WithLeeway(ClockSkewLeeway))`.
    `WithValidMethods` blocks `alg=none`/HS256 confusion attacks.
 5. Map `jwtgo.ErrTokenExpired` → `ExpiredTokenError`.

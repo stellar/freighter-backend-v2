@@ -31,7 +31,7 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 			case errors.Is(err, auth.ErrNoToken):
 				if mode == auth.Required {
 					metrics.RecordAuth(authMetrics, "rejected", "no_token")
-					httperror.Unauthorized("", nil).Render(w)
+					httperror.Unauthorized("unauthorized", nil).Render(w)
 					return
 				}
 				// Permissive: allow through with no user ID attached.
@@ -49,14 +49,14 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 					"detail", err.Error(),
 					"method", r.Method,
 					"path", r.URL.Path)
-				httperror.Unauthorized("", nil).Render(w)
+				httperror.Unauthorized("unauthorized", nil).Render(w)
 				return
 
 			default:
 				// Operational failure (e.g. reading the body).
 				metrics.RecordAuth(authMetrics, "rejected", "internal")
 				logger.ErrorWithContext(r.Context(), "auth check failed", "error", err)
-				httperror.InternalServerError("", err).Render(w)
+				httperror.InternalServerError("An unexpected error occurred", err).Render(w)
 				return
 			}
 
