@@ -47,9 +47,19 @@ func (c *Claims) Validate(methodAndPath string, body []byte, maxLifetime time.Du
 	if lifetime > maxLifetime {
 		return &VerificationError{Reason: ReasonBadTiming, Err: fmt.Errorf("token lifetime %s exceeds max %s", lifetime, maxLifetime)}
 	}
+	// Capture a single "now" so the iat/exp future bounds are checked against the
+	// same instant.
+	now := time.Now()
+	// Reject a future-dated iat beyond the skew leeway. jwt/v5 with WithLeeway
+	// validates exp/nbf but does not reject a future iat, so without this a signer
+	// could date a token ahead of now (e.g. iat=exp=now+lifetime+leeway) and have
+	// it accepted, stretching the acceptance window past the intended ±skew.
+	if c.IssuedAt.After(now.Add(ClockSkewLeeway)) {
+		return &VerificationError{Reason: ReasonBadTiming, Err: errors.New("iat is in the future beyond the allowed skew")}
+	}
 	// Reject tokens dated implausibly far in the future. exp can legitimately be
 	// up to one full lifetime ahead, plus skew leeway.
-	if c.ExpiresAt.After(time.Now().Add(maxLifetime + ClockSkewLeeway)) {
+	if c.ExpiresAt.After(now.Add(maxLifetime + ClockSkewLeeway)) {
 		return &VerificationError{Reason: ReasonBadTiming, Err: errors.New("exp is too far in the future")}
 	}
 

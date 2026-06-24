@@ -185,6 +185,26 @@ func TestParseJWT_LifetimeTooLong(t *testing.T) {
 	assert.ErrorIs(t, err, ErrUnauthorized)
 }
 
+// A token dated into the future beyond the clock-skew leeway must be rejected as
+// bad timing — jwt/v5's WithLeeway alone does not reject a future iat, which
+// would otherwise let a signer (iat=exp=now+lifetime+leeway) stretch the
+// acceptance window past the intended ±skew.
+func TestParseJWT_FutureIssuedAt(t *testing.T) {
+	_, priv, sub := newKeypair(t)
+	c := validClaims(sub, testMethodAndPath, nil)
+	now := time.Now()
+	// iat just past the skew window; keep exp within its own bound so the only
+	// failing check is the new iat-skew check.
+	c.IssuedAt = jwtgo.NewNumericDate(now.Add(ClockSkewLeeway + 2*time.Second))
+	c.ExpiresAt = jwtgo.NewNumericDate(now.Add(ClockSkewLeeway + 2*time.Second))
+	token := mint(t, priv, c)
+
+	_, err := ParseJWT(token, testMethodAndPath, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrUnauthorized)
+	assert.Equal(t, ReasonBadTiming, Reason(err))
+}
+
 // --- VerifyHTTPRequest ---
 
 func newRequest(t *testing.T, method, target string, body []byte, bearer string) *http.Request {

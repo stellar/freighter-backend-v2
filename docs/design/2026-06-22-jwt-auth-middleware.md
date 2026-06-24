@@ -108,6 +108,10 @@ risk silently truncating the bytes it hashes.
 1. `ParseUnverified` to read `claims.Subject`.
 2. `claims.Validate(methodAndPath, body, MaxTokenLifetime)`:
    - `exp` and `iat` set; `exp - iat ≤ MaxTokenLifetime`;
+   - `iat` not in the future beyond `ClockSkewLeeway`, and `exp` not beyond
+     `now + MaxTokenLifetime + ClockSkewLeeway` (keeps the acceptance window
+     within the intended lifetime ± skew — `WithLeeway` alone does not bound a
+     future `iat`);
    - `methodAndPath` matches `"<METHOD> <RequestURI>"` (binds query string);
    - `bodyHash == HashBody(body)`.
 3. Decode `Subject` → `ed25519.PublicKey` (valid hex decoding to exactly
