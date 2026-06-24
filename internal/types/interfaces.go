@@ -2,6 +2,7 @@ package types
 
 import (
 	"context"
+	"time"
 
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -21,11 +22,11 @@ const (
 
 type Service interface {
 	Name() string
-	GetHealth(ctx context.Context, network string) (GetHealthResponse, error)
 }
 
 type RPCService interface {
 	Service
+	GetHealth(ctx context.Context, network string) (GetHealthResponse, error)
 	SimulateTx(ctx context.Context, tx *txnbuild.Transaction, network string) (SimulateTransactionResponse, error)
 	SimulateInvocation(
 		ctx context.Context,
@@ -41,6 +42,40 @@ type RPCService interface {
 
 type WalletBackendService interface {
 	Service
+	GetHealth(ctx context.Context, network string) (GetHealthResponse, error)
 	GetBalancesByAccountAddresses(ctx context.Context, addresses []string, network string) (interface{}, error)
 	GetAccountTransactions(ctx context.Context, address, network string, params AccountHistoryParams) (*PaginatedResponse[*AccountTransaction], error)
+}
+
+// StellarExpertAsset is the subset of the Stellar Expert /asset/{id} response
+// we care about for pricing.
+type StellarExpertAsset struct {
+	Price float64 `json:"price"`
+}
+
+// StellarExpertCandle is one row of /asset/{id}/candles.
+// Wire shape per Stellar Expert API docs: [ts, open, low, high, close,
+// quote_volume, base_volume, trades].
+type StellarExpertCandle [8]float64
+
+func (c StellarExpertCandle) TS() int64     { return int64(c[0]) }
+func (c StellarExpertCandle) Open() float64 { return c[1] }
+
+type StellarExpertService interface {
+	Service
+	GetAsset(ctx context.Context, network, assetID string) (*StellarExpertAsset, error)
+	GetAssetCandles(ctx context.Context, network, assetID string, from, to time.Time, resolutionSec int) ([]StellarExpertCandle, error)
+}
+
+// PriceEntry is the per-token shape returned to the client. Numeric fields
+// are JSON strings to match the legacy v1 BigNumber output;
+// PercentagePriceChange24h is nullable when 24h history is unavailable.
+type PriceEntry struct {
+	CurrentPrice             string  `json:"currentPrice"`
+	PercentagePriceChange24h *string `json:"percentagePriceChange24h"`
+}
+
+type PricesService interface {
+	Service
+	GetPrices(ctx context.Context, tokens []string, network string) (map[string]*PriceEntry, error)
 }

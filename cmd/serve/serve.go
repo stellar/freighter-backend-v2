@@ -34,9 +34,16 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.AppConfig.WalletBackendBalanceConcurrency; n <= 0 {
 				return fmt.Errorf("--wallet-backend-balance-concurrency=%d must be positive", n)
 			}
+			if n := s.Cfg.PricesConfig.MaxTokensPerRequest; n <= 0 {
+				return fmt.Errorf("--max-tokens-per-request=%d must be positive", n)
+			}
+			if n := s.Cfg.PricesConfig.PriceFetchTimeoutSeconds; n < 0 {
+				return fmt.Errorf("--price-fetch-timeout-seconds=%d must be >= 0", n)
+			}
 			if d, m := s.Cfg.AppConfig.AccountHistoryDefaultLimit, s.Cfg.AppConfig.AccountHistoryMaxLimit; d <= 0 || m <= 0 || d > m || m > handlers.AccountHistoryUpstreamMaxLimit {
 				return fmt.Errorf("--account-history-default-limit=%d / --account-history-max-limit=%d must be positive, default <= max, and max <= %d", d, m, handlers.AccountHistoryUpstreamMaxLimit)
 			}
+
 			return nil
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -100,6 +107,16 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.TestnetUrl, "wallet-backend-testnet-url", "", "Wallet backend testnet URL")
 	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.PubnetSigningKey, "wallet-backend-pubnet-signing-key", "", "Wallet backend pubnet JWT signing key (Stellar secret key)")
 	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.TestnetSigningKey, "wallet-backend-testnet-signing-key", "", "Wallet backend testnet JWT signing key (Stellar secret key)")
+
+	// Token Prices Config
+	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertPubnetURL, "stellar-expert-pubnet-url", "https://api.stellar.expert/explorer/public", "Stellar Expert base URL for pubnet")
+	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertTestnetURL, "stellar-expert-testnet-url", "https://api.stellar.expert/explorer/testnet", "Stellar Expert base URL for testnet")
+	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertAPIKey, "stellar-expert-api-key", "", "Bearer token for the Stellar Expert API (required)")
+	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertOrigin, "stellar-expert-origin", "https://stellar.expert", "Origin header sent on Stellar Expert requests; Stellar Expert associates the API key with this origin (e.g. https://api.freighter.app in production)")
+	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceCacheTTLSeconds, "price-cache-ttl-seconds", 30, "TTL for cached token prices in Redis (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceFetchTimeoutSeconds, "price-fetch-timeout-seconds", 9, "Budget for uncached token price fetches before returning best-effort results (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxTokensPerRequest, "max-tokens-per-request", 1000, "Maximum tokens accepted in a single token-prices request")
+	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxConcurrentPriceFetches, "max-concurrent-price-fetches", 25, "Per-request token-in-flight cap; each token issues GetAsset and GetAssetCandles in parallel, so the upstream HTTP-call ceiling is up to 2× this value")
 	return cmd
 }
 

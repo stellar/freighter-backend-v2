@@ -36,6 +36,7 @@ type ApiServer struct {
 	redis                *store.RedisStore
 	rpcService           types.RPCService
 	walletBackendService types.WalletBackendService
+	pricesService        types.PricesService
 	registry             *prometheus.Registry
 	appMetrics           *metrics.Metrics
 }
@@ -66,6 +67,10 @@ func (s *ApiServer) Start() error {
 }
 
 func (s *ApiServer) initServices() error {
+	if s.cfg.PricesConfig.StellarExpertAPIKey == "" {
+		return fmt.Errorf("STELLAR_EXPERT_API_KEY is required")
+	}
+
 	s.redis = store.NewRedisStore(s.cfg.RedisConfig.Host, s.cfg.RedisConfig.Port, s.cfg.RedisConfig.Password)
 
 	s.rpcService = services.NewRPCService(s.cfg.RpcConfig.PubnetRpcUrl, s.cfg.RpcConfig.TestnetRpcUrl, s.cfg.RpcConfig.FuturenetRpcUrl, s.appMetrics.Service)
@@ -84,6 +89,19 @@ func (s *ApiServer) initServices() error {
 		return err
 	}
 	s.walletBackendService = walletBackendService
+
+	stellarExpert := services.NewStellarExpertService(
+		s.cfg.PricesConfig.StellarExpertPubnetURL,
+		s.cfg.PricesConfig.StellarExpertTestnetURL,
+		s.cfg.PricesConfig.StellarExpertAPIKey,
+		s.cfg.PricesConfig.StellarExpertOrigin,
+		s.appMetrics.Service,
+	)
+	s.pricesService = services.NewPricesService(stellarExpert, s.redis, services.PricesServiceConfig{
+		CacheTTL:         time.Duration(s.cfg.PricesConfig.PriceCacheTTLSeconds) * time.Second,
+		MissFetchTimeout: time.Duration(s.cfg.PricesConfig.PriceFetchTimeoutSeconds) * time.Second,
+		MaxConcurrent:    s.cfg.PricesConfig.MaxConcurrentPriceFetches,
+	}, s.appMetrics.Service, s.appMetrics.Prices)
 
 	return nil
 }
@@ -113,6 +131,9 @@ func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 
 	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
 	mux.HandleFunc("POST /api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances))
+
+	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest)
+	mux.HandleFunc("POST /api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices))
 
 	accountHistoryHandler, err := handlers.NewAccountHistoryHandler(
 		s.walletBackendService,

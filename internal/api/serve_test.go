@@ -23,14 +23,24 @@ func TestNewApiServer(t *testing.T) {
 	assert.Equal(t, cfg, s.cfg)
 }
 
-func TestApiServer_initServices_Success(t *testing.T) {
+func TestApiServer_initServices_RequiresAPIKey(t *testing.T) {
+	s := &ApiServer{
+		cfg:        &config.Config{},
+		appMetrics: metrics.NewMetrics(prometheus.NewRegistry()),
+	}
+	err := s.initServices()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "STELLAR_EXPERT_API_KEY")
+}
+
+func TestApiServer_initServices_AcceptsAPIKey(t *testing.T) {
 	// Minimal but valid config: WalletBackendBalanceConcurrency must be > 0
 	// because NewWalletBackendService rejects non-positive values to avoid
 	// errgroup.SetLimit(0)/(-1) surprises.
 	s := &ApiServer{
 		cfg: &config.Config{
-			RedisConfig: config.RedisConfig{Host: "", Port: 0},
-			AppConfig:   config.AppConfig{WalletBackendBalanceConcurrency: 10},
+			PricesConfig: config.PricesConfig{StellarExpertAPIKey: "test-key"},
+			AppConfig:    config.AppConfig{WalletBackendBalanceConcurrency: 10},
 		},
 		appMetrics: metrics.NewMetrics(prometheus.NewRegistry()),
 	}
@@ -42,7 +52,8 @@ func TestApiServer_initServices_RejectsNonPositiveBalanceConcurrency(t *testing.
 	for _, n := range []int{0, -1} {
 		s := &ApiServer{
 			cfg: &config.Config{
-				AppConfig: config.AppConfig{WalletBackendBalanceConcurrency: n},
+				PricesConfig: config.PricesConfig{StellarExpertAPIKey: "test-key"},
+				AppConfig:    config.AppConfig{WalletBackendBalanceConcurrency: n},
 			},
 			appMetrics: metrics.NewMetrics(prometheus.NewRegistry()),
 		}

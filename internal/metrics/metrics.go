@@ -52,6 +52,7 @@ func (e *UpstreamError) Unwrap() error { return e.Err }
 type Metrics struct {
 	HTTP    *HTTP
 	Service *Service
+	Prices  *Prices
 }
 
 // NewMetrics creates and registers all application metrics with the given registerer.
@@ -59,6 +60,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	return &Metrics{
 		HTTP:    NewHTTP(reg),
 		Service: NewService(reg),
+		Prices:  NewPrices(reg),
 	}
 }
 
@@ -125,6 +127,44 @@ func NewService(reg prometheus.Registerer) *Service {
 	}
 	reg.MustRegister(s.CallsTotal, s.CallDuration, s.ErrorsTotal)
 	return s
+}
+
+// Prices holds metrics specific to the token-prices service: cache outcomes,
+// degraded-mode signals (miss-budget exhaustion), and
+// Redis-from-this-service-POV errors.
+type Prices struct {
+	// CacheOutcomes counts per-token cache outcomes by network and outcome:
+	// "hit" (live entry within --price-cache-ttl-seconds) or "miss" (no
+	// entry, expired, or upstream-only path).
+	CacheOutcomes *prometheus.CounterVec
+	// MissBudgetExhausted counts requests whose miss-fetch budget
+	// (--price-fetch-timeout-seconds) tripped before all misses resolved.
+	// Labeled by network.
+	MissBudgetExhausted *prometheus.CounterVec
+	// RedisErrors counts Redis operations from the prices service that
+	// failed (and were silently fallen-through). Labeled by op: "mget" or
+	// "set".
+	RedisErrors *prometheus.CounterVec
+}
+
+// NewPrices creates and registers prices-service metrics with the given registerer.
+func NewPrices(reg prometheus.Registerer) *Prices {
+	p := &Prices{
+		CacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_prices_cache_outcomes_total",
+			Help: "Per-token cache outcomes for the token-prices endpoint.",
+		}, []string{"network", "outcome"}),
+		MissBudgetExhausted: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_prices_miss_budget_exhausted_total",
+			Help: "Requests whose miss-fetch budget elapsed before all misses resolved.",
+		}, []string{"network"}),
+		RedisErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_prices_redis_errors_total",
+			Help: "Redis operation failures observed by the prices service.",
+		}, []string{"op"}),
+	}
+	reg.MustRegister(p.CacheOutcomes, p.MissBudgetExhausted, p.RedisErrors)
+	return p
 }
 
 // Record records call metrics for a service method invocation.
