@@ -114,6 +114,36 @@ func TestServeCmd_AcceptsMaxLedgerKeyAddressesAtUpstreamCeiling(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 }
 
+func TestServeCmd_RejectsNonPositiveMaxTokensPerRequest(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--max-tokens-per-request", "0"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--max-tokens-per-request=0 must be positive")
+}
+
+func TestServeCmd_RejectsNegativePriceFetchTimeout(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--price-fetch-timeout-seconds", "-1"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--price-fetch-timeout-seconds=-1 must be >= 0")
+}
+
 func TestServeCmd_RejectsAccountHistoryMaxLimitAbove100(t *testing.T) {
 	t.Parallel()
 

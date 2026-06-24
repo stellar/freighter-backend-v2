@@ -152,3 +152,28 @@ func (m *MockWalletBackendService) GetAccountTransactions(ctx context.Context, a
 	}
 	return m.GetAccountTransactionsResult, nil
 }
+
+type MockPricesService struct {
+	GetPricesFunc     func(ctx context.Context, tokens []string, network string) (map[string]*types.PriceEntry, error)
+	GetPricesOverride map[string]*types.PriceEntry
+	GetPricesError    error
+	LastTokens        []string
+	LastNetwork       string
+}
+
+func (m *MockPricesService) Name() string { return "mock-prices" }
+
+func (m *MockPricesService) GetPrices(ctx context.Context, tokens []string, network string) (map[string]*types.PriceEntry, error) {
+	m.LastTokens = tokens
+	m.LastNetwork = network
+	if m.GetPricesFunc != nil {
+		return m.GetPricesFunc(ctx, tokens, network)
+	}
+	if m.GetPricesError != nil {
+		return nil, m.GetPricesError
+	}
+	if m.GetPricesOverride != nil {
+		return m.GetPricesOverride, nil
+	}
+	return map[string]*types.PriceEntry{}, nil
+}
