@@ -390,4 +390,3 @@ func completeMissingResults(tokens []string, result map[string]*types.PriceEntry
 		}
 	}
 }
-

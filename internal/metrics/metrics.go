@@ -11,7 +11,25 @@ import (
 
 	"github.com/creachadair/jrpc2"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/stellar/freighter-backend-v2/internal/types"
 )
+
+// sanitizeNetwork buckets any value that is not one of the finite, supported
+// networks into a single "unknown" label. The network label flows into
+// Prometheus metric vectors, which retain a time series per unique label value
+// for the lifetime of the process. Bucketing here caps the cardinality of the
+// network label so a caller-controlled value can never cause unbounded series
+// (and thus unbounded memory) growth, independent of any handler-level
+// validation.
+func sanitizeNetwork(network string) string {
+	switch network {
+	case types.PUBLIC, types.TESTNET, types.FUTURENET:
+		return network
+	default:
+		return "unknown"
+	}
+}
 
 // UpstreamError represents an error from an upstream service that should be
 // classified with a specific kind and optional error code for metric labels.
@@ -67,7 +85,7 @@ func NewHTTP(reg prometheus.Registerer) *HTTP {
 		RequestDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "freighter_http_request_duration_seconds",
 			Help:    "Duration of HTTP requests in seconds.",
-			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.25, 0.35, 0.5, 0.75, 1, 2.5, 5, 10, 30},
 		}, []string{"handler", "method", "code"}),
 		InFlightRequests: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "freighter_http_in_flight_requests",
@@ -100,7 +118,7 @@ func NewService(reg prometheus.Registerer) *Service {
 		CallDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "freighter_service_call_duration_seconds",
 			Help:    "Duration of external service calls in seconds.",
-			Buckets: []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+			Buckets: []float64{0.01, 0.025, 0.05, 0.075, 0.1, 0.15, 0.25, 0.35, 0.5, 0.75, 1, 2.5, 5, 10, 30},
 		}, []string{"service", "method", "network"}),
 		ErrorsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_service_errors_total",
@@ -155,6 +173,7 @@ func Record(m *Service, service, method, network string, duration float64, err e
 	if m == nil {
 		return
 	}
+	network = sanitizeNetwork(network)
 	m.CallsTotal.WithLabelValues(service, method, network).Inc()
 	m.CallDuration.WithLabelValues(service, method, network).Observe(duration)
 	if err != nil {

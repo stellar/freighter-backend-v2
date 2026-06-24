@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/stellar/freighter-backend-v2/internal/api"
+	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/services"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
@@ -39,6 +40,9 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.PricesConfig.PriceFetchTimeoutSeconds; n < 0 {
 				return fmt.Errorf("--price-fetch-timeout-seconds=%d must be >= 0", n)
 			}
+			if d, m := s.Cfg.AppConfig.AccountHistoryDefaultLimit, s.Cfg.AppConfig.AccountHistoryMaxLimit; d <= 0 || m <= 0 || d > m || m > handlers.AccountHistoryUpstreamMaxLimit {
+				return fmt.Errorf("--account-history-default-limit=%d / --account-history-max-limit=%d must be positive, default <= max, and max <= %d", d, m, handlers.AccountHistoryUpstreamMaxLimit)
+			}
 
 			return nil
 		},
@@ -67,6 +71,8 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxBalanceAddresses, "max-balance-addresses", 100, "Maximum number of addresses allowed in account balances request")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxLedgerKeyAddresses, "max-ledger-key-addresses", 100, "Maximum number of public keys allowed in a ledger-key/accounts request")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.WalletBackendBalanceConcurrency, "wallet-backend-balance-concurrency", 10, "Per-request maximum number of concurrent wallet-backend balance fetches (the /accounts/balances handler fans out to one accountByAddress call per address)")
+	cmd.Flags().IntVar(&s.Cfg.AppConfig.AccountHistoryDefaultLimit, "account-history-default-limit", 20, "Default page size for GET /accounts/{address}/transactions")
+	cmd.Flags().IntVar(&s.Cfg.AppConfig.AccountHistoryMaxLimit, "account-history-max-limit", 100, "Maximum page size for GET /accounts/{address}/transactions (upstream hard-caps at 100)")
 
 	// RPC Config
 	cmd.Flags().StringVar(&s.Cfg.RpcConfig.PubnetRpcUrl, "pubnet-rpc-url", "", "The Pubnet URL of the Pubnet RPC instance")

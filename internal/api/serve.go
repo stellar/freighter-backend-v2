@@ -57,7 +57,11 @@ func (s *ApiServer) Start() error {
 		return err
 	}
 
-	apiHandler := s.initMiddleware(s.initHandlers())
+	mux, err := s.initHandlers()
+	if err != nil {
+		return fmt.Errorf("initializing handlers: %w", err)
+	}
+	apiHandler := s.initMiddleware(mux)
 	metricsHandler := middleware.Chain(s.initMetricsHandler(), middleware.Recover())
 	return s.startServers(apiHandler, metricsHandler)
 }
@@ -102,7 +106,7 @@ func (s *ApiServer) initServices() error {
 	return nil
 }
 
-func (s *ApiServer) initHandlers() *http.ServeMux {
+func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 	mux := http.NewServeMux()
 
 	// Initialize health check handler
@@ -130,7 +134,18 @@ func (s *ApiServer) initHandlers() *http.ServeMux {
 
 	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest)
 	mux.HandleFunc("POST /api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices))
-	return mux
+
+	accountHistoryHandler, err := handlers.NewAccountHistoryHandler(
+		s.walletBackendService,
+		s.cfg.AppConfig.AccountHistoryDefaultLimit,
+		s.cfg.AppConfig.AccountHistoryMaxLimit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("init account-history handler: %w", err)
+	}
+	mux.HandleFunc("GET /api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions))
+
+	return mux, nil
 }
 
 func (s *ApiServer) initMetricsHandler() http.Handler {

@@ -77,6 +77,16 @@ func ServiceUnavailablef(format string, args ...interface{}) *HttpError {
 	return NewHttpError(fmt.Sprintf(format, args...), nil, http.StatusServiceUnavailable, nil)
 }
 
+// BadGateway creates a 502 Bad Gateway error
+func BadGateway(message string, err error) *HttpError {
+	return NewHttpError(message, err, http.StatusBadGateway, nil)
+}
+
+// GatewayTimeout creates a 504 Gateway Timeout error
+func GatewayTimeout(message string, err error) *HttpError {
+	return NewHttpError(message, err, http.StatusGatewayTimeout, nil)
+}
+
 // WithExtras adds extra data to any HttpError
 func WithExtras(err *HttpError, extras map[string]interface{}) *HttpError {
 	err.Extras = extras

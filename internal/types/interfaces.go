@@ -44,6 +44,7 @@ type WalletBackendService interface {
 	Service
 	GetHealth(ctx context.Context, network string) (GetHealthResponse, error)
 	GetBalancesByAccountAddresses(ctx context.Context, addresses []string, network string) (interface{}, error)
+	GetAccountTransactions(ctx context.Context, address, network string, params AccountHistoryParams) (*PaginatedResponse[*AccountTransaction], error)
 }
 
 // StellarExpertAsset is the subset of the Stellar Expert /asset/{id} response

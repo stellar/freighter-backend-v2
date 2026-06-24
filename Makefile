@@ -82,7 +82,12 @@ deadcode: ## Find unused code
 		echo "✅ No deadcode found"; \
 	fi
 
-check: tidy fmt vet lint generate shadow exhaustive deadcode ## Run all checks
+# exhaustive is intentionally omitted from `check`: golangci-lint already runs the
+# exhaustive analyzer with the same settings (see .golangci.yml), so the standalone
+# target is redundant. It is also kept out of the chain because exhaustive@v0.12.0
+# (its latest release) pins x/tools@v0.15.0, which fails to compile under Go 1.26.
+# Run `make exhaustive` directly on Go <=1.25 if you want the standalone tool.
+check: tidy fmt vet lint generate shadow deadcode ## Run all checks
 	@echo "✅ All checks completed successfully"
 
 # ==================================================================================== #

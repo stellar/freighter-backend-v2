@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStatusCodeHelpers(t *testing.T) {
@@ -143,4 +144,22 @@ func TestWithExtras(t *testing.T) {
 	assert.Equal(t, extras, errWithExtras.Extras)
 	assert.Equal(t, err.StatusCode, errWithExtras.StatusCode)
 	assert.Equal(t, err.Message, errWithExtras.Message)
+}
+
+func TestBadGateway(t *testing.T) {
+	root := errors.New("upstream failed")
+	h := BadGateway("upstream unavailable", root)
+	require.NotNil(t, h)
+	assert.Equal(t, "upstream unavailable", h.Message)
+	assert.Equal(t, root, h.Err)
+	assert.Equal(t, http.StatusBadGateway, h.StatusCode)
+}
+
+func TestGatewayTimeout(t *testing.T) {
+	root := errors.New("ctx deadline exceeded")
+	h := GatewayTimeout("upstream timed out", root)
+	require.NotNil(t, h)
+	assert.Equal(t, "upstream timed out", h.Message)
+	assert.Equal(t, root, h.Err)
+	assert.Equal(t, http.StatusGatewayTimeout, h.StatusCode)
 }

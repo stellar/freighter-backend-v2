@@ -65,9 +65,14 @@ func TestApiServer_initServices_RejectsNonPositiveBalanceConcurrency(t *testing.
 
 func TestApiServer_initHandlers(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	cfg := &config.Config{AppConfig: config.AppConfig{ProtocolsConfigPath: "testdata/protocols.json"}}
+	cfg := &config.Config{AppConfig: config.AppConfig{
+		ProtocolsConfigPath:        "testdata/protocols.json",
+		AccountHistoryDefaultLimit: 20,
+		AccountHistoryMaxLimit:     100,
+	}}
 	s := &ApiServer{cfg: cfg, registry: reg}
-	mux := s.initHandlers()
+	mux, err := s.initHandlers()
+	require.NoError(t, err)
 	require.NotNil(t, mux)
 	handler, pattern := mux.Handler(&http.Request{Method: "GET", URL: mustParseURL("/api/v1/ping")})
 	assert.NotNil(t, handler)
@@ -78,9 +83,14 @@ func TestApiServer_initHandlers(t *testing.T) {
 
 func TestApiServer_initHandlers_DoesNotServeMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	cfg := &config.Config{AppConfig: config.AppConfig{ProtocolsConfigPath: "testdata/protocols.json"}}
+	cfg := &config.Config{AppConfig: config.AppConfig{
+		ProtocolsConfigPath:        "testdata/protocols.json",
+		AccountHistoryDefaultLimit: 20,
+		AccountHistoryMaxLimit:     100,
+	}}
 	s := &ApiServer{cfg: cfg, registry: reg}
-	mux := s.initHandlers()
+	mux, err := s.initHandlers()
+	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	rec := httptest.NewRecorder()
@@ -124,6 +134,37 @@ func TestApiServer_initMiddleware(t *testing.T) {
 	mux := http.NewServeMux()
 	h := s.initMiddleware(mux)
 	require.NotNil(t, h)
+}
+
+func TestApiServer_initHandlers_RegistersAccountHistoryRoutes(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	cfg := &config.Config{AppConfig: config.AppConfig{
+		ProtocolsConfigPath:        "testdata/protocols.json",
+		AccountHistoryDefaultLimit: 20,
+		AccountHistoryMaxLimit:     100,
+	}}
+	s := &ApiServer{cfg: cfg, registry: reg}
+	mux, err := s.initHandlers()
+	require.NoError(t, err)
+	require.NotNil(t, mux)
+
+	path := "/api/v1/accounts/GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF/transactions"
+	handler, pattern := mux.Handler(&http.Request{Method: "GET", URL: mustParseURL(path)})
+	assert.NotNil(t, handler, "no handler registered for %s", path)
+	assert.NotEmpty(t, pattern, "no pattern matched for %s", path)
+}
+
+func TestApiServer_initHandlers_ReturnsErrorOnInvalidConfig(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	// Zero AccountHistoryDefaultLimit makes the constructor fail.
+	cfg := &config.Config{AppConfig: config.AppConfig{
+		ProtocolsConfigPath: "testdata/protocols.json",
+	}}
+	s := &ApiServer{cfg: cfg, registry: reg}
+	mux, err := s.initHandlers()
+	require.Error(t, err)
+	assert.Nil(t, mux)
+	assert.Contains(t, err.Error(), "init account-history handler")
 }
 
 func mustParseURL(path string) *url.URL {
