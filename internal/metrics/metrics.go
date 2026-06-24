@@ -73,7 +73,7 @@ type Auth struct {
 	//   result: "authenticated" | "anonymous" | "rejected"
 	//   reason: "ok" | "no_token" | "expired" | "bad_signature" | "bad_timing" |
 	//           "bad_method_path" | "bad_body_hash" | "bad_subject" | "malformed" |
-	//           "invalid" | "internal"
+	//           "invalid" | "too_large" | "internal"
 	RequestsTotal *prometheus.CounterVec
 }
 

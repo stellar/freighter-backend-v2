@@ -52,6 +52,15 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				httperror.Unauthorized("unauthorized", nil).Render(w)
 				return
 
+			case IsMaxBytesError(err):
+				// The request body exceeded the limit set by BodySizeLimit (which
+				// runs upstream of this middleware), surfaced via the verifier's
+				// io.ReadAll. This is a client-controlled condition, so render the
+				// same 413 the body-reading handlers use, not a 500.
+				metrics.RecordAuth(authMetrics, "rejected", "too_large")
+				httperror.RequestEntityTooLarge("Request body too large", err).Render(w)
+				return
+
 			default:
 				// Operational failure (e.g. reading the body).
 				metrics.RecordAuth(authMetrics, "rejected", "internal")

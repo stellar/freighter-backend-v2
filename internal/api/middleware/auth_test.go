@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/hex"
 	"net/http"
@@ -104,4 +105,26 @@ func TestAuth_TruthTable(t *testing.T) {
 			}
 		})
 	}
+}
+
+// When the request body exceeds the limit installed upstream by BodySizeLimit,
+// the verifier's io.ReadAll returns an *http.MaxBytesError. The middleware must
+// surface that as a 413 (client error), not a 500.
+func TestAuth_OversizedBodyReturns413(t *testing.T) {
+	const limit = 16
+
+	body := bytes.NewReader(make([]byte, limit+1))
+	r := httptest.NewRequest(http.MethodPost, authTestPath, body)
+	r.Header.Set("Authorization", "Bearer token-value-is-irrelevant-body-is-read-first")
+	rr := httptest.NewRecorder()
+	// Simulate the upstream BodySizeLimit middleware wrapping the body.
+	r.Body = http.MaxBytesReader(rr, r.Body, limit)
+
+	reached := false
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })
+	handler := Auth(auth.NewVerifier(), auth.Required, nil)(next)
+	handler.ServeHTTP(rr, r)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
+	assert.False(t, reached, "handler must not be reached when the body exceeds the limit")
 }

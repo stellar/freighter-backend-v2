@@ -3,6 +3,7 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 )
 
@@ -29,12 +30,11 @@ func BodySizeLimit(maxBytes int64) Middleware {
 	}
 }
 
-// IsMaxBytesError checks if an error is from http.MaxBytesReader exceeding the limit.
-// This can be used by handlers to return an appropriate error response.
+// IsMaxBytesError reports whether err (or anything it wraps) is the error
+// http.MaxBytesReader returns when the body exceeds the limit. It uses errors.As
+// so it still matches when the error has been wrapped with %w (e.g. the auth
+// verifier wraps the io.ReadAll failure with request context).
 func IsMaxBytesError(err error) bool {
-	if err == nil {
-		return false
-	}
-	_, ok := err.(*http.MaxBytesError)
-	return ok
+	var maxBytesErr *http.MaxBytesError
+	return errors.As(err, &maxBytesErr)
 }
