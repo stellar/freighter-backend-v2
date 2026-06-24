@@ -61,7 +61,7 @@ func (s *ApiServer) Start() error {
 	s.registry.MustRegister(collectors.NewBuildInfoCollector())
 	s.appMetrics = metrics.NewMetrics(s.registry)
 
-	if err := s.initServices(); err != nil {
+	if err = s.initServices(); err != nil {
 		logger.Error("Failed to initialize services", "error", err)
 		return err
 	}
