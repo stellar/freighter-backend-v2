@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,14 +32,23 @@ func NewVerifier() *Verifier {
 // token is present (so callers can allow anonymous access in permissive mode);
 // any other error indicates a present-but-invalid token.
 func (v *Verifier) VerifyHTTPRequest(r *http.Request) (string, error) {
-	// RFC 6750: the "Bearer" auth scheme is case-insensitive.
-	scheme, token, found := strings.Cut(r.Header.Get("Authorization"), " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
 		return "", ErrNoToken
 	}
+	// RFC 6750: the "Bearer" auth scheme is case-insensitive.
+	scheme, token, _ := strings.Cut(authHeader, " ")
+	if !strings.EqualFold(scheme, "Bearer") {
+		// A different (or unparseable) auth scheme — not a bearer token this
+		// verifier handles, so treat it as no token (anonymous in permissive mode).
+		return "", ErrNoToken
+	}
+	// A Bearer scheme with an empty or whitespace-only credential is a
+	// present-but-invalid token, not "no token": reject it (401 in both modes)
+	// rather than letting permissive mode pass it through as anonymous.
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return "", ErrNoToken
+		return "", &VerificationError{Reason: ReasonMalformed, Err: errors.New("empty bearer credential")}
 	}
 
 	body, err := readAndResetBody(r)

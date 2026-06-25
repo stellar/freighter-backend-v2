@@ -45,7 +45,9 @@ func (c *Claims) Validate(methodAndPath string, body []byte, maxLifetime time.Du
 		return &VerificationError{Reason: ReasonBadTiming, Err: errors.New("exp precedes iat")}
 	}
 	if lifetime > maxLifetime {
-		return &VerificationError{Reason: ReasonBadTiming, Err: fmt.Errorf("token lifetime %s exceeds max %s", lifetime, maxLifetime)}
+		// Don't echo the configured maximum; keep the offending lifetime for
+		// diagnostics but leave the server's threshold out of the detail.
+		return &VerificationError{Reason: ReasonBadTiming, Err: fmt.Errorf("token lifetime %s exceeds maximum", lifetime)}
 	}
 	// Capture a single "now" so the iat/exp future bounds are checked against the
 	// same instant.

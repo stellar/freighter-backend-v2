@@ -56,6 +56,12 @@ func ParseJWT(tokenString, methodAndPath string, body []byte) (*Claims, error) {
 		return nil, &VerificationError{Reason: ReasonBadSignature, Err: err}
 	}
 
+	// Canonicalize the subject before exposing it as the user ID. hex.DecodeString
+	// accepts upper/mixed-case, so the same key could otherwise arrive as distinct
+	// strings; re-encoding the decoded bytes yields the canonical lowercase form so
+	// callers that key storage/cache by the user ID never split one key into two.
+	claims.Subject = hex.EncodeToString(pubKey)
+
 	return claims, nil
 }
 

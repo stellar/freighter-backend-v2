@@ -67,6 +67,20 @@ func TestParseJWT_Valid(t *testing.T) {
 	assert.Equal(t, sub, claims.Subject)
 }
 
+func TestParseJWT_CanonicalizesSubject(t *testing.T) {
+	_, priv, sub := newKeypair(t)
+	// Sign a token whose `sub` is uppercase hex. hex.DecodeString accepts it and
+	// it verifies against the same key, but the returned user ID must be the
+	// canonical lowercase form so callers can't split one key into two users.
+	upper := strings.ToUpper(sub)
+	token := mint(t, priv, validClaims(upper, testMethodAndPath, nil))
+
+	claims, err := ParseJWT(token, testMethodAndPath, nil)
+	require.NoError(t, err)
+	assert.Equal(t, sub, claims.Subject)
+	assert.Equal(t, claims.Subject, strings.ToLower(claims.Subject))
+}
+
 func TestParseJWT_WrongKey(t *testing.T) {
 	pub1, _, sub1 := newKeypair(t)
 	_, priv2, _ := newKeypair(t)
@@ -236,6 +250,23 @@ func TestVerifyHTTPRequest_NonBearer(t *testing.T) {
 	r.Header.Set("Authorization", "Basic abc123")
 	_, err := v.VerifyHTTPRequest(r)
 	assert.ErrorIs(t, err, ErrNoToken)
+}
+
+func TestVerifyHTTPRequest_EmptyBearerRejected(t *testing.T) {
+	v := NewVerifier()
+	// A Bearer scheme with an empty/whitespace credential (or no credential at
+	// all) is a present-but-invalid token: it must be rejected (401 in both
+	// modes), not waved through as anonymous the way a missing token is.
+	for _, header := range []string{"Bearer ", "Bearer", "Bearer    ", "bearer  "} {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami", nil)
+		r.Header.Set("Authorization", header)
+
+		_, err := v.VerifyHTTPRequest(r)
+		require.Error(t, err, "header %q", header)
+		assert.ErrorIs(t, err, ErrUnauthorized, "header %q", header)
+		assert.NotErrorIs(t, err, ErrNoToken, "header %q", header)
+		assert.Equal(t, ReasonMalformed, Reason(err), "header %q", header)
+	}
 }
 
 func TestVerifyHTTPRequest_Valid(t *testing.T) {
