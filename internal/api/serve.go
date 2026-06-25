@@ -16,6 +16,7 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
+	"github.com/stellar/freighter-backend-v2/internal/auth"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
@@ -39,6 +40,7 @@ type ApiServer struct {
 	pricesService        types.PricesService
 	registry             *prometheus.Registry
 	appMetrics           *metrics.Metrics
+	authMode             auth.Mode
 }
 
 func NewApiServer(cfg *config.Config) *ApiServer {
@@ -46,13 +48,21 @@ func NewApiServer(cfg *config.Config) *ApiServer {
 }
 
 func (s *ApiServer) Start() error {
+	// Resolve the auth mode once, up front, so a misconfigured value fails before
+	// we bind ports or open connections. Downstream code reads s.authMode.
+	authMode, err := auth.ParseMode(s.cfg.AppConfig.AuthMode)
+	if err != nil {
+		return fmt.Errorf("parsing auth mode: %w", err)
+	}
+	s.authMode = authMode
+
 	s.registry = prometheus.NewRegistry()
 	s.registry.MustRegister(collectors.NewGoCollector())
 	s.registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	s.registry.MustRegister(collectors.NewBuildInfoCollector())
 	s.appMetrics = metrics.NewMetrics(s.registry)
 
-	if err := s.initServices(); err != nil {
+	if err = s.initServices(); err != nil {
 		logger.Error("Failed to initialize services", "error", err)
 		return err
 	}
@@ -144,6 +154,14 @@ func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 		return nil, fmt.Errorf("init account-history handler: %w", err)
 	}
 	mux.HandleFunc("GET /api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions))
+
+	// Auth: a guarded endpoint that echoes the authenticated user ID. It exercises
+	// the JWT middleware end-to-end and gives client teams a surface to validate
+	// their JWT construction. s.authMode is resolved once in Start().
+	verifier := auth.NewVerifier()
+	whoamiHandler := handlers.NewWhoamiHandler()
+	mux.Handle("GET /api/v1/auth/whoami",
+		middleware.Auth(verifier, s.authMode, s.appMetrics.Auth)(handlers.CustomHandler(whoamiHandler.Whoami)))
 
 	return mux, nil
 }

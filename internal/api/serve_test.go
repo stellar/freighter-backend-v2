@@ -12,9 +12,26 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
+	"github.com/stellar/freighter-backend-v2/internal/auth"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 )
+
+// newTestAPIServer builds a fully-initialized ApiServer for handler-level tests
+// (registry, metrics, and resolved auth mode), mirroring what Start() sets up so
+// initHandlers can rely on the same non-nil invariants as production.
+func newTestAPIServer(t *testing.T, cfg *config.Config) *ApiServer {
+	t.Helper()
+	reg := prometheus.NewRegistry()
+	mode, err := auth.ParseMode(cfg.AppConfig.AuthMode)
+	require.NoError(t, err)
+	return &ApiServer{
+		cfg:        cfg,
+		registry:   reg,
+		appMetrics: metrics.NewMetrics(reg),
+		authMode:   mode,
+	}
+}
 
 func TestNewApiServer(t *testing.T) {
 	cfg := &config.Config{}
@@ -64,13 +81,13 @@ func TestApiServer_initServices_RejectsNonPositiveBalanceConcurrency(t *testing.
 }
 
 func TestApiServer_initHandlers(t *testing.T) {
-	reg := prometheus.NewRegistry()
 	cfg := &config.Config{AppConfig: config.AppConfig{
 		ProtocolsConfigPath:        "testdata/protocols.json",
 		AccountHistoryDefaultLimit: 20,
 		AccountHistoryMaxLimit:     100,
+		AuthMode:                   "permissive",
 	}}
-	s := &ApiServer{cfg: cfg, registry: reg}
+	s := newTestAPIServer(t, cfg)
 	mux, err := s.initHandlers()
 	require.NoError(t, err)
 	require.NotNil(t, mux)
@@ -82,13 +99,13 @@ func TestApiServer_initHandlers(t *testing.T) {
 }
 
 func TestApiServer_initHandlers_DoesNotServeMetrics(t *testing.T) {
-	reg := prometheus.NewRegistry()
 	cfg := &config.Config{AppConfig: config.AppConfig{
 		ProtocolsConfigPath:        "testdata/protocols.json",
 		AccountHistoryDefaultLimit: 20,
 		AccountHistoryMaxLimit:     100,
+		AuthMode:                   "permissive",
 	}}
-	s := &ApiServer{cfg: cfg, registry: reg}
+	s := newTestAPIServer(t, cfg)
 	mux, err := s.initHandlers()
 	require.NoError(t, err)
 
@@ -137,13 +154,13 @@ func TestApiServer_initMiddleware(t *testing.T) {
 }
 
 func TestApiServer_initHandlers_RegistersAccountHistoryRoutes(t *testing.T) {
-	reg := prometheus.NewRegistry()
 	cfg := &config.Config{AppConfig: config.AppConfig{
 		ProtocolsConfigPath:        "testdata/protocols.json",
 		AccountHistoryDefaultLimit: 20,
 		AccountHistoryMaxLimit:     100,
+		AuthMode:                   "permissive",
 	}}
-	s := &ApiServer{cfg: cfg, registry: reg}
+	s := newTestAPIServer(t, cfg)
 	mux, err := s.initHandlers()
 	require.NoError(t, err)
 	require.NotNil(t, mux)
@@ -154,13 +171,39 @@ func TestApiServer_initHandlers_RegistersAccountHistoryRoutes(t *testing.T) {
 	assert.NotEmpty(t, pattern, "no pattern matched for %s", path)
 }
 
+func TestApiServer_initHandlers_WhoamiRouteRespectsAuthMode(t *testing.T) {
+	cfgWith := func(authMode string) *config.Config {
+		return &config.Config{AppConfig: config.AppConfig{
+			ProtocolsConfigPath:        "testdata/protocols.json",
+			AccountHistoryDefaultLimit: 20,
+			AccountHistoryMaxLimit:     100,
+			AuthMode:                   authMode,
+		}}
+	}
+
+	// Permissive: an unauthenticated request passes through.
+	mux, err := newTestAPIServer(t, cfgWith("permissive")).initHandlers()
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami", nil))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "\"authenticated\":false")
+
+	// Strict: an unauthenticated request is rejected.
+	mux, err = newTestAPIServer(t, cfgWith("strict")).initHandlers()
+	require.NoError(t, err)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami", nil))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
 func TestApiServer_initHandlers_ReturnsErrorOnInvalidConfig(t *testing.T) {
-	reg := prometheus.NewRegistry()
 	// Zero AccountHistoryDefaultLimit makes the constructor fail.
 	cfg := &config.Config{AppConfig: config.AppConfig{
 		ProtocolsConfigPath: "testdata/protocols.json",
+		AuthMode:            "permissive",
 	}}
-	s := &ApiServer{cfg: cfg, registry: reg}
+	s := newTestAPIServer(t, cfg)
 	mux, err := s.initHandlers()
 	require.Error(t, err)
 	assert.Nil(t, mux)

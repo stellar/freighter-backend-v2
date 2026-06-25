@@ -60,17 +60,39 @@ func New(cfg loggerConfig) *Logger {
 // Global logger instance
 var (
 	global *Logger
-	once   sync.Once
+	mu     sync.RWMutex
 )
 
-// Global returns the global logger instance, initializing it safely if needed
+// Global returns the global logger instance, initializing it safely if needed.
+// The common case — an already-initialized logger — takes only a read lock so
+// concurrent log calls (every Debug/Info/Warn/Error goes through here) don't
+// serialize on each other; the write lock is taken only for first-time init.
 func Global() *Logger {
-	once.Do(func() {
-		if global == nil {
-			global = New(DefaultConfig())
-		}
-	})
+	mu.RLock()
+	g := global
+	mu.RUnlock()
+	if g != nil {
+		return g
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if global == nil {
+		global = New(DefaultConfig())
+	}
 	return global
+}
+
+// SetOutput redirects the global logger to w, rebuilding it with the default
+// level and format. It is primarily a test seam so output can be captured
+// deterministically regardless of when the global logger was first initialized.
+func SetOutput(w io.Writer) {
+	cfg := DefaultConfig()
+	cfg.Output = w
+
+	mu.Lock()
+	defer mu.Unlock()
+	global = New(cfg)
 }
 
 // Debug logs at debug level
