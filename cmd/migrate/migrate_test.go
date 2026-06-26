@@ -11,14 +11,18 @@ import (
 )
 
 func TestMigrateCmd_RejectsEmptyDatabaseURL(t *testing.T) {
-	t.Parallel()
+	// No t.Parallel(): t.Setenv is incompatible with parallel tests, and we must
+	// control DATABASE_URL process-wide. Clear it so the PersistentPreRunE env
+	// fallback finds nothing — otherwise a developer/CI shell with DATABASE_URL
+	// exported would make `migrate up` run against that real database.
+	t.Setenv("DATABASE_URL", "")
 
 	migrateCmd := &MigrateCmd{Cfg: &config.Config{}}
 	cmd := migrateCmd.Command()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	// `migrate up` with no --database-url must fail fast in PersistentPreRunE,
-	// before any attempt to touch a database.
+	// `migrate up` with no --database-url (and no DATABASE_URL in the env) must
+	// fail fast in PersistentPreRunE, before any attempt to touch a database.
 	cmd.SetArgs([]string{"up"})
 
 	err := cmd.Execute()
