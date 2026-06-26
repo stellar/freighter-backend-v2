@@ -24,18 +24,24 @@ const (
 	DefaultMaxConnIdleTime time.Duration = 10 * time.Second
 )
 
-// PoolConfig holds configurable pgxpool settings. Zero values fall back to the
-// Default* constants above.
+// PoolConfig holds configurable pgxpool settings. It is used whole-config:
+// callers either pass a fully-populated PoolConfig (as serve does from flags) or
+// pass none and get DefaultPoolConfig(). Fields are NOT merged field-by-field
+// against the defaults — a zero field is forwarded as-is, because zero is a
+// legitimate value for some fields (e.g. MinConns: 0 = no idle floor;
+// QueryExecMode: 0 = pgx's default). Use DefaultPoolConfig() as a base if you
+// only want to override a subset.
 type PoolConfig struct {
 	MaxConns        int32
 	MinConns        int32
 	MaxConnLifetime time.Duration
 	MaxConnIdleTime time.Duration
 	// QueryExecMode overrides pgx's default query execution mode. The zero value
-	// leaves pgx's default (CacheStatement). Set QueryExecModeExec when connecting
-	// through a PgBouncer / CNPG Pooler in transaction pooling mode: the default
-	// mode caches server-side prepared statements, which collide across pooled
-	// backends and surface as SQLSTATE 42P05 ("prepared statement already exists").
+	// leaves pgx's default (CacheStatement), which is what we want connecting
+	// directly to PostgreSQL. It only needs to be set to QueryExecModeExec if a
+	// transaction-mode pooler (PgBouncer) is ever placed in front, where the
+	// default statement caching would surface SQLSTATE 42P05; the wallet-eng
+	// services currently run no such pooler.
 	QueryExecMode pgx.QueryExecMode
 }
 
@@ -60,8 +66,8 @@ func resolvePoolConfig(configs []PoolConfig) PoolConfig {
 }
 
 // buildPoolConfig parses the data source name and overlays the resolved pool
-// settings onto it. Split out from OpenDBConnectionPool so the mapping (incl.
-// the PgBouncer-safe QueryExecMode) is unit-testable without a live database.
+// settings onto it. Split out from OpenDBConnectionPool so the mapping is
+// unit-testable without a live database.
 func buildPoolConfig(dataSourceName string, poolConfigs ...PoolConfig) (*pgxpool.Config, error) {
 	poolCfg := resolvePoolConfig(poolConfigs)
 

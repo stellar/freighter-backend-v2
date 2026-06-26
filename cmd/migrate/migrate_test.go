@@ -49,26 +49,16 @@ func TestMigrateCmd_DownRejectsNonPositiveCount(t *testing.T) {
 	}
 }
 
-func TestParseMigrationCount(t *testing.T) {
+func TestMigrateCmd_UpRejectsArgs(t *testing.T) {
 	t.Parallel()
 
-	t.Run("no args means all (0)", func(t *testing.T) {
-		t.Parallel()
-		n, err := parseMigrationCount(nil)
-		require.NoError(t, err)
-		assert.Equal(t, 0, n)
-	})
+	// `up` applies all pending migrations and takes no count argument.
+	migrateCmd := &MigrateCmd{Cfg: &config.Config{}}
+	cmd := migrateCmd.Command()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"up", "3", "--database-url", "postgres://localhost/test"})
 
-	t.Run("numeric arg is parsed", func(t *testing.T) {
-		t.Parallel()
-		n, err := parseMigrationCount([]string{"3"})
-		require.NoError(t, err)
-		assert.Equal(t, 3, n)
-	})
-
-	t.Run("non-numeric arg errors", func(t *testing.T) {
-		t.Parallel()
-		_, err := parseMigrationCount([]string{"abc"})
-		require.Error(t, err)
-	})
+	err := cmd.Execute()
+	require.Error(t, err)
 }

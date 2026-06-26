@@ -9,7 +9,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -118,9 +117,9 @@ func (s *ApiServer) initDatabase() error {
 		MinConns:        int32(s.cfg.DatabaseConfig.MinConns), //nolint:gosec // operator-supplied pool size, within int32
 		MaxConnLifetime: s.cfg.DatabaseConfig.MaxConnLifetime,
 		MaxConnIdleTime: s.cfg.DatabaseConfig.MaxConnIdleTime,
-		// We connect through a CNPG Pooler (PgBouncer) in transaction pooling mode,
-		// so disable server-side prepared-statement caching to avoid 42P05 errors.
-		QueryExecMode: pgx.QueryExecModeExec,
+		// QueryExecMode is left at pgx's default (CacheStatement): we connect
+		// directly to the CNPG primary (-rw), with no transaction-mode pooler in
+		// front, so server-side prepared-statement caching is safe and faster.
 	})
 	if err != nil {
 		logger.Error("Failed to open database connection pool", "error", err)

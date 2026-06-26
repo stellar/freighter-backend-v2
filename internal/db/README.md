@@ -100,52 +100,37 @@ DROP TABLE widgets;
 ## Connecting to deployed environments
 
 In deployed environments `DATABASE_URL` is **not** set by hand — it is injected
-into the pod from a secret managed by ExternalSecrets. Inside a running pod the
-value is already present in the environment:
+into the pod from a secret managed by ExternalSecrets. To read the value already
+present in a running pod:
 
 ```sh
 kubectl exec -it deploy/<freighter-backend-deployment> -n <namespace> -- printenv DATABASE_URL
 ```
 
-> The database currently exists only in **wallet-eng-dev**. Other environments
-> are provisioned separately (see the "Provision Postgres" issue).
+### Running locally against a hosted DB
 
-### Running locally against a hosted DB (the common case)
-
-Two `make` targets wrap the CNPG mechanics so switching to a hosted env is one
-command each. `db-url` reads the cluster's basic-auth creds secret
-(`freighter-backend-v2-db-app-creds` — `username`/`password`) and builds a
-`DATABASE_URL` pointed at your local tunnel, with `sslmode=require`.
-
-First make sure your `kubectl` context points at the target environment, then:
+Point this service at a hosted database the same way as the other backends
+(horizon, RPC, wallet-backend): export `DATABASE_URL` yourself, then run. The
+standard CNPG mechanism is to port-forward the cluster's read-write primary and
+build a URL from its creds secret with `sslmode=require`:
 
 ```sh
-# terminal 1 — open the tunnel to the CNPG primary (blocking; leave it running)
-make db-forward ENV=dev
+# open a tunnel to the CNPG read-write primary (leave running)
+kubectl -n <namespace> port-forward svc/<cnpg-cluster>-rw 5432:5432
 
-# terminal 2 — point this shell at the tunnel, then run the service
-eval "$(make -s db-url ENV=dev)"
+# in another shell, point at the tunnel and run the service
+export DATABASE_URL='postgres://<user>:<password>@localhost:5432/<db>?sslmode=require'
 make run
 ```
 
-`ENV` is `dev` | `stg` | `prd`; `LOCAL_PORT` overrides the local port (default 5432).
-
-> **`dev` is wired** (`wallet-eng-dev` / cluster `freighter-backend-v2-db`). The
-> database currently exists **only** in `wallet-eng-dev`; `stg`/`prd` are
-> provisioned by the "Provision Postgres" work and `db-url` will error clearly
-> there until they exist.
+The concrete per-environment values (namespace, cluster name, creds secret) live
+in the private **wallet-eng-runbooks**, not in this public repo.
 
 Verify a hosted connection works:
 
 ```sh
 freighter-backend migrate up                 # → "Applied migrations up count=N" (0 on re-run)
 curl -s localhost:3002/api/v1/db-health       # → {"status":"healthy"} once `serve` is up
-```
-
-To just read the value already injected into a running pod:
-
-```sh
-kubectl exec -it deploy/<freighter-backend-deployment> -n <namespace> -- printenv DATABASE_URL
 ```
 
 ## Pool configuration

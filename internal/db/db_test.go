@@ -14,7 +14,7 @@ func TestBuildPoolConfig_AppliesQueryExecMode(t *testing.T) {
 
 	dsn := "postgres://u:p@localhost:5432/db"
 
-	t.Run("QueryExecModeExec is applied for PgBouncer compatibility", func(t *testing.T) {
+	t.Run("explicit QueryExecModeExec is applied when set", func(t *testing.T) {
 		t.Parallel()
 		cfg, err := buildPoolConfig(dsn, PoolConfig{QueryExecMode: pgx.QueryExecModeExec})
 		require.NoError(t, err)

@@ -157,12 +157,6 @@ docker-build-up: docker-build-local docker-up ## Build locally and start contain
 # DATABASE
 # ==================================================================================== #
 # Switch between local and a hosted CNPG env by changing only DATABASE_URL.
-# ENV selects the hosted environment (dev|stg|prd). LOCAL_PORT overrides the
-# local forwarded port (default 5432). See scripts/db-connect.sh.
-ENV ?= dev
-
-db-forward: ## Port-forward the hosted CNPG primary for ENV to localhost (blocking)
-	./scripts/db-connect.sh forward $(ENV)
-
-db-url: ## Print `export DATABASE_URL=...` for the hosted CNPG ENV (use: eval "$$(make -s db-url ENV=dev)")
-	@./scripts/db-connect.sh url $(ENV)
+# Local dev uses docker-compose; to run against a hosted database, export
+# DATABASE_URL yourself (same as horizon/RPC/wallet-backend) — see
+# internal/db/README.md. Concrete per-env values live in wallet-eng-runbooks.
