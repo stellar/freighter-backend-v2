@@ -20,11 +20,15 @@ type Config struct {
 }
 
 type AppConfig struct {
-	FreighterBackendHost           string
-	FreighterBackendPort           int
-	MetricsHost                    string
-	MetricsPort                    int
-	Mode                           string
+	FreighterBackendHost string
+	FreighterBackendPort int
+	MetricsHost          string
+	MetricsPort          int
+	Mode                 string
+	// AuthMode selects JWT enforcement for gated routes: "permissive" (allow
+	// requests with no token through, reject invalid tokens) or "strict"
+	// (require a valid token). Parsed via auth.ParseMode; validated at startup.
+	AuthMode                       string
 	SentryKey                      string
 	ProtocolsConfigPath            string
 	MeridianPayTreasureHuntAddress string
@@ -108,13 +112,14 @@ type HorizonConfig struct {
 }
 
 type PricesConfig struct {
-	HorizonURL                     string
-	DisableTokenPrices             bool
-	BatchUpdateDelayMilliseconds   int
-	CalculationTimeoutMilliseconds int
-	UpdateIntervalMilliseconds     int
-	UpdateBatchSize                int
-	StalenessThreshold             int
+	StellarExpertPubnetURL    string
+	StellarExpertTestnetURL   string
+	StellarExpertAPIKey       string
+	StellarExpertOrigin       string
+	PriceCacheTTLSeconds      int
+	PriceFetchTimeoutSeconds  int
+	MaxTokensPerRequest       int
+	MaxConcurrentPriceFetches int
 }
 
 type BlockaidConfig struct {

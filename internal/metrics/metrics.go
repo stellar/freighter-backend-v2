@@ -52,6 +52,8 @@ func (e *UpstreamError) Unwrap() error { return e.Err }
 type Metrics struct {
 	HTTP    *HTTP
 	Service *Service
+	Auth    *Auth
+	Prices  *Prices
 }
 
 // NewMetrics creates and registers all application metrics with the given registerer.
@@ -59,7 +61,41 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	return &Metrics{
 		HTTP:    NewHTTP(reg),
 		Service: NewService(reg),
+		Auth:    NewAuth(reg),
+		Prices:  NewPrices(reg),
 	}
+}
+
+// Auth holds JWT authentication metrics. During the client rollout these track
+// adoption (authenticated vs anonymous) and rejection reasons.
+type Auth struct {
+	// RequestsTotal counts auth-checked requests, labeled by outcome and reason.
+	//   result: "authenticated" | "anonymous" | "rejected"
+	//   reason: "ok" | "no_token" | "expired" | "bad_signature" | "bad_timing" |
+	//           "bad_method_path" | "bad_body_hash" | "bad_subject" | "malformed" |
+	//           "invalid" | "too_large" | "internal"
+	RequestsTotal *prometheus.CounterVec
+}
+
+// NewAuth creates and registers auth metrics with the given registerer.
+func NewAuth(reg prometheus.Registerer) *Auth {
+	a := &Auth{
+		RequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_auth_requests_total",
+			Help: "Total number of auth-checked HTTP requests, by result and reason.",
+		}, []string{"result", "reason"}),
+	}
+	reg.MustRegister(a.RequestsTotal)
+	return a
+}
+
+// RecordAuth records the outcome of an auth check. It is nil-safe so the
+// middleware and its tests can run without a metrics registry.
+func RecordAuth(a *Auth, result, reason string) {
+	if a == nil {
+		return
+	}
+	a.RequestsTotal.WithLabelValues(result, reason).Inc()
 }
 
 // HTTP holds HTTP request metrics.
@@ -125,6 +161,44 @@ func NewService(reg prometheus.Registerer) *Service {
 	}
 	reg.MustRegister(s.CallsTotal, s.CallDuration, s.ErrorsTotal)
 	return s
+}
+
+// Prices holds metrics specific to the token-prices service: cache outcomes,
+// degraded-mode signals (miss-budget exhaustion), and
+// Redis-from-this-service-POV errors.
+type Prices struct {
+	// CacheOutcomes counts per-token cache outcomes by network and outcome:
+	// "hit" (live entry within --price-cache-ttl-seconds) or "miss" (no
+	// entry, expired, or upstream-only path).
+	CacheOutcomes *prometheus.CounterVec
+	// MissBudgetExhausted counts requests whose miss-fetch budget
+	// (--price-fetch-timeout-seconds) tripped before all misses resolved.
+	// Labeled by network.
+	MissBudgetExhausted *prometheus.CounterVec
+	// RedisErrors counts Redis operations from the prices service that
+	// failed (and were silently fallen-through). Labeled by op: "mget" or
+	// "set".
+	RedisErrors *prometheus.CounterVec
+}
+
+// NewPrices creates and registers prices-service metrics with the given registerer.
+func NewPrices(reg prometheus.Registerer) *Prices {
+	p := &Prices{
+		CacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_prices_cache_outcomes_total",
+			Help: "Per-token cache outcomes for the token-prices endpoint.",
+		}, []string{"network", "outcome"}),
+		MissBudgetExhausted: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_prices_miss_budget_exhausted_total",
+			Help: "Requests whose miss-fetch budget elapsed before all misses resolved.",
+		}, []string{"network"}),
+		RedisErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_prices_redis_errors_total",
+			Help: "Redis operation failures observed by the prices service.",
+		}, []string{"op"}),
+	}
+	reg.MustRegister(p.CacheOutcomes, p.MissBudgetExhausted, p.RedisErrors)
+	return p
 }
 
 // Record records call metrics for a service method invocation.

@@ -130,6 +130,36 @@ func TestServeCmd_AcceptsMaxLedgerKeyAddressesAtUpstreamCeiling(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 }
 
+func TestServeCmd_RejectsNonPositiveMaxTokensPerRequest(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--max-tokens-per-request", "0"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--max-tokens-per-request=0 must be positive")
+}
+
+func TestServeCmd_RejectsNegativePriceFetchTimeout(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--price-fetch-timeout-seconds", "-1"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--price-fetch-timeout-seconds=-1 must be >= 0")
+}
+
 func TestServeCmd_RejectsAccountHistoryMaxLimitAbove100(t *testing.T) {
 	t.Parallel()
 
@@ -146,4 +176,34 @@ func TestServeCmd_RejectsAccountHistoryMaxLimitAbove100(t *testing.T) {
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "max <= 100")
+}
+
+func TestServeCmd_RejectsInvalidAuthMode(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--auth-mode", "bogus"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid auth mode")
+}
+
+func TestServeCmd_AcceptsStrictAuthMode(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	// --database-url is required (the DB is a hard dependency), so supply one here
+	// to reach and exercise the auth-mode validation.
+	cmd.SetArgs([]string{"--auth-mode", "strict", "--database-url", "postgres://localhost/test"})
+
+	require.NoError(t, cmd.Execute())
 }
