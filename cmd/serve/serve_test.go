@@ -87,7 +87,10 @@ func TestServeCmd_Execute(t *testing.T) {
 }
 
 func TestServeCmd_RejectsEmptyDatabaseURL(t *testing.T) {
-	t.Parallel()
+	// No t.Parallel(): t.Setenv is incompatible with parallel tests. Clear
+	// DATABASE_URL so utils.InitializeConfig can't bind it into --database-url
+	// from the surrounding shell, which would mask the missing-config path.
+	t.Setenv("DATABASE_URL", "")
 
 	serveCmd := &ServeCmd{Cfg: &config.Config{}}
 	cmd := serveCmd.Command()

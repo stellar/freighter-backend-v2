@@ -77,7 +77,7 @@ func (s *ApiServer) Start() error {
 	// The database is initialized separately from initServices because it eagerly
 	// connects (to fail fast), whereas the other clients are lazy. Keeping it out
 	// of initServices keeps that function unit-testable without real infrastructure.
-	if err := s.initDatabase(); err != nil {
+	if err = s.initDatabase(); err != nil {
 		logger.Error("Failed to initialize database", "error", err)
 		return err
 	}
