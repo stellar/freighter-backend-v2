@@ -19,6 +19,7 @@ type SharedContainers struct {
 	TestNetwork           *testcontainers.DockerNetwork
 	RedisContainer        *redis.RedisContainer
 	PostgresContainer     *TestContainer
+	AppPostgresContainer  *TestContainer
 	StellarCoreContainer  *TestContainer
 	RpcContainer          *TestContainer
 	FreighterContainer    *FreighterBackendContainer
@@ -51,6 +52,13 @@ func (s *SharedContainers) initializeContainerInfrastructure(ctx context.Context
 	s.PostgresContainer, err = createPostgresContainer(ctx, s.TestNetwork)
 	if err != nil {
 		return fmt.Errorf("creating core DB container: %w", err)
+	}
+
+	// Start the app's PostgreSQL (freighter-backend-v2 connects to this via
+	// DATABASE_URL; serve pings it on boot).
+	s.AppPostgresContainer, err = createAppPostgresContainer(ctx, s.TestNetwork)
+	if err != nil {
+		return fmt.Errorf("creating app DB container: %w", err)
 	}
 
 	// Start Stellar Core
@@ -93,6 +101,9 @@ func (s *SharedContainers) Cleanup(ctx context.Context) {
 	}
 	if s.StellarCoreContainer != nil {
 		_ = s.StellarCoreContainer.Terminate(ctx)
+	}
+	if s.AppPostgresContainer != nil {
+		_ = s.AppPostgresContainer.Terminate(ctx)
 	}
 	if s.PostgresContainer != nil {
 		_ = s.PostgresContainer.Terminate(ctx)

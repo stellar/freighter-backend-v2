@@ -13,11 +13,17 @@ services:
       - FREIGHTER_BACKEND_PORT=3002
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      # Single-sourced so the migrate service and api never drift apart.
+      - &database_url DATABASE_URL=postgres://freighter:freighter@postgres:5432/freighter?sslmode=disable
       - MODE=development
     command: ["./freighter-backend", "serve"]
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "http://localhost:3002/api/v1/ping"]
@@ -54,8 +60,50 @@ services:
           cpus: '0.5'
           memory: 256M
 
+  # One-shot: applies migrations once Postgres is healthy, then exits. The api
+  # service waits for it to complete successfully before starting. Mirrors how
+  # deployed envs run `migrate up` as a Job rather than on the serve path.
+  migrate:
+    container_name: freighter-backend-migrate
+    build:
+      context: ../
+      dockerfile: deployments/Dockerfile
+    environment:
+      - *database_url
+    command: ["./freighter-backend", "migrate", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  postgres:
+    container_name: freighter-backend-postgres
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=freighter
+      - POSTGRES_PASSWORD=freighter
+      - POSTGRES_DB=freighter
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U freighter -d freighter"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
 volumes:
   redis_data:
+    driver: local
+  postgres_data:
     driver: local
 
 networks:

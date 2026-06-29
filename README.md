@@ -1,6 +1,12 @@
 # freighter-backend-v2
 Freighter's next generation of backend system written in Go
 
+## Database
+
+The service requires a PostgreSQL database (`DATABASE_URL`). For local setup,
+connecting with `psql`, migrations, deployed-environment access, and pool tuning,
+see [`internal/db/README.md`](internal/db/README.md).
+
 ## Releases
 
 Releases follow a two-step prerelease → promote flow. Both steps run in GitHub Actions; you trigger each with `gh workflow run`.

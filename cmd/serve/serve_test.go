@@ -75,7 +75,7 @@ func TestServeCmd_Execute(t *testing.T) {
 
 	b := bytes.NewBufferString("")
 	cmd.SetOut(b)
-	cmd.SetArgs([]string{"--freighter-backend-host", "test_host", "--mode", "test_mode"})
+	cmd.SetArgs([]string{"--freighter-backend-host", "test_host", "--mode", "test_mode", "--database-url", "postgres://localhost/test"})
 	err := cmd.Execute()
 	require.NoError(t, err)
 
@@ -84,6 +84,25 @@ func TestServeCmd_Execute(t *testing.T) {
 	assert.Contains(t, string(out), "freighter-backend-host=test_host")
 	assert.Contains(t, string(out), "mode=test_mode")
 	assert.True(t, configUsed)
+}
+
+func TestServeCmd_RejectsEmptyDatabaseURL(t *testing.T) {
+	// No t.Parallel(): t.Setenv is incompatible with parallel tests. Clear
+	// DATABASE_URL so utils.InitializeConfig can't bind it into --database-url
+	// from the surrounding shell, which would mask the missing-config path.
+	t.Setenv("DATABASE_URL", "")
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	// No --database-url provided: the DB is a hard dependency, so boot must fail fast.
+	cmd.SetArgs([]string{})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "database-url")
 }
 
 func TestServeCmd_RejectsMaxLedgerKeyAddressesAboveUpstreamCeiling(t *testing.T) {
@@ -109,7 +128,7 @@ func TestServeCmd_AcceptsMaxLedgerKeyAddressesAtUpstreamCeiling(t *testing.T) {
 	cmd.RunE = func(*cobra.Command, []string) error { return nil }
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"--max-ledger-key-addresses", fmt.Sprintf("%d", services.MaxLedgerEntryKeys)})
+	cmd.SetArgs([]string{"--max-ledger-key-addresses", fmt.Sprintf("%d", services.MaxLedgerEntryKeys), "--database-url", "postgres://localhost/test"})
 
 	require.NoError(t, cmd.Execute())
 }
@@ -185,7 +204,9 @@ func TestServeCmd_AcceptsStrictAuthMode(t *testing.T) {
 	cmd.RunE = func(*cobra.Command, []string) error { return nil }
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"--auth-mode", "strict"})
+	// --database-url is required (the DB is a hard dependency), so supply one here
+	// to reach and exercise the auth-mode validation.
+	cmd.SetArgs([]string{"--auth-mode", "strict", "--database-url", "postgres://localhost/test"})
 
 	require.NoError(t, cmd.Execute())
 }

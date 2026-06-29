@@ -2,6 +2,7 @@ package serve
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -46,6 +47,16 @@ func (s *ServeCmd) Command() *cobra.Command {
 			}
 			if _, err := auth.ParseMode(s.Cfg.AppConfig.AuthMode); err != nil {
 				return fmt.Errorf("--auth-mode: %w", err)
+			}
+			// The database is a hard dependency: fail fast with a clear message
+			// rather than surfacing an opaque connection error deeper in startup.
+			if err := s.Cfg.DatabaseConfig.Validate(); err != nil {
+				return err
+			}
+			// serve sources the pool tuning from flags, so validate them here
+			// (migrate uses package defaults and skips this).
+			if err := s.Cfg.DatabaseConfig.ValidatePoolConfig(); err != nil {
+				return err
 			}
 			return nil
 		},
@@ -93,6 +104,13 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.RedisConfig.Host, "redis-host", "localhost", "The Redis host")
 	cmd.Flags().IntVar(&s.Cfg.RedisConfig.Port, "redis-port", 6379, "The Redis port")
 	cmd.Flags().StringVar(&s.Cfg.RedisConfig.Password, "redis-password", "", "Redis password")
+
+	// Database Config
+	cmd.Flags().StringVar(&s.Cfg.DatabaseConfig.URL, "database-url", "", "PostgreSQL connection string (env DATABASE_URL). Required.")
+	cmd.Flags().IntVar(&s.Cfg.DatabaseConfig.MaxConns, "db-max-conns", 10, "Maximum number of connections in the DB pool")
+	cmd.Flags().IntVar(&s.Cfg.DatabaseConfig.MinConns, "db-min-conns", 2, "Minimum number of idle connections kept in the DB pool")
+	cmd.Flags().DurationVar(&s.Cfg.DatabaseConfig.MaxConnLifetime, "db-max-conn-lifetime", 5*time.Minute, "Maximum lifetime of a pooled DB connection before it is recycled")
+	cmd.Flags().DurationVar(&s.Cfg.DatabaseConfig.MaxConnIdleTime, "db-max-conn-idle-time", 10*time.Second, "Maximum idle time before a pooled DB connection is closed")
 
 	// Blockaid Config
 	cmd.Flags().StringVar(&s.Cfg.BlockaidConfig.BlockaidAPIKey, "blockaid-api-key", "", "Blockaid API key")

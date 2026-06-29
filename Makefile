@@ -103,7 +103,7 @@ unit-test-coverage: ## Run unit tests with coverage
 
 integration-test: ## Run integration tests
 	@echo "==> Running integration tests..."
-	ENABLE_INTEGRATION_TESTS=true go test -v ./internal/integrationtests/...
+	ENABLE_INTEGRATION_TESTS=true go test -v ./internal/integrationtests/... ./internal/db/...
 
 test-all: unit-test-coverage integration-test ## Run all tests
 	@echo "✅ All tests completed successfully"
@@ -152,3 +152,11 @@ docker-push: ## Push tagged docker image
 	$(SUDO) docker push $(TAG)
 
 docker-build-up: docker-build-local docker-up ## Build locally and start containers
+
+# ==================================================================================== #
+# DATABASE
+# ==================================================================================== #
+# Switch between local and a hosted CNPG env by changing only DATABASE_URL.
+# Local dev uses docker-compose; to run against a hosted database, export
+# DATABASE_URL yourself (same as horizon/RPC/wallet-backend) — see
+# internal/db/README.md. Concrete per-env values live in wallet-eng-runbooks.

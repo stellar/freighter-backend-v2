@@ -40,7 +40,7 @@ func TestRPCHealthHandler_CheckRPCHealth(t *testing.T) {
 		assert.Equal(t, "no-cache, no-store, must-revalidate", rr.Header().Get("Cache-Control"))
 
 		// Parse and check response body
-		var response RPCHealthResponse
+		var response types.GetHealthResponse
 		err = json.Unmarshal(rr.Body.Bytes(), &response)
 		require.NoError(t, err)
 		assert.Equal(t, types.StatusHealthy, response.Status)
@@ -129,7 +129,7 @@ func TestRPCHealthHandler_CheckRPCHealth(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rr.Code)
 
 		// Parse and check response body has unhealthy status
-		var response RPCHealthResponse
+		var response types.GetHealthResponse
 		err = json.Unmarshal(rr.Body.Bytes(), &response)
 		require.NoError(t, err)
 		assert.Equal(t, types.StatusUnhealthy, response.Status)
