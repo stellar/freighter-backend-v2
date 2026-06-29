@@ -4,14 +4,11 @@ import (
 	"context"
 	"os"
 	"testing"
-	"time"
 
 	migrate "github.com/rubenv/sql-migrate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // startPostgres spins up a throwaway PostgreSQL container and returns its DSN.
@@ -29,9 +26,11 @@ func startPostgres(t *testing.T) string {
 		postgres.WithDatabase("freighter"),
 		postgres.WithUsername("freighter"),
 		postgres.WithPassword("freighter"),
-		testcontainers.WithWaitStrategy(
-			wait.ForListeningPort("5432/tcp").WithStartupTimeout(60*time.Second),
-		),
+		// BasicWaitStrategies waits for the "ready to accept connections" log
+		// twice — the official image starts, runs init, then restarts — and then
+		// the port. A port-only wait can let the first Ping race that restart and
+		// flake. See testcontainers' postgres module docs.
+		postgres.BasicWaitStrategies(),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = container.Terminate(ctx) })

@@ -215,7 +215,13 @@ func createAppPostgresContainer(ctx context.Context, testNetwork *testcontainers
 		},
 		Networks:     []string{testNetwork.Name},
 		ExposedPorts: []string{"5432/tcp"},
-		WaitingFor:   wait.ForListeningPort("5432/tcp"),
+		// Wait for Postgres readiness, not just the open port: the official image
+		// starts, runs init, then restarts, so a port-only wait lets serve's boot
+		// Ping race that restart and flake. Mirror postgres.BasicWaitStrategies.
+		WaitingFor: wait.ForAll(
+			wait.ForLog("database system is ready to accept connections").WithOccurrence(2),
+			wait.ForListeningPort("5432/tcp"),
+		),
 	}
 
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
