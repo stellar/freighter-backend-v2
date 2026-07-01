@@ -291,6 +291,15 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 		return nil, false
 	}
 
+	// A zero price — whether Stellar Expert omitted the `price` field (a known
+	// but illiquid asset; JSON absence decodes to 0) or reported a genuine 0 —
+	// is unpriceable. Honor the documented null contract rather than leaking a
+	// "0" string. Resolves to (nil, true) like not-found/malformed so it caches
+	// as an authoritative miss.
+	if asset.Price == 0 {
+		return nil, true
+	}
+
 	// The 24h change comes only from the hourly candles window, which can pin
 	// a true trailing 24h (±1h). When candles are unavailable or can't cover
 	// ~24h we return null rather than a mislabeled day-over-day delta from the

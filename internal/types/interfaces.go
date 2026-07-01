@@ -48,7 +48,10 @@ type WalletBackendService interface {
 }
 
 // StellarExpertAsset is the subset of the Stellar Expert /asset/{id} response
-// we care about for pricing.
+// we care about for pricing. A zero Price means unpriceable — either Stellar
+// Expert omitted the `price` field (a known but illiquid asset; JSON absence
+// decodes to 0) or reported a genuine 0. Callers map that to a null price
+// rather than a "0" string.
 type StellarExpertAsset struct {
 	Price float64 `json:"price"`
 }

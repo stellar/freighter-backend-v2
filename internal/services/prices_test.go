@@ -327,6 +327,24 @@ func TestPrices_Malformed_ReturnsNull(t *testing.T) {
 	assert.Nil(t, got["BAD:"+testIssuer])
 }
 
+// A zero price is unpriceable and must serialize as null, not a manufactured
+// "0". This covers both Stellar Expert omitting the `price` field for a known
+// but illiquid asset (JSON absence decodes to 0) and a genuine reported 0 —
+// the two are indistinguishable and treated identically.
+func TestPrices_ZeroPrice_ReturnsNull(t *testing.T) {
+	t.Parallel()
+
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set("USDyc-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 0})
+
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
+	got, err := svc.GetPrices(context.Background(), []string{"USDyc:" + testIssuer}, types.PUBLIC)
+	require.NoError(t, err)
+	entry, ok := got["USDyc:"+testIssuer]
+	assert.True(t, ok)
+	assert.Nil(t, entry, "zero price → null, not \"0\"")
+}
+
 func TestPrices_UpstreamError_ReturnsNull(t *testing.T) {
 	t.Parallel()
 
