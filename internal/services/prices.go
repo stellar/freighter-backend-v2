@@ -291,11 +291,12 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 		return nil, false
 	}
 
-	// A known asset can return 200 with no `price` field (illiquid, no recent
-	// trades). That is unpriceable, not a price of 0: honor the documented
-	// null contract rather than leaking a zero value. Resolves to (nil, true)
-	// like not-found/malformed so it caches as an authoritative miss.
-	if asset.Price == nil {
+	// A zero price — whether Stellar Expert omitted the `price` field (a known
+	// but illiquid asset; JSON absence decodes to 0) or reported a genuine 0 —
+	// is unpriceable. Honor the documented null contract rather than leaking a
+	// "0" string. Resolves to (nil, true) like not-found/malformed so it caches
+	// as an authoritative miss.
+	if asset.Price == 0 {
 		return nil, true
 	}
 
@@ -310,11 +311,11 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 			logger.Warn("prices: candles fetch failed; 24h change unavailable", "asset", stellarExpertID, "error", candlesErr)
 		}
 	} else {
-		change24h = change24hFromCandles(*asset.Price, candles, to)
+		change24h = change24hFromCandles(asset.Price, candles, to)
 	}
 
 	entry := &types.PriceEntry{
-		CurrentPrice:             formatPrice(*asset.Price),
+		CurrentPrice:             formatPrice(asset.Price),
 		PercentagePriceChange24h: change24h,
 	}
 	p.cachePositive(ctx, cacheNet, canonical, entry)

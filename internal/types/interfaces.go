@@ -48,11 +48,12 @@ type WalletBackendService interface {
 }
 
 // StellarExpertAsset is the subset of the Stellar Expert /asset/{id} response
-// we care about for pricing. Price is a pointer so an absent `price` field
-// (a known but illiquid/unpriced asset) is distinguishable from a genuine
-// upstream price of 0; nil means unpriceable, not zero.
+// we care about for pricing. A zero Price means unpriceable — either Stellar
+// Expert omitted the `price` field (a known but illiquid asset; JSON absence
+// decodes to 0) or reported a genuine 0. Callers map that to a null price
+// rather than a "0" string.
 type StellarExpertAsset struct {
-	Price *float64 `json:"price"`
+	Price float64 `json:"price"`
 }
 
 // StellarExpertCandle is one row of /asset/{id}/candles.
