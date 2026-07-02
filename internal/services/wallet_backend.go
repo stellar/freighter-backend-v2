@@ -152,14 +152,14 @@ func (w *walletBackendService) configureNetworkClient(network string) *wbclient.
 //
 //   - Duplicate input addresses collapse to a single result while preserving
 //     first-seen order.
-//   - The single address-scoped failure is the typed
+//   - The single address-scoped outcome is the typed
 //     wbclient.ErrAccountNotFound sentinel (accountByAddress:null upstream):
-//     it becomes a per-account Error string in the returned
-//     []*types.AccountBalances while other accounts in the same request
-//     still return their balances.
+//     it sets is_funded=false (with an empty balances slice) on that account's
+//     result while other accounts in the same request still return their
+//     balances.
 //   - Every other failure is systemic and returned as a top-level error so
 //     the handler emits a 5xx and monitoring sees the outage rather than a
-//     200 of per-account error strings. This includes GraphQL errors[]
+//     200 that hides it. This includes GraphQL errors[]
 //     from the server (no structured signal to prove account-locality —
 //     schema/query/resolver bugs hit every account the same way), HTTP
 //     4xx/5xx, transport failures, signing failures, and request-level
@@ -187,13 +187,14 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 	for i, addr := range unique {
 		g.Go(func() error {
 			balances, fetchErr := client.GetAllAccountBalances(gctx, addr)
-			// Always non-nil so the JSON encoder emits "balances": [] even if
-			// a future SDK regression returned nil for an account with zero
-			// balances. GetAllAccountBalances currently returns a non-nil
-			// empty slice; keeping the guard is cheap insurance.
+			// Balances is always non-nil so the JSON encoder emits "balances": []
+			// even if a future SDK regression returned nil for an account with zero
+			// balances. GetAllAccountBalances currently returns a non-nil empty
+			// slice; keeping the guard is cheap insurance. IsFunded defaults to
+			// false and is set true only on a successful fetch (below).
 			ab := &types.AccountBalances{
 				Address:  addr,
-				Balances: []wbtypes.Balance{},
+				Balances: []types.Balance{},
 			}
 			if fetchErr != nil {
 				if !errors.Is(fetchErr, wbclient.ErrAccountNotFound) {
@@ -207,12 +208,29 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 					// outage instead of a 200 of per-account error strings.
 					return classifyWBError(fetchErr)
 				}
-				logger.ErrorWithContext(gctx, "fetching account balances",
-					"address", addr, "error", fetchErr)
-				msg := fetchErr.Error()
-				ab.Error = &msg
-			} else if len(balances) > 0 {
-				ab.Balances = balances
+				// ErrAccountNotFound is a normal outcome (the account doesn't exist
+				// on-chain), not a fetch failure — every systemic error already
+				// returned above. It's conveyed to the client via is_funded=false
+				// and an empty balances slice; log at Info (not Error) for a
+				// breadcrumb, matching the metrics layer's non-error treatment.
+				logger.InfoWithContext(gctx, "account not found", "address", addr)
+			} else {
+				// A successful fetch means the account exists on-chain, so it is
+				// funded. Not-found leaves IsFunded false; systemic errors return
+				// above and never yield a result — so funded is derived from a real
+				// success, not from the absence of an error, and stays correct even
+				// if the error handling above changes.
+				ab.IsFunded = true
+				mapped := make([]types.Balance, 0, len(balances))
+				for _, b := range balances {
+					// SubentryCount is hoisted from the single native balance;
+					// it stays 0 for accounts without one (e.g. unfunded views).
+					if nb, ok := b.(*wbtypes.NativeBalance); ok {
+						ab.SubentryCount = nb.NumSubentries
+					}
+					mapped = append(mapped, mapBalance(b))
+				}
+				ab.Balances = mapped
 			}
 			results[i] = ab
 			return nil

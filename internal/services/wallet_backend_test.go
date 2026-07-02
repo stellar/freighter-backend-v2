@@ -292,8 +292,6 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 		require.Len(t, results, 2)
 		assert.Equal(t, addrA, results[0].Address)
 		assert.Equal(t, addrB, results[1].Address)
-		assert.Nil(t, results[0].Error)
-		assert.Nil(t, results[1].Error)
 		assert.Len(t, results[0].Balances, 1)
 		assert.Len(t, results[1].Balances, 1)
 	})
@@ -325,7 +323,6 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 		results := raw.([]*types.AccountBalances)
 		require.Len(t, results, 1)
 		assert.Equal(t, addrA, results[0].Address)
-		assert.Nil(t, results[0].Error)
 		require.Len(t, results[0].Balances, 2, "SDK pagination loop must aggregate edges across pages")
 		assert.EqualValues(t, int64(2), f.calls.Load(), "exactly one request per page")
 	})
@@ -355,12 +352,13 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 		assert.Equal(t, "graphql_error", upErr.Kind)
 	})
 
-	t.Run("account_not_found_returns_per_account_error", func(t *testing.T) {
+	t.Run("account_not_found_is_address_scoped", func(t *testing.T) {
 		// wallet-backend signals "account not indexed" with a 200 response
 		// carrying accountByAddress:null. wbclient surfaces that as the typed
 		// sentinel ErrAccountNotFound (PR #612). It must remain address-scoped
 		// — failing the whole batch when one of N requested accounts isn't
-		// indexed would defeat the multi-account endpoint's purpose.
+		// indexed would defeat the multi-account endpoint's purpose. The
+		// not-found account is reported via is_funded=false, not a batch error.
 		f := newFanoutFakeServer(t, func(address string, _ *string) (int, string) {
 			if address == addrA {
 				return http.StatusOK, accountNotFoundGraphQLResponse()
@@ -373,12 +371,9 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 		require.NoError(t, err)
 		results := raw.([]*types.AccountBalances)
 		require.Len(t, results, 2)
-		require.NotNil(t, results[0].Error)
-		// The per-account error string is the raw wbclient error, whose
-		// chain contains the typed sentinel's "account not found" message.
-		assert.Contains(t, *results[0].Error, "account not found")
+		assert.False(t, results[0].IsFunded, "not-found account is reported unfunded")
 		assert.Empty(t, results[0].Balances) // initialized to non-nil empty slice
-		assert.Nil(t, results[1].Error)
+		assert.True(t, results[1].IsFunded, "the other account still resolves")
 		assert.Len(t, results[1].Balances, 1)
 	})
 
@@ -578,6 +573,59 @@ func TestGetBalancesByAccountAddresses_FanOut(t *testing.T) {
 		assert.Equal(t, addrA, results[0].Address, "first-seen ordering preserved")
 		assert.Equal(t, addrB, results[1].Address)
 		assert.Equal(t, int64(2), f.calls.Load(), "fake server must see exactly len(unique) GraphQL calls")
+	})
+}
+
+func TestGetBalancesByAccountAddresses_EnvelopeEnrichment(t *testing.T) {
+	t.Run("funded_account_sets_is_funded_and_hoists_subentry_count", func(t *testing.T) {
+		// A native balance carrying numSubentries=5. The service must set
+		// is_funded=true, hoist subentry_count from the native entry, and map
+		// the balance into a *NativeBalance with available = balance -
+		// minimumBalance (100 - 2.5 = 97.5).
+		nativeWithSubentries := `{
+			"data": {"accountByAddress": {"balances": {
+				"edges": [{"node": {
+					"__typename": "NativeBalance",
+					"balance": "100.0000000", "tokenId": "native", "tokenType": "NATIVE",
+					"minimumBalance": "2.5000000", "buyingLiabilities": "0.0000000", "sellingLiabilities": "0.0000000",
+					"lastModifiedLedger": 100, "numSubentries": 5
+				}}],
+				"pageInfo": {"hasNextPage": false, "endCursor": null}
+			}}}
+		}`
+		f := newFanoutFakeServer(t, func(_ string, _ *string) (int, string) {
+			return http.StatusOK, nativeWithSubentries
+		})
+		svc := newFanoutTestService(f.server.URL, 10)
+
+		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA}, types.PUBLIC)
+		require.NoError(t, err)
+		results := raw.([]*types.AccountBalances)
+		require.Len(t, results, 1)
+		assert.True(t, results[0].IsFunded)
+		assert.EqualValues(t, 5, results[0].SubentryCount)
+		require.Len(t, results[0].Balances, 1)
+		native, ok := results[0].Balances[0].(*types.NativeBalance)
+		require.True(t, ok, "expected *NativeBalance, got %T", results[0].Balances[0])
+		assert.Equal(t, "97.5000000", native.Available)
+	})
+
+	t.Run("account_not_found_sets_is_funded_false", func(t *testing.T) {
+		// ErrAccountNotFound is address-scoped: is_funded=false,
+		// subentry_count=0, and an empty balances slice (no per-account error —
+		// not-found is conveyed by is_funded).
+		f := newFanoutFakeServer(t, func(_ string, _ *string) (int, string) {
+			return http.StatusOK, accountNotFoundGraphQLResponse()
+		})
+		svc := newFanoutTestService(f.server.URL, 10)
+
+		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA}, types.PUBLIC)
+		require.NoError(t, err)
+		results := raw.([]*types.AccountBalances)
+		require.Len(t, results, 1)
+		assert.False(t, results[0].IsFunded)
+		assert.EqualValues(t, 0, results[0].SubentryCount)
+		assert.Empty(t, results[0].Balances)
 	})
 }
 

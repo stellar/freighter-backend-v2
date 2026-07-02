@@ -4,8 +4,6 @@ package types
 
 import (
 	"time"
-
-	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
 )
 
 // AccountBalances is the per-account fan-out result returned by the multi-account
@@ -15,19 +13,22 @@ import (
 // AccountBalances values, one per unique input address (duplicates are collapsed
 // while preserving first-seen order).
 //
-// Wire format: address is the canonical Stellar account ID, balances is always a
-// non-nil slice (an account with no balances marshals to "balances": []), and
-// error — when present — carries the wallet-backend account-not-found message
-// for that address (the typed wbclient.ErrAccountNotFound sentinel surfaced as
-// accountByAddress:null upstream). This is the only address-scoped failure.
-// Every other failure (GraphQL errors[] from the server, HTTP 4xx/5xx,
-// transport, signing, request-level cancellation) surfaces as a top-level
-// error from the service rather than a per-account Error string, so
-// monitoring sees real outages instead of a 200 of error strings.
+// Wire format: address is the canonical Stellar account ID, is_funded reports
+// whether the account exists on-ledger (false when the account isn't found),
+// subentry_count is hoisted from the native balance, and balances is always a
+// non-nil slice (an account with no balances marshals to "balances": []).
+//
+// The one address-scoped outcome — the account not existing (the typed
+// wbclient.ErrAccountNotFound sentinel, accountByAddress:null upstream) — is
+// conveyed by is_funded=false, not a per-account error. Every other failure
+// (GraphQL errors[] from the server, HTTP 4xx/5xx, transport, signing,
+// request-level cancellation) surfaces as a top-level error from the service,
+// so monitoring sees real outages instead of a 200 that hides them.
 type AccountBalances struct {
-	Address  string            `json:"address"`
-	Balances []wbtypes.Balance `json:"balances"`
-	Error    *string           `json:"error,omitempty"`
+	Address       string    `json:"address"`
+	IsFunded      bool      `json:"is_funded"`
+	SubentryCount uint32    `json:"subentry_count"`
+	Balances      []Balance `json:"balances"`
 }
 
 // PaginationDirection selects forward (next) or backward (prev) traversal of
