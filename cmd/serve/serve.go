@@ -48,15 +48,20 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if _, err := auth.ParseMode(s.Cfg.AppConfig.AuthMode); err != nil {
 				return fmt.Errorf("--auth-mode: %w", err)
 			}
-			// The database is a hard dependency: fail fast with a clear message
-			// rather than surfacing an opaque connection error deeper in startup.
-			if err := s.Cfg.DatabaseConfig.Validate(); err != nil {
-				return err
-			}
-			// serve sources the pool tuning from flags, so validate them here
-			// (migrate uses package defaults and skips this).
-			if err := s.Cfg.DatabaseConfig.ValidatePoolConfig(); err != nil {
-				return err
+			// The database is validated only when enabled. With --db-enabled=false
+			// the service runs without a database (DB-backed features report
+			// unavailable), so an empty DATABASE_URL must not fail boot.
+			if s.Cfg.DatabaseConfig.Enabled {
+				// Fail fast with a clear message rather than surfacing an opaque
+				// connection error deeper in startup.
+				if err := s.Cfg.DatabaseConfig.Validate(); err != nil {
+					return err
+				}
+				// serve sources the pool tuning from flags, so validate them here
+				// (migrate uses package defaults and skips this).
+				if err := s.Cfg.DatabaseConfig.ValidatePoolConfig(); err != nil {
+					return err
+				}
 			}
 			return nil
 		},
@@ -106,7 +111,8 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.RedisConfig.Password, "redis-password", "", "Redis password")
 
 	// Database Config
-	cmd.Flags().StringVar(&s.Cfg.DatabaseConfig.URL, "database-url", "", "PostgreSQL connection string (env DATABASE_URL). Required.")
+	cmd.Flags().BoolVar(&s.Cfg.DatabaseConfig.Enabled, "db-enabled", true, "Enable the database subsystem. Set false (env DB_ENABLED) to run without a database; DATABASE_URL is then not required.")
+	cmd.Flags().StringVar(&s.Cfg.DatabaseConfig.URL, "database-url", "", "PostgreSQL connection string (env DATABASE_URL). Required unless --db-enabled=false.")
 	cmd.Flags().IntVar(&s.Cfg.DatabaseConfig.MaxConns, "db-max-conns", 10, "Maximum number of connections in the DB pool")
 	cmd.Flags().IntVar(&s.Cfg.DatabaseConfig.MinConns, "db-min-conns", 2, "Minimum number of idle connections kept in the DB pool")
 	cmd.Flags().DurationVar(&s.Cfg.DatabaseConfig.MaxConnLifetime, "db-max-conn-lifetime", 5*time.Minute, "Maximum lifetime of a pooled DB connection before it is recycled")

@@ -105,6 +105,31 @@ func TestServeCmd_RejectsEmptyDatabaseURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "database-url")
 }
 
+func TestServeCmd_DBEnabledDefaultsTrue(t *testing.T) {
+	t.Parallel()
+
+	cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
+	dbEnabled, err := cmd.Flags().GetBool("db-enabled")
+	require.NoError(t, err)
+	assert.True(t, dbEnabled, "db-enabled should default to true")
+}
+
+func TestServeCmd_AllowsEmptyDatabaseURLWhenDBDisabled(t *testing.T) {
+	// No t.Parallel(): t.Setenv is incompatible with parallel tests. Clear
+	// DATABASE_URL so it can't be bound into --database-url from the shell.
+	t.Setenv("DATABASE_URL", "")
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	// With the DB disabled, an empty DATABASE_URL must NOT fail boot.
+	cmd.SetArgs([]string{"--db-enabled=false"})
+
+	require.NoError(t, cmd.Execute())
+}
+
 func TestServeCmd_RejectsMaxLedgerKeyAddressesAboveUpstreamCeiling(t *testing.T) {
 	t.Parallel()
 

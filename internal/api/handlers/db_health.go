@@ -37,6 +37,16 @@ func NewDBHealthHandler(db DBPinger) *DBHealthHandler {
 func (h *DBHealthHandler) CheckDBHealth(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 
+	// A nil pinger means the database is disabled (DB_ENABLED=false / no pool
+	// opened). Report that distinctly rather than pinging a nil pool.
+	if h.db == nil {
+		resp := types.GetHealthResponse{Status: types.StatusDisabled}
+		if err := response.JSON(w, http.StatusOK, resp); err != nil {
+			return httperror.InternalServerError("error writing DB health check response", err)
+		}
+		return nil
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), dbHealthPingTimeout)
 	defer cancel()
 
