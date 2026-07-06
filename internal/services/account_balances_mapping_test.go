@@ -22,33 +22,34 @@ func TestMapBalance_AllVariants(t *testing.T) {
 		want types.Balance
 	}{
 		{
-			// available = balance - minimumBalance = 100 - 1.5 = 98.5
-			// (minimumBalance already folds in selling liabilities).
+			// available = balance - minimum_balance - selling_liabilities = 100 - 1.3 - 0.2 = 98.5.
+			// minimum_balance is the pure reserve; selling liabilities are a separate subtrahend, so
+			// this case proves both are netted (subtracting only one would give 98.7 or 99.8).
 			"native", &wbtypes.NativeBalance{
 				BalanceValue: "100.0000000", TokenID: "native", TokenType: wbtypes.TokenTypeNative,
-				MinimumBalance: "1.5000000", BuyingLiabilities: "0.5000000", SellingLiabilities: "0.2000000",
+				MinimumBalance: "1.3000000", BuyingLiabilities: "0.5000000", SellingLiabilities: "0.2000000",
 				LastModifiedLedger: 100, NumSubentries: 3,
 			},
 			&types.NativeBalance{
 				BalanceBase:        types.BalanceBase{Balance: "100.0000000", Available: "98.5000000", TokenID: "native", TokenType: "NATIVE"},
-				MinimumBalance:     "1.5000000",
+				MinimumBalance:     "1.3000000",
 				BuyingLiabilities:  "0.5000000",
 				SellingLiabilities: "0.2000000",
 				LastModifiedLedger: 100,
 			},
 		},
 		{
-			// Underfunded native: balance < minimumBalance clamps available to 0.
+			// Underfunded native: balance < minimum_balance + selling_liabilities clamps available to 0.
 			"native_underfunded", &wbtypes.NativeBalance{
 				BalanceValue: "1.0000000", TokenID: "native", TokenType: wbtypes.TokenTypeNative,
-				MinimumBalance: "5.0000000", BuyingLiabilities: "0.0000000", SellingLiabilities: "0.0000000",
+				MinimumBalance: "0.8000000", BuyingLiabilities: "0.0000000", SellingLiabilities: "0.5000000",
 				LastModifiedLedger: 42, NumSubentries: 0,
 			},
 			&types.NativeBalance{
 				BalanceBase:        types.BalanceBase{Balance: "1.0000000", Available: "0.0000000", TokenID: "native", TokenType: "NATIVE"},
-				MinimumBalance:     "5.0000000",
+				MinimumBalance:     "0.8000000",
 				BuyingLiabilities:  "0.0000000",
-				SellingLiabilities: "0.0000000",
+				SellingLiabilities: "0.5000000",
 				LastModifiedLedger: 42,
 			},
 		},

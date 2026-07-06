@@ -24,9 +24,9 @@ func mapBalance(b wbtypes.Balance) types.Balance {
 	}
 	switch bal := b.(type) {
 	case *wbtypes.NativeBalance:
-		// MinimumBalance already includes selling liabilities, so it is the only
-		// amount subtracted here.
-		base.Available = spendable(bal.BalanceValue, bal.MinimumBalance)
+		// MinimumBalance is the pure base reserve; selling liabilities also lock XLM,
+		// so both are subtracted (mirrors stellar-core getAvailableBalance).
+		base.Available = spendable(bal.BalanceValue, bal.MinimumBalance, bal.SellingLiabilities)
 		return &types.NativeBalance{
 			BalanceBase:        base,
 			MinimumBalance:     bal.MinimumBalance,
@@ -88,14 +88,22 @@ func mapBalance(b wbtypes.Balance) types.Balance {
 	}
 }
 
-// spendable returns balance minus reserved, clamped at zero, as a Stellar amount
-// string. balance and reserved are pre-formatted Stellar amount strings (7
-// decimal places); if either fails to parse it falls back to the raw balance.
-func spendable(balance, reserved string) string {
-	bal, balErr := amount.ParseInt64(balance)
-	res, resErr := amount.ParseInt64(reserved)
-	if balErr != nil || resErr != nil {
+// spendable returns balance minus the sum of the reserved amounts, clamped at
+// zero, as a Stellar amount string. All inputs are pre-formatted Stellar amount
+// strings (7 decimal places); if any fails to parse it falls back to the raw
+// balance.
+func spendable(balance string, reserved ...string) string {
+	bal, err := amount.ParseInt64(balance)
+	if err != nil {
 		return balance
+	}
+	var res int64
+	for _, r := range reserved {
+		v, err := amount.ParseInt64(r)
+		if err != nil {
+			return balance
+		}
+		res += v
 	}
 	if avail := bal - res; avail > 0 {
 		return amount.StringFromInt64(avail)

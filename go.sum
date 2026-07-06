@@ -198,8 +198,8 @@ github.com/stellar/go-stellar-sdk v0.5.0 h1:xpOO+ZTyvGz54wTm7pwl2Gf1e6lZl0ExrJ/t
 github.com/stellar/go-stellar-sdk v0.5.0/go.mod h1:tLKAQPxa2I5UvGMabBbUXcY3fmgYnfDudrMeK7CDX4w=
 github.com/stellar/go-xdr v0.0.0-20260312225820-cc2b0611aabf h1:GY1RVbX3Hg7poPXEf6yojjP0hyypvgUgZmCqQU9D0xg=
 github.com/stellar/go-xdr v0.0.0-20260312225820-cc2b0611aabf/go.mod h1:If+U9Z1W5xU97VrOgJandQT+2dN7/iOpkCrxBJEyF80=
-github.com/stellar/wallet-backend v0.0.0-20260702191255-7b9e3d83547a h1:J3mnV81NeeeRpNlz+Y9LqDuuJC7g7v3O2Uh/1+L5q8o=
-github.com/stellar/wallet-backend v0.0.0-20260702191255-7b9e3d83547a/go.mod h1:BTE9yIWReB6J2jwSNCYmDSSVzgkkRtcEwmKaPdF+E7E=
+github.com/stellar/wallet-backend v0.0.0-20260706154018-f95a87f4975f h1:Hj5fwz9qvj60lcIyGLea3ceM+hErGeAD6oXlBCjJ8fs=
+github.com/stellar/wallet-backend v0.0.0-20260706154018-f95a87f4975f/go.mod h1:BTE9yIWReB6J2jwSNCYmDSSVzgkkRtcEwmKaPdF+E7E=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.5.2 h1:xuMeJ0Sdp5ZMRXx/aWO6RZxdr3beISkG5/G/aIRr3pY=
 github.com/stretchr/objx v0.5.2/go.mod h1:FRsXN1f5AsAjCGJKqEizvkpNtU+EGNCLh3NxZ/8L+MA=
