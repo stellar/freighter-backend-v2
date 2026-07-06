@@ -70,6 +70,10 @@ type RedisConfig struct {
 // DatabaseConfig holds the PostgreSQL connection string and pgx pool tunables.
 // URL is sourced from DATABASE_URL (via ExternalSecrets in deployed envs).
 type DatabaseConfig struct {
+	// Enabled gates the whole database subsystem. When false, serve skips
+	// URL/pool validation and never opens a pool — used to run the service
+	// without a database (e.g. envs where the DB isn't provisioned yet).
+	Enabled         bool
 	URL             string
 	MaxConns        int
 	MinConns        int

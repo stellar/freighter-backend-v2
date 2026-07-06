@@ -77,9 +77,15 @@ func (s *ApiServer) Start() error {
 	// The database is initialized separately from initServices because it eagerly
 	// connects (to fail fast), whereas the other clients are lazy. Keeping it out
 	// of initServices keeps that function unit-testable without real infrastructure.
-	if err = s.initDatabase(); err != nil {
-		logger.Error("Failed to initialize database", "error", err)
-		return err
+	// Skipped entirely when the DB is disabled: no pool is opened and dbPool stays
+	// nil, so DB-backed features (and db-health) report unavailable.
+	if s.cfg.DatabaseConfig.Enabled {
+		if err = s.initDatabase(); err != nil {
+			logger.Error("Failed to initialize database", "error", err)
+			return err
+		}
+	} else {
+		logger.Warn("Database is disabled (--db-enabled=false); running without a database")
 	}
 	defer s.closeServices()
 
@@ -181,8 +187,14 @@ func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 	mux.HandleFunc("GET /api/v1/rpc-health", handlers.CustomHandler(rpcHealthHandler.CheckRPCHealth))
 
 	// Initialize DB health check handler (reports connectivity in the body; never
-	// fails the request, so it can't restart or depool a pod over a DB outage)
-	dbHealthHandler := handlers.NewDBHealthHandler(s.dbPool)
+	// fails the request, so it can't restart or depool a pod over a DB outage).
+	// Pass a true nil interface when disabled — a nil *pgxpool.Pool boxed in the
+	// interface is not == nil, which would defeat the handler's disabled check.
+	var dbPinger handlers.DBPinger
+	if s.dbPool != nil {
+		dbPinger = s.dbPool
+	}
+	dbHealthHandler := handlers.NewDBHealthHandler(dbPinger)
 	mux.HandleFunc("GET /api/v1/db-health", handlers.CustomHandler(dbHealthHandler.CheckDBHealth))
 
 	protocolsHandler := handlers.NewProtocolsHandler(s.cfg.AppConfig.ProtocolsConfigPath)

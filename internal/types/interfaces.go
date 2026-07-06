@@ -12,6 +12,10 @@ const (
 	StatusHealthy   = "healthy"
 	StatusUnhealthy = "unhealthy"
 	StatusError     = "error"
+	// StatusDisabled is reported by db-health when the database is turned off
+	// (DB_ENABLED=false / no pool opened), so probes can tell "off on purpose"
+	// apart from "configured but unreachable" (StatusUnhealthy).
+	StatusDisabled = "disabled"
 )
 
 const (

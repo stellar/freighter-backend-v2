@@ -32,6 +32,23 @@ func (f *fakeDBPinger) Ping(ctx context.Context) error {
 func TestDBHealthHandler_CheckDBHealth(t *testing.T) {
 	t.Parallel()
 
+	t.Run("returns 200 and disabled when DB is not configured", func(t *testing.T) {
+		t.Parallel()
+		// nil pinger => the DB is disabled (DB_ENABLED=false / no pool opened).
+		handler := NewDBHealthHandler(nil)
+
+		req, _ := http.NewRequest("GET", "/api/v1/db-health", nil)
+		rr := httptest.NewRecorder()
+
+		err := handler.CheckDBHealth(rr, req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, rr.Code)
+
+		var resp types.GetHealthResponse
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+		assert.Equal(t, types.StatusDisabled, resp.Status)
+	})
+
 	t.Run("returns 200 and healthy when DB is reachable", func(t *testing.T) {
 		t.Parallel()
 		handler := NewDBHealthHandler(&fakeDBPinger{err: nil})
