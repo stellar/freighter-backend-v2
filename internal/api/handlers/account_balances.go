@@ -86,7 +86,7 @@ func (h *AccountBalancesHandler) GetAccountBalances(w http.ResponseWriter, r *ht
 	if err != nil {
 		// address is intentionally empty: this is a multi-address fan-out
 		// endpoint, and individual ErrAccountNotFound outcomes are already
-		// surfaced as per-address Error strings inside a 200 body. The top-level
+		// surfaced as is_funded:false inside a 200 body. The top-level
 		// err here is only ever a systemic failure (graphql_error, http_error,
 		// connection, timeout, internal).
 		return translateServiceError(r.Context(), err, "account balances", "", network)
