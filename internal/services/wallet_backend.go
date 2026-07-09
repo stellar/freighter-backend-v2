@@ -152,11 +152,13 @@ func (w *walletBackendService) configureNetworkClient(network string) *wbclient.
 //
 //   - Duplicate input addresses collapse to a single result while preserving
 //     first-seen order.
-//   - The single address-scoped outcome is the typed
-//     wbclient.ErrAccountNotFound sentinel (accountByAddress:null upstream):
-//     it sets is_funded=false (with an empty balances slice) on that account's
-//     result while other accounts in the same request still return their
-//     balances.
+//   - is_funded is derived from the presence of a native balance, so an account
+//     is reported unfunded (is_funded=false with an empty balances slice) via two
+//     address-scoped paths, while other accounts in the same request still return
+//     their balances: the typed wbclient.ErrAccountNotFound sentinel
+//     (accountByAddress:null upstream — the account isn't indexed), and a
+//     successful fetch whose balances contain no native entry (a merged or
+//     contract-token-only account with no classic account).
 //   - Every other failure is systemic and returned as a top-level error so
 //     the handler emits a 5xx and monitoring sees the outage rather than a
 //     200 that hides it. This includes GraphQL errors[]
@@ -222,22 +224,18 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 				// accounts (history but no classic account) and holders of only Soroban
 				// tokens. So derive IsFunded from the native balance rather than from the
 				// fetch succeeding, hoisting SubentryCount from the same entry.
+				mapped := make([]types.Balance, 0, len(balances))
 				for _, b := range balances {
-					// There is at most one native balance per account; stop once found.
 					if nb, ok := b.(*wbtypes.NativeBalance); ok {
 						ab.IsFunded = true
 						ab.SubentryCount = nb.NumSubentries
-						break
 					}
+					mapped = append(mapped, mapBalance(b))
 				}
 				// Only surface balances for a funded account: an account with no classic
 				// account is reported as unfunded with an empty balance set, so any
 				// residual Soroban token balances it holds are not exposed here.
 				if ab.IsFunded {
-					mapped := make([]types.Balance, 0, len(balances))
-					for _, b := range balances {
-						mapped = append(mapped, mapBalance(b))
-					}
 					ab.Balances = mapped
 				}
 			}

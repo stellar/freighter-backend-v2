@@ -13,14 +13,17 @@ import (
 // AccountBalances values, one per unique input address (duplicates are collapsed
 // while preserving first-seen order).
 //
-// Wire format: address is the canonical Stellar account ID, is_funded reports
-// whether the account exists on-ledger (false when the account isn't found),
-// subentry_count is hoisted from the native balance, and balances is always a
-// non-nil slice (an account with no balances marshals to "balances": []).
+// Wire format: address is the canonical Stellar account ID; is_funded reports
+// whether the classic account exists — true iff the account has a native balance;
+// subentry_count is hoisted from that native balance; and balances is always a
+// non-nil slice (an unfunded account, or one with no balances, marshals to
+// "balances": []).
 //
-// The one address-scoped outcome — the account not existing (the typed
-// wbclient.ErrAccountNotFound sentinel, accountByAddress:null upstream) — is
-// conveyed by is_funded=false, not a per-account error. Every other failure
+// An account is reported unfunded (is_funded=false, empty balances) via two
+// address-scoped paths, neither a per-account error: the account isn't indexed
+// (the typed wbclient.ErrAccountNotFound sentinel, accountByAddress:null
+// upstream), or a successful fetch returns no native balance (a merged or
+// contract-token-only account with no classic account). Every other failure
 // (GraphQL errors[] from the server, HTTP 4xx/5xx, transport, signing,
 // request-level cancellation) surfaces as a top-level error from the service,
 // so monitoring sees real outages instead of a 200 that hides them.
