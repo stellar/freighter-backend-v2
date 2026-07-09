@@ -610,6 +610,54 @@ func TestGetBalancesByAccountAddresses_EnvelopeEnrichment(t *testing.T) {
 		assert.Equal(t, "97.5000000", native.Available)
 	})
 
+	t.Run("funded_account_surfaces_native_and_non_native_balances", func(t *testing.T) {
+		// A funded account must surface ALL its balances, not just the native entry
+		// that drives is_funded. A native + SEP-41 fixture guards against the funded
+		// path accidentally being narrowed to native-only.
+		nativeAndSep41 := `{
+			"data": {"accountByAddress": {"balances": {
+				"edges": [
+					{"node": {
+						"__typename": "NativeBalance",
+						"balance": "100.0000000", "tokenId": "native", "tokenType": "NATIVE",
+						"minimumBalance": "1.0000000", "buyingLiabilities": "0.0000000", "sellingLiabilities": "0.0000000",
+						"lastModifiedLedger": 100, "numSubentries": 3
+					}},
+					{"node": {
+						"__typename": "SEP41Balance",
+						"balance": "5000000000", "tokenId": "CDMLFMKMMD7MWZP3FKUBZPVHTUEDLSX4BYGYKH4GCESXYHS3IHQ4EIG4",
+						"tokenType": "SEP41", "name": "SEP41 Token", "symbol": "SEP41",
+						"decimals": 7, "lastModifiedLedger": 12345
+					}}
+				],
+				"pageInfo": {"hasNextPage": false, "endCursor": null}
+			}}}
+		}`
+		f := newFanoutFakeServer(t, func(_ string, _ *string) (int, string) {
+			return http.StatusOK, nativeAndSep41
+		})
+		svc := newFanoutTestService(f.server.URL, 10)
+
+		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA}, types.PUBLIC)
+		require.NoError(t, err)
+		results := raw.([]*types.AccountBalances)
+		require.Len(t, results, 1)
+		assert.True(t, results[0].IsFunded)
+		assert.EqualValues(t, 3, results[0].SubentryCount)
+		require.Len(t, results[0].Balances, 2, "funded account must surface all balances, not just native")
+		var sawNative, sawSEP41 bool
+		for _, b := range results[0].Balances {
+			switch b.(type) {
+			case *types.NativeBalance:
+				sawNative = true
+			case *types.SEP41Balance:
+				sawSEP41 = true
+			}
+		}
+		assert.True(t, sawNative, "native balance must be surfaced")
+		assert.True(t, sawSEP41, "non-native (SEP-41) balance must be surfaced for a funded account")
+	})
+
 	t.Run("account_not_found_sets_is_funded_false", func(t *testing.T) {
 		// ErrAccountNotFound is address-scoped: is_funded=false,
 		// subentry_count=0, and an empty balances slice (no per-account error —
@@ -626,6 +674,36 @@ func TestGetBalancesByAccountAddresses_EnvelopeEnrichment(t *testing.T) {
 		assert.False(t, results[0].IsFunded)
 		assert.EqualValues(t, 0, results[0].SubentryCount)
 		assert.Empty(t, results[0].Balances)
+	})
+
+	t.Run("unfunded_account_with_only_contract_balance_hides_balances", func(t *testing.T) {
+		// A successful fetch returning only a SEP-41 (Soroban) balance and no native
+		// balance means the account has no classic account: is_funded=false,
+		// subentry_count=0, and no balances surfaced (an unfunded account exposes no
+		// balances). "Fetch succeeded" must not be mistaken for "funded".
+		sep41Only := `{
+			"data": {"accountByAddress": {"balances": {
+				"edges": [{"node": {
+					"__typename": "SEP41Balance",
+					"balance": "5000000000", "tokenId": "CDMLFMKMMD7MWZP3FKUBZPVHTUEDLSX4BYGYKH4GCESXYHS3IHQ4EIG4",
+					"tokenType": "SEP41", "name": "SEP41 Token", "symbol": "SEP41",
+					"decimals": 7, "lastModifiedLedger": 12345
+				}}],
+				"pageInfo": {"hasNextPage": false, "endCursor": null}
+			}}}
+		}`
+		f := newFanoutFakeServer(t, func(_ string, _ *string) (int, string) {
+			return http.StatusOK, sep41Only
+		})
+		svc := newFanoutTestService(f.server.URL, 10)
+
+		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA}, types.PUBLIC)
+		require.NoError(t, err)
+		results := raw.([]*types.AccountBalances)
+		require.Len(t, results, 1)
+		assert.False(t, results[0].IsFunded, "no native balance -> unfunded even though the fetch succeeded")
+		assert.EqualValues(t, 0, results[0].SubentryCount)
+		assert.Empty(t, results[0].Balances, "unfunded account exposes no balances")
 	})
 }
 
