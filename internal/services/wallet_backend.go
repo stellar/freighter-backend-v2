@@ -191,7 +191,8 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 			// even if a future SDK regression returned nil for an account with zero
 			// balances. GetAllAccountBalances currently returns a non-nil empty
 			// slice; keeping the guard is cheap insurance. IsFunded defaults to
-			// false and is set true only on a successful fetch (below).
+			// false and is set true only when the fetched balances include a
+			// native balance (below).
 			ab := &types.AccountBalances{
 				Address:  addr,
 				Balances: []types.Balance{},
@@ -215,22 +216,30 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 				// breadcrumb, matching the metrics layer's non-error treatment.
 				logger.InfoWithContext(gctx, "account not found", "address", addr)
 			} else {
-				// A successful fetch means the account exists on-chain, so it is
-				// funded. Not-found leaves IsFunded false; systemic errors return
-				// above and never yield a result — so funded is derived from a real
-				// success, not from the absence of an error, and stays correct even
-				// if the error handling above changes.
-				ab.IsFunded = true
-				mapped := make([]types.Balance, 0, len(balances))
+				// "Funded" means the classic account exists, which on-chain is exactly
+				// the presence of a native balance. A successful fetch only proves
+				// wallet-backend has data for the address — which also holds for merged
+				// accounts (history but no classic account) and holders of only Soroban
+				// tokens. So derive IsFunded from the native balance rather than from the
+				// fetch succeeding, hoisting SubentryCount from the same entry.
 				for _, b := range balances {
-					// SubentryCount is hoisted from the single native balance;
-					// it stays 0 for accounts without one (e.g. unfunded views).
+					// There is at most one native balance per account; stop once found.
 					if nb, ok := b.(*wbtypes.NativeBalance); ok {
+						ab.IsFunded = true
 						ab.SubentryCount = nb.NumSubentries
+						break
 					}
-					mapped = append(mapped, mapBalance(b))
 				}
-				ab.Balances = mapped
+				// Only surface balances for a funded account: an account with no classic
+				// account is reported as unfunded with an empty balance set, so any
+				// residual Soroban token balances it holds are not exposed here.
+				if ab.IsFunded {
+					mapped := make([]types.Balance, 0, len(balances))
+					for _, b := range balances {
+						mapped = append(mapped, mapBalance(b))
+					}
+					ab.Balances = mapped
+				}
 			}
 			results[i] = ab
 			return nil

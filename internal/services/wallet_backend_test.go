@@ -627,6 +627,36 @@ func TestGetBalancesByAccountAddresses_EnvelopeEnrichment(t *testing.T) {
 		assert.EqualValues(t, 0, results[0].SubentryCount)
 		assert.Empty(t, results[0].Balances)
 	})
+
+	t.Run("unfunded_account_with_only_contract_balance_hides_balances", func(t *testing.T) {
+		// A successful fetch returning only a SEP-41 (Soroban) balance and no native
+		// balance means the account has no classic account: is_funded=false,
+		// subentry_count=0, and no balances surfaced (an unfunded account exposes no
+		// balances). "Fetch succeeded" must not be mistaken for "funded".
+		sep41Only := `{
+			"data": {"accountByAddress": {"balances": {
+				"edges": [{"node": {
+					"__typename": "SEP41Balance",
+					"balance": "5000000000", "tokenId": "CDMLFMKMMD7MWZP3FKUBZPVHTUEDLSX4BYGYKH4GCESXYHS3IHQ4EIG4",
+					"tokenType": "SEP41", "name": "SEP41 Token", "symbol": "SEP41",
+					"decimals": 7, "lastModifiedLedger": 12345
+				}}],
+				"pageInfo": {"hasNextPage": false, "endCursor": null}
+			}}}
+		}`
+		f := newFanoutFakeServer(t, func(_ string, _ *string) (int, string) {
+			return http.StatusOK, sep41Only
+		})
+		svc := newFanoutTestService(f.server.URL, 10)
+
+		raw, err := svc.GetBalancesByAccountAddresses(context.Background(), []string{addrA}, types.PUBLIC)
+		require.NoError(t, err)
+		results := raw.([]*types.AccountBalances)
+		require.Len(t, results, 1)
+		assert.False(t, results[0].IsFunded, "no native balance -> unfunded even though the fetch succeeded")
+		assert.EqualValues(t, 0, results[0].SubentryCount)
+		assert.Empty(t, results[0].Balances, "unfunded account exposes no balances")
+	})
 }
 
 // txResponder builds a fake response for the GetAccountTransactions GraphQL query.
