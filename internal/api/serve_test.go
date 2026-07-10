@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	jwtgo "github.com/golang-jwt/jwt/v5"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -17,7 +18,6 @@ import (
 	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	jwtgo "github.com/golang-jwt/jwt/v5"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/auth"
