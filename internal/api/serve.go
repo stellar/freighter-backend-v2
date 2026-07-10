@@ -178,18 +178,19 @@ func (s *ApiServer) closeServices() {
 func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 	mux := http.NewServeMux()
 
-	// Initialize health check handler (dependency-free liveness signal)
+	// Health/liveness/readiness probes: registered BARE — never wrapped by Auth.
+	// K8s and the docker-compose wget healthcheck cannot present per-request JWTs,
+	// and db-health is designed never to fail the request; gating any of these
+	// would 401 probes under `--auth-mode strict` and cause pod churn.
 	healthHandler := handlers.NewHealthHandler()
 	mux.HandleFunc("GET /api/v1/ping", handlers.CustomHandler(healthHandler.CheckHealth))
 
-	// Initialize RPC health check handler
 	rpcHealthHandler := handlers.NewRPCHealthHandler(s.rpcService)
 	mux.HandleFunc("GET /api/v1/rpc-health", handlers.CustomHandler(rpcHealthHandler.CheckRPCHealth))
 
-	// Initialize DB health check handler (reports connectivity in the body; never
-	// fails the request, so it can't restart or depool a pod over a DB outage).
-	// Pass a true nil interface when disabled — a nil *pgxpool.Pool boxed in the
-	// interface is not == nil, which would defeat the handler's disabled check.
+	// Pass a true nil interface when the DB is disabled — a nil *pgxpool.Pool
+	// boxed in the interface is not == nil, which would defeat the handler's
+	// disabled check.
 	var dbPinger handlers.DBPinger
 	if s.dbPool != nil {
 		dbPinger = s.dbPool
@@ -197,23 +198,30 @@ func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 	dbHealthHandler := handlers.NewDBHealthHandler(dbPinger)
 	mux.HandleFunc("GET /api/v1/db-health", handlers.CustomHandler(dbHealthHandler.CheckDBHealth))
 
+	// Every user-facing route runs the auth middleware. `authed` binds one Auth
+	// instance to s.authMode (resolved once in Start); flipping --auth-mode
+	// permissive<->strict moves all of these together. A future user-scoped route
+	// can opt into auth.Required independently by wrapping with its own Auth value.
+	verifier := auth.NewVerifier()
+	authed := middleware.Auth(verifier, s.authMode, s.appMetrics.Auth)
+
 	protocolsHandler := handlers.NewProtocolsHandler(s.cfg.AppConfig.ProtocolsConfigPath)
-	mux.HandleFunc("GET /api/v1/protocols", handlers.CustomHandler(protocolsHandler.GetProtocols))
+	mux.Handle("GET /api/v1/protocols", authed(handlers.CustomHandler(protocolsHandler.GetProtocols)))
 
 	collectiblesHandler := handlers.NewCollectiblesHandler(s.rpcService, s.cfg.AppConfig.MeridianPayTreasureHuntAddress, s.cfg.AppConfig.MeridianPayTreasurePoapAddress, s.cfg.AppConfig.MeridianPayStellarHouseAddress, s.cfg.RpcConfig.MaxConcurrentRPCCalls)
-	mux.HandleFunc("POST /api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles))
+	mux.Handle("POST /api/v1/collectibles", authed(handlers.CustomHandler(collectiblesHandler.GetCollectibles)))
 
 	ledgerKeyAccountsHandler := handlers.NewLedgerKeyAccountHandler(s.rpcService, s.cfg.AppConfig.MaxLedgerKeyAddresses)
-	mux.HandleFunc("POST /api/v1/ledger-key/accounts", handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts))
+	mux.Handle("POST /api/v1/ledger-key/accounts", authed(handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts)))
 
 	featureFlagsHandler := handlers.NewFeatureFlagsHandler()
-	mux.HandleFunc("GET /api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags))
+	mux.Handle("GET /api/v1/feature-flags", authed(handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags)))
 
 	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
-	mux.HandleFunc("POST /api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances))
+	mux.Handle("POST /api/v1/accounts/balances", authed(handlers.CustomHandler(accountBalancesHandler.GetAccountBalances)))
 
 	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest)
-	mux.HandleFunc("POST /api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices))
+	mux.Handle("POST /api/v1/token-prices", authed(handlers.CustomHandler(tokenPricesHandler.GetPrices)))
 
 	accountHistoryHandler, err := handlers.NewAccountHistoryHandler(
 		s.walletBackendService,
@@ -223,15 +231,12 @@ func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init account-history handler: %w", err)
 	}
-	mux.HandleFunc("GET /api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions))
+	mux.Handle("GET /api/v1/accounts/{address}/transactions", authed(handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions)))
 
-	// Auth: a guarded endpoint that echoes the authenticated user ID. It exercises
-	// the JWT middleware end-to-end and gives client teams a surface to validate
-	// their JWT construction. s.authMode is resolved once in Start().
-	verifier := auth.NewVerifier()
+	// whoami is a normal user-facing route now; it reads the user ID from context
+	// and reports authenticated:false when absent (permissive anonymous).
 	whoamiHandler := handlers.NewWhoamiHandler()
-	mux.Handle("GET /api/v1/auth/whoami",
-		middleware.Auth(verifier, s.authMode, s.appMetrics.Auth)(handlers.CustomHandler(whoamiHandler.Whoami)))
+	mux.Handle("GET /api/v1/auth/whoami", authed(handlers.CustomHandler(whoamiHandler.Whoami)))
 
 	return mux, nil
 }

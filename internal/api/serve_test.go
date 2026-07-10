@@ -210,6 +210,41 @@ func TestApiServer_initHandlers_ReturnsErrorOnInvalidConfig(t *testing.T) {
 	assert.Contains(t, err.Error(), "init account-history handler")
 }
 
+func TestApiServer_initHandlers_UserFacingRoutesRespectAuthMode(t *testing.T) {
+	cfgWith := func(authMode string) *config.Config {
+		return &config.Config{AppConfig: config.AppConfig{
+			ProtocolsConfigPath:        "testdata/protocols.json",
+			AccountHistoryDefaultLimit: 20,
+			AccountHistoryMaxLimit:     100,
+			AuthMode:                   authMode,
+		}}
+	}
+
+	// feature-flags is a dependency-free user-facing GET that returns 200 with no
+	// file or service, so it isolates auth behavior from handler dependencies.
+
+	// Permissive: an anonymous request to a user-facing route passes through.
+	mux, err := newTestAPIServer(t, cfgWith("permissive")).initHandlers()
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/feature-flags", nil))
+	assert.Equal(t, http.StatusOK, rec.Code, "permissive: anonymous must pass")
+
+	// Permissive: a present-but-invalid bearer token is rejected on that route.
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feature-flags", nil)
+	req.Header.Set("Authorization", "Bearer not-a-real-token")
+	mux.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code, "permissive: invalid token must 401")
+
+	// Strict: an anonymous request to a previously-open route is rejected.
+	mux, err = newTestAPIServer(t, cfgWith("strict")).initHandlers()
+	require.NoError(t, err)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/feature-flags", nil))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code, "strict: anonymous must 401")
+}
+
 func mustParseURL(path string) *url.URL {
 	u, err := url.Parse(path)
 	if err != nil {
