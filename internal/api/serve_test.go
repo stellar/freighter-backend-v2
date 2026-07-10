@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/stellar/go-stellar-sdk/txnbuild"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -15,6 +18,7 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/auth"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
+	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
 // newTestAPIServer builds a fully-initialized ApiServer for handler-level tests
@@ -251,4 +255,48 @@ func mustParseURL(path string) *url.URL {
 		panic(err)
 	}
 	return u
+}
+
+// stubRPCService is a no-network RPCService double so /rpc-health can be invoked
+// in tests without a live RPC endpoint. Only GetHealth is used by CheckRPCHealth.
+type stubRPCService struct{}
+
+func (stubRPCService) Name() string { return "stub-rpc" }
+
+func (stubRPCService) GetHealth(ctx context.Context, network string) (types.GetHealthResponse, error) {
+	return types.GetHealthResponse{Status: types.StatusHealthy}, nil
+}
+
+func (stubRPCService) SimulateTx(ctx context.Context, tx *txnbuild.Transaction, network string) (types.SimulateTransactionResponse, error) {
+	return nil, nil
+}
+
+func (stubRPCService) SimulateInvocation(ctx context.Context, contractId xdr.ScAddress, sourceAccount *txnbuild.SimpleAccount, functionName xdr.ScSymbol, params []xdr.ScVal, timeout txnbuild.TimeBounds, network string) (types.SimulateTransactionResponse, error) {
+	return nil, nil
+}
+
+func (stubRPCService) GetLedgerEntries(ctx context.Context, keys []string, network string) ([]types.LedgerEntryMap, error) {
+	return nil, nil
+}
+
+func TestApiServer_initHandlers_HealthRoutesAnonymousInStrict(t *testing.T) {
+	cfg := &config.Config{AppConfig: config.AppConfig{
+		ProtocolsConfigPath:        "testdata/protocols.json",
+		AccountHistoryDefaultLimit: 20,
+		AccountHistoryMaxLimit:     100,
+		AuthMode:                   "strict",
+	}}
+	s := newTestAPIServer(t, cfg)
+	s.rpcService = stubRPCService{} // so /rpc-health can be invoked without a live RPC
+
+	mux, err := s.initHandlers()
+	require.NoError(t, err)
+
+	for _, path := range []string{"/api/v1/ping", "/api/v1/db-health", "/api/v1/rpc-health"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		assert.NotEqual(t, http.StatusUnauthorized, rec.Code,
+			"%s must stay anonymous (no 401) even in strict mode", path)
+		assert.Equal(t, http.StatusOK, rec.Code, "%s should return 200", path)
+	}
 }
