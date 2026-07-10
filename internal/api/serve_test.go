@@ -2,17 +2,22 @@ package api
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	jwtgo "github.com/golang-jwt/jwt/v5"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/auth"
@@ -299,4 +304,78 @@ func TestApiServer_initHandlers_HealthRoutesAnonymousInStrict(t *testing.T) {
 			"%s must stay anonymous (no 401) even in strict mode", path)
 		assert.Equal(t, http.StatusOK, rec.Code, "%s should return 200", path)
 	}
+}
+
+// mintAPIToken mints a valid Ed25519 JWT bound to a specific method and path.
+// It mirrors the proven token minter in internal/api/middleware/auth_test.go.
+func mintAPIToken(t *testing.T, priv ed25519.PrivateKey, sub, methodAndPath string) string {
+	t.Helper()
+	now := time.Now()
+	c := auth.Claims{
+		BodyHash:      auth.HashBody(nil), // GET requests have no body
+		MethodAndPath: methodAndPath,
+		RegisteredClaims: jwtgo.RegisteredClaims{
+			Subject:   sub,
+			Issuer:    "freighter-extension",
+			IssuedAt:  jwtgo.NewNumericDate(now),
+			ExpiresAt: jwtgo.NewNumericDate(now.Add(auth.MaxTokenLifetime)),
+		},
+	}
+	s, err := jwtgo.NewWithClaims(jwtgo.SigningMethodEdDSA, c).SignedString(priv)
+	require.NoError(t, err)
+	return s
+}
+
+func TestApiServer_initHandlers_ValidTokenPopulatesWhoami(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	sub := hex.EncodeToString(pub)
+
+	cfg := &config.Config{AppConfig: config.AppConfig{
+		ProtocolsConfigPath:        "testdata/protocols.json",
+		AccountHistoryDefaultLimit: 20,
+		AccountHistoryMaxLimit:     100,
+		AuthMode:                   "permissive",
+	}}
+	mux, err := newTestAPIServer(t, cfg).initHandlers()
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami", nil)
+	req.Header.Set("Authorization", "Bearer "+mintAPIToken(t, priv, sub, "GET /api/v1/auth/whoami"))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "\"authenticated\":true")
+	assert.Contains(t, rec.Body.String(), sub)
+}
+
+func TestApiServer_authenticatedRequestKeepsRouteMetricLabel(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	sub := hex.EncodeToString(pub)
+
+	cfg := &config.Config{AppConfig: config.AppConfig{
+		ProtocolsConfigPath:        "testdata/protocols.json",
+		AccountHistoryDefaultLimit: 20,
+		AccountHistoryMaxLimit:     100,
+		AuthMode:                   "permissive",
+	}}
+	s := newTestAPIServer(t, cfg)
+	mux, err := s.initHandlers()
+	require.NoError(t, err)
+	assembled := s.initMiddleware(mux) // full chain incl. Metrics, so r.Pattern is exercised
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feature-flags", nil)
+	req.Header.Set("Authorization", "Bearer "+mintAPIToken(t, priv, sub, "GET /api/v1/feature-flags"))
+	rec := httptest.NewRecorder()
+	assembled.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// The authenticated request must be metered under its real route pattern,
+	// not "unknown" (which is what a pre-routing context fork would have caused).
+	got := testutil.ToFloat64(s.appMetrics.HTTP.RequestsTotal.WithLabelValues("GET /api/v1/feature-flags", "GET", "200"))
+	assert.Equal(t, float64(1), got, "authed request should be counted under its route pattern")
+	unknown := testutil.ToFloat64(s.appMetrics.HTTP.RequestsTotal.WithLabelValues("unknown", "GET", "200"))
+	assert.Equal(t, float64(0), unknown, "authed request must not collapse to the unknown handler label")
 }
