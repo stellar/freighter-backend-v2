@@ -25,6 +25,12 @@ Every user-facing `/api/v1` route runs the auth middleware. Infra health probes 
 - **Verify-only:** clients sign, the server verifies. No signing/generator code, no key/secret
   config.
 
+Because identity is self-asserted, a valid JWT only proves possession of *some* Ed25519 keypair —
+anyone can mint one — so auth (even in `strict`) is **not** an anti-sybil or rate-limiting control.
+It raises the bar for casual/anonymous abuse but does not bound how many identities a caller can
+present; endpoints that need abuse protection (e.g. anything hitting a metered upstream) still
+require their own per-route limits or quotas on top of auth.
+
 ## Modes and rollout
 
 Shipped Freighter clients today send **no** JWT; newer client versions send a JWT on every request.
@@ -46,9 +52,12 @@ config change.
 
 ## Route coverage
 
-Auth is applied **per route**: one `middleware.Auth(verifier, s.authMode, metrics)` value is bound
-to the configured mode and wraps each user-facing route at its registration site in
-`internal/api/serve.go`.
+Auth is applied **per route**, driven by a single route table (`routes()` in
+`internal/api/serve.go`). Each entry declares a `gated` flag; `initHandlers` iterates the table and
+wraps every `gated` route with one shared `middleware.Auth(verifier, s.authMode, metrics)` value
+bound to the configured mode. The table is the single source of truth for gating — the strict-mode
+guard test enumerates the same `routes()`, so a newly-added route is auto-covered and a route added
+`gated: false` is a visible, reviewable decision rather than a silent fail-open.
 
 - **Gated (user-facing):** `/api/v1/protocols`, `/api/v1/collectibles`,
   `/api/v1/ledger-key/accounts`, `/api/v1/feature-flags`, `/api/v1/accounts/balances`,
@@ -62,8 +71,10 @@ Because auth wraps the handler *inside* the mux, it runs **after** routing — s
 `Logging`/`Metrics` middleware (which are outer, wrapping the whole mux) capture auth 401s, and the
 HTTP metrics `handler` label (from `r.Pattern`) stays correct for authenticated requests.
 
-A future user-scoped route can opt into `auth.Required` independently of the global mode by wrapping
-with its own `Auth` value — e.g. `middleware.Auth(verifier, auth.Required, m)(contactsHandler)`.
+A future user-scoped route that needs a policy *different* from the global mode (e.g. always
+`auth.Required` regardless of `AUTH_MODE`) would wrap explicitly with its own `Auth` value —
+e.g. `middleware.Auth(verifier, auth.Required, m)(contactsHandler)` — rather than relying on the
+shared `authed` the table applies to every `gated` route.
 
 ## Architecture
 
@@ -80,7 +91,7 @@ internal/api/middleware/auth.go    Auth(verifier, mode, metrics) Middleware; 401
 internal/api/handlers/whoami.go    echoes the authenticated userID (auth smoke-test surface)
 internal/config/config.go          AuthMode field (permissive|strict), validated at load
 internal/metrics/metrics.go        auth counter (adoption/rejection signal)
-internal/api/serve.go              per-route Auth wrapping in initHandlers; health routes bare
+internal/api/serve.go              routes() table + per-route Auth wrapping in initHandlers; health routes gated=false (bare)
 ```
 
 **Boundaries:** `internal/auth` owns the *mechanism* (is this token cryptographically valid for its

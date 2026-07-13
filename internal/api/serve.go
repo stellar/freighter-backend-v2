@@ -175,19 +175,25 @@ func (s *ApiServer) closeServices() {
 	}
 }
 
-func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
-	mux := http.NewServeMux()
+// route describes a single registered API endpoint. It is the single source of
+// truth consumed by both initHandlers (which registers it) and the strict-mode
+// gating guard test (which enumerates it): gated routes are wrapped in the Auth
+// middleware, bare routes are not. Keeping method/pattern/gated together in one
+// table means a newly-added route cannot silently skip the auth guard — it must
+// declare `gated` here, and the test derives its coverage from the same table
+// rather than a hand-maintained parallel list that could drift.
+type route struct {
+	method  string
+	pattern string
+	handler http.Handler
+	gated   bool
+}
 
-	// Health/liveness/readiness probes: registered BARE — never wrapped by Auth.
-	// K8s and the docker-compose wget healthcheck cannot present per-request JWTs,
-	// and db-health is designed never to fail the request; gating any of these
-	// would 401 probes under `--auth-mode strict` and cause pod churn.
-	healthHandler := handlers.NewHealthHandler()
-	mux.HandleFunc("GET /api/v1/ping", handlers.CustomHandler(healthHandler.CheckHealth))
-
-	rpcHealthHandler := handlers.NewRPCHealthHandler(s.rpcService)
-	mux.HandleFunc("GET /api/v1/rpc-health", handlers.CustomHandler(rpcHealthHandler.CheckRPCHealth))
-
+// routes builds the full endpoint table. It constructs each handler with its
+// dependencies but performs no middleware wrapping or mux registration, so both
+// initHandlers and tests can enumerate the routes (and their gated flags) without
+// standing up the auth middleware.
+func (s *ApiServer) routes() ([]route, error) {
 	// Pass a true nil interface when the DB is disabled — a nil *pgxpool.Pool
 	// boxed in the interface is not == nil, which would defeat the handler's
 	// disabled check.
@@ -195,34 +201,17 @@ func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 	if s.dbPool != nil {
 		dbPinger = s.dbPool
 	}
-	dbHealthHandler := handlers.NewDBHealthHandler(dbPinger)
-	mux.HandleFunc("GET /api/v1/db-health", handlers.CustomHandler(dbHealthHandler.CheckDBHealth))
 
-	// Every user-facing route runs the auth middleware. `authed` binds one Auth
-	// instance to s.authMode (resolved once in Start); flipping --auth-mode
-	// permissive<->strict moves all of these together. A future user-scoped route
-	// can opt into auth.Required independently by wrapping with its own Auth value.
-	verifier := auth.NewVerifier()
-	authed := middleware.Auth(verifier, s.authMode, s.appMetrics.Auth)
+	healthHandler := handlers.NewHealthHandler()
+	rpcHealthHandler := handlers.NewRPCHealthHandler(s.rpcService)
+	dbHealthHandler := handlers.NewDBHealthHandler(dbPinger)
 
 	protocolsHandler := handlers.NewProtocolsHandler(s.cfg.AppConfig.ProtocolsConfigPath)
-	mux.Handle("GET /api/v1/protocols", authed(handlers.CustomHandler(protocolsHandler.GetProtocols)))
-
 	collectiblesHandler := handlers.NewCollectiblesHandler(s.rpcService, s.cfg.AppConfig.MeridianPayTreasureHuntAddress, s.cfg.AppConfig.MeridianPayTreasurePoapAddress, s.cfg.AppConfig.MeridianPayStellarHouseAddress, s.cfg.RpcConfig.MaxConcurrentRPCCalls)
-	mux.Handle("POST /api/v1/collectibles", authed(handlers.CustomHandler(collectiblesHandler.GetCollectibles)))
-
 	ledgerKeyAccountsHandler := handlers.NewLedgerKeyAccountHandler(s.rpcService, s.cfg.AppConfig.MaxLedgerKeyAddresses)
-	mux.Handle("POST /api/v1/ledger-key/accounts", authed(handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts)))
-
 	featureFlagsHandler := handlers.NewFeatureFlagsHandler()
-	mux.Handle("GET /api/v1/feature-flags", authed(handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags)))
-
 	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
-	mux.Handle("POST /api/v1/accounts/balances", authed(handlers.CustomHandler(accountBalancesHandler.GetAccountBalances)))
-
 	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest)
-	mux.Handle("POST /api/v1/token-prices", authed(handlers.CustomHandler(tokenPricesHandler.GetPrices)))
-
 	accountHistoryHandler, err := handlers.NewAccountHistoryHandler(
 		s.walletBackendService,
 		s.cfg.AppConfig.AccountHistoryDefaultLimit,
@@ -231,12 +220,53 @@ func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init account-history handler: %w", err)
 	}
-	mux.Handle("GET /api/v1/accounts/{address}/transactions", authed(handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions)))
-
-	// whoami is a normal user-facing route now; it reads the user ID from context
-	// and reports authenticated:false when absent (permissive anonymous).
 	whoamiHandler := handlers.NewWhoamiHandler()
-	mux.Handle("GET /api/v1/auth/whoami", authed(handlers.CustomHandler(whoamiHandler.Whoami)))
+
+	return []route{
+		// Health/liveness/readiness probes: gated=false, registered BARE — never
+		// wrapped by Auth. K8s and the docker-compose wget healthcheck cannot present
+		// per-request JWTs, and db-health is designed never to fail the request;
+		// gating any of these would 401 probes under `--auth-mode strict` and cause
+		// pod churn.
+		{http.MethodGet, "/api/v1/ping", handlers.CustomHandler(healthHandler.CheckHealth), false},
+		{http.MethodGet, "/api/v1/rpc-health", handlers.CustomHandler(rpcHealthHandler.CheckRPCHealth), false},
+		{http.MethodGet, "/api/v1/db-health", handlers.CustomHandler(dbHealthHandler.CheckDBHealth), false},
+
+		// User-facing routes: gated=true, wrapped in the shared Auth middleware.
+		// Flipping --auth-mode permissive<->strict moves all of these together.
+		// whoami reads the user ID from context and reports authenticated:false when
+		// absent (permissive anonymous).
+		{http.MethodGet, "/api/v1/protocols", handlers.CustomHandler(protocolsHandler.GetProtocols), true},
+		{http.MethodPost, "/api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles), true},
+		{http.MethodPost, "/api/v1/ledger-key/accounts", handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts), true},
+		{http.MethodGet, "/api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags), true},
+		{http.MethodPost, "/api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances), true},
+		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true},
+		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true},
+		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true},
+	}, nil
+}
+
+func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
+	rts, err := s.routes()
+	if err != nil {
+		return nil, err
+	}
+
+	// One Auth instance, bound to s.authMode (resolved once in Start), wraps every
+	// gated route. A future user-scoped route opts into auth simply by adding itself
+	// to routes() with gated=true.
+	verifier := auth.NewVerifier()
+	authed := middleware.Auth(verifier, s.authMode, s.appMetrics.Auth)
+
+	mux := http.NewServeMux()
+	for _, rt := range rts {
+		h := rt.handler
+		if rt.gated {
+			h = authed(h)
+		}
+		mux.Handle(rt.method+" "+rt.pattern, h)
+	}
 
 	return mux, nil
 }

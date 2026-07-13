@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"testing"
 	"time"
 
-	jwtgo "github.com/golang-jwt/jwt/v5"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -21,10 +21,27 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/auth"
+	"github.com/stellar/freighter-backend-v2/internal/auth/authtest"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
+
+// testCfg returns the standard handler-test config, varying only the auth mode.
+// Most initHandlers tests differ from each other only in AuthMode, so they share
+// this literal rather than each rebuilding it inline.
+func testCfg(authMode string) *config.Config {
+	return &config.Config{AppConfig: config.AppConfig{
+		ProtocolsConfigPath:        "testdata/protocols.json",
+		AccountHistoryDefaultLimit: 20,
+		AccountHistoryMaxLimit:     100,
+		AuthMode:                   authMode,
+	}}
+}
+
+// wildcardSegment matches a ServeMux path wildcard like {address} so tests can
+// substitute a concrete segment when probing a route pattern.
+var wildcardSegment = regexp.MustCompile(`\{[^}]+\}`)
 
 // newTestAPIServer builds a fully-initialized ApiServer for handler-level tests
 // (registry, metrics, and resolved auth mode), mirroring what Start() sets up so
@@ -90,13 +107,7 @@ func TestApiServer_initServices_RejectsNonPositiveBalanceConcurrency(t *testing.
 }
 
 func TestApiServer_initHandlers(t *testing.T) {
-	cfg := &config.Config{AppConfig: config.AppConfig{
-		ProtocolsConfigPath:        "testdata/protocols.json",
-		AccountHistoryDefaultLimit: 20,
-		AccountHistoryMaxLimit:     100,
-		AuthMode:                   "permissive",
-	}}
-	s := newTestAPIServer(t, cfg)
+	s := newTestAPIServer(t, testCfg("permissive"))
 	mux, err := s.initHandlers()
 	require.NoError(t, err)
 	require.NotNil(t, mux)
@@ -108,13 +119,7 @@ func TestApiServer_initHandlers(t *testing.T) {
 }
 
 func TestApiServer_initHandlers_DoesNotServeMetrics(t *testing.T) {
-	cfg := &config.Config{AppConfig: config.AppConfig{
-		ProtocolsConfigPath:        "testdata/protocols.json",
-		AccountHistoryDefaultLimit: 20,
-		AccountHistoryMaxLimit:     100,
-		AuthMode:                   "permissive",
-	}}
-	s := newTestAPIServer(t, cfg)
+	s := newTestAPIServer(t, testCfg("permissive"))
 	mux, err := s.initHandlers()
 	require.NoError(t, err)
 
@@ -163,13 +168,7 @@ func TestApiServer_initMiddleware(t *testing.T) {
 }
 
 func TestApiServer_initHandlers_RegistersAccountHistoryRoutes(t *testing.T) {
-	cfg := &config.Config{AppConfig: config.AppConfig{
-		ProtocolsConfigPath:        "testdata/protocols.json",
-		AccountHistoryDefaultLimit: 20,
-		AccountHistoryMaxLimit:     100,
-		AuthMode:                   "permissive",
-	}}
-	s := newTestAPIServer(t, cfg)
+	s := newTestAPIServer(t, testCfg("permissive"))
 	mux, err := s.initHandlers()
 	require.NoError(t, err)
 	require.NotNil(t, mux)
@@ -181,17 +180,8 @@ func TestApiServer_initHandlers_RegistersAccountHistoryRoutes(t *testing.T) {
 }
 
 func TestApiServer_initHandlers_WhoamiRouteRespectsAuthMode(t *testing.T) {
-	cfgWith := func(authMode string) *config.Config {
-		return &config.Config{AppConfig: config.AppConfig{
-			ProtocolsConfigPath:        "testdata/protocols.json",
-			AccountHistoryDefaultLimit: 20,
-			AccountHistoryMaxLimit:     100,
-			AuthMode:                   authMode,
-		}}
-	}
-
 	// Permissive: an unauthenticated request passes through.
-	mux, err := newTestAPIServer(t, cfgWith("permissive")).initHandlers()
+	mux, err := newTestAPIServer(t, testCfg("permissive")).initHandlers()
 	require.NoError(t, err)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami", nil))
@@ -199,7 +189,7 @@ func TestApiServer_initHandlers_WhoamiRouteRespectsAuthMode(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "\"authenticated\":false")
 
 	// Strict: an unauthenticated request is rejected.
-	mux, err = newTestAPIServer(t, cfgWith("strict")).initHandlers()
+	mux, err = newTestAPIServer(t, testCfg("strict")).initHandlers()
 	require.NoError(t, err)
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami", nil))
@@ -220,20 +210,11 @@ func TestApiServer_initHandlers_ReturnsErrorOnInvalidConfig(t *testing.T) {
 }
 
 func TestApiServer_initHandlers_UserFacingRoutesRespectAuthMode(t *testing.T) {
-	cfgWith := func(authMode string) *config.Config {
-		return &config.Config{AppConfig: config.AppConfig{
-			ProtocolsConfigPath:        "testdata/protocols.json",
-			AccountHistoryDefaultLimit: 20,
-			AccountHistoryMaxLimit:     100,
-			AuthMode:                   authMode,
-		}}
-	}
-
 	// feature-flags is a dependency-free user-facing GET that returns 200 with no
 	// file or service, so it isolates auth behavior from handler dependencies.
 
 	// Permissive: an anonymous request to a user-facing route passes through.
-	mux, err := newTestAPIServer(t, cfgWith("permissive")).initHandlers()
+	mux, err := newTestAPIServer(t, testCfg("permissive")).initHandlers()
 	require.NoError(t, err)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/feature-flags", nil))
@@ -247,7 +228,7 @@ func TestApiServer_initHandlers_UserFacingRoutesRespectAuthMode(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code, "permissive: invalid token must 401")
 
 	// Strict: an anonymous request to a previously-open route is rejected.
-	mux, err = newTestAPIServer(t, cfgWith("strict")).initHandlers()
+	mux, err = newTestAPIServer(t, testCfg("strict")).initHandlers()
 	require.NoError(t, err)
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/feature-flags", nil))
@@ -285,13 +266,7 @@ func (stubRPCService) GetLedgerEntries(ctx context.Context, keys []string, netwo
 }
 
 func TestApiServer_initHandlers_HealthRoutesAnonymousInStrict(t *testing.T) {
-	cfg := &config.Config{AppConfig: config.AppConfig{
-		ProtocolsConfigPath:        "testdata/protocols.json",
-		AccountHistoryDefaultLimit: 20,
-		AccountHistoryMaxLimit:     100,
-		AuthMode:                   "strict",
-	}}
-	s := newTestAPIServer(t, cfg)
+	s := newTestAPIServer(t, testCfg("strict"))
 	s.rpcService = stubRPCService{} // so /rpc-health can be invoked without a live RPC
 
 	mux, err := s.initHandlers()
@@ -306,24 +281,11 @@ func TestApiServer_initHandlers_HealthRoutesAnonymousInStrict(t *testing.T) {
 	}
 }
 
-// mintAPIToken mints a valid Ed25519 JWT bound to a specific method and path.
-// It mirrors the proven token minter in internal/api/middleware/auth_test.go.
+// mintAPIToken mints a valid, full-lifetime GET token via the shared authtest
+// helper, so this package and middleware can't drift on the claims format.
 func mintAPIToken(t *testing.T, priv ed25519.PrivateKey, sub, methodAndPath string) string {
 	t.Helper()
-	now := time.Now()
-	c := auth.Claims{
-		BodyHash:      auth.HashBody(nil), // GET requests have no body
-		MethodAndPath: methodAndPath,
-		RegisteredClaims: jwtgo.RegisteredClaims{
-			Subject:   sub,
-			Issuer:    "freighter-extension",
-			IssuedAt:  jwtgo.NewNumericDate(now),
-			ExpiresAt: jwtgo.NewNumericDate(now.Add(auth.MaxTokenLifetime)),
-		},
-	}
-	s, err := jwtgo.NewWithClaims(jwtgo.SigningMethodEdDSA, c).SignedString(priv)
-	require.NoError(t, err)
-	return s
+	return authtest.MintToken(t, priv, sub, methodAndPath, auth.MaxTokenLifetime, time.Now())
 }
 
 func TestApiServer_initHandlers_ValidTokenPopulatesWhoami(t *testing.T) {
@@ -331,13 +293,7 @@ func TestApiServer_initHandlers_ValidTokenPopulatesWhoami(t *testing.T) {
 	require.NoError(t, err)
 	sub := hex.EncodeToString(pub)
 
-	cfg := &config.Config{AppConfig: config.AppConfig{
-		ProtocolsConfigPath:        "testdata/protocols.json",
-		AccountHistoryDefaultLimit: 20,
-		AccountHistoryMaxLimit:     100,
-		AuthMode:                   "permissive",
-	}}
-	mux, err := newTestAPIServer(t, cfg).initHandlers()
+	mux, err := newTestAPIServer(t, testCfg("permissive")).initHandlers()
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami", nil)
@@ -355,13 +311,7 @@ func TestApiServer_authenticatedRequestKeepsRouteMetricLabel(t *testing.T) {
 	require.NoError(t, err)
 	sub := hex.EncodeToString(pub)
 
-	cfg := &config.Config{AppConfig: config.AppConfig{
-		ProtocolsConfigPath:        "testdata/protocols.json",
-		AccountHistoryDefaultLimit: 20,
-		AccountHistoryMaxLimit:     100,
-		AuthMode:                   "permissive",
-	}}
-	s := newTestAPIServer(t, cfg)
+	s := newTestAPIServer(t, testCfg("permissive"))
 	mux, err := s.initHandlers()
 	require.NoError(t, err)
 	assembled := s.initMiddleware(mux) // full chain incl. Metrics, so r.Pattern is exercised
@@ -381,40 +331,39 @@ func TestApiServer_authenticatedRequestKeepsRouteMetricLabel(t *testing.T) {
 }
 
 // TestApiServer_initHandlers_AllUserFacingRoutesGatedInStrict guards the full set
-// of user-facing routes against one being added (or left) without the shared
-// authed wrapper — a silent fail-open. In strict mode the Auth middleware rejects
-// an anonymous request with 401 BEFORE the handler runs, so this needs no service
-// stubs: the nil services left by newTestAPIServer are never reached. A route
-// registered bare would instead reach its handler (returning 200/404, or panicking
-// on a nil service) and fail this assertion. Health probes are covered separately
-// by TestApiServer_initHandlers_HealthRoutesAnonymousInStrict.
+// of user-facing routes against one being added (or left) without the Auth wrapper
+// — a silent fail-open. It derives its coverage from routes() (the same table
+// initHandlers registers from), so a NEW gated route is probed automatically, and
+// a route added with gated=false is a visible, reviewable decision sitting next to
+// the health probes rather than an invisible omission a hand-maintained list here
+// would miss. In strict mode Auth rejects an anonymous request with 401 BEFORE the
+// handler runs, so this needs no service stubs: the nil services left by
+// newTestAPIServer are never reached. A route registered bare would instead reach
+// its handler (returning 200/404, or panicking on a nil service) and fail this
+// assertion. Health probes (gated=false) are covered separately by
+// TestApiServer_initHandlers_HealthRoutesAnonymousInStrict.
 func TestApiServer_initHandlers_AllUserFacingRoutesGatedInStrict(t *testing.T) {
-	cfg := &config.Config{AppConfig: config.AppConfig{
-		ProtocolsConfigPath:        "testdata/protocols.json",
-		AccountHistoryDefaultLimit: 20,
-		AccountHistoryMaxLimit:     100,
-		AuthMode:                   "strict",
-	}}
-	mux, err := newTestAPIServer(t, cfg).initHandlers()
+	s := newTestAPIServer(t, testCfg("strict"))
+	mux, err := s.initHandlers()
 	require.NoError(t, err)
 
-	userFacing := []struct {
-		method string
-		path   string
-	}{
-		{http.MethodGet, "/api/v1/protocols"},
-		{http.MethodPost, "/api/v1/collectibles"},
-		{http.MethodPost, "/api/v1/ledger-key/accounts"},
-		{http.MethodGet, "/api/v1/feature-flags"},
-		{http.MethodPost, "/api/v1/accounts/balances"},
-		{http.MethodPost, "/api/v1/token-prices"},
-		{http.MethodGet, "/api/v1/accounts/GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF/transactions"},
-		{http.MethodGet, "/api/v1/auth/whoami"},
-	}
-	for _, r := range userFacing {
+	rts, err := s.routes()
+	require.NoError(t, err)
+
+	gated := 0
+	for _, rt := range rts {
+		if !rt.gated {
+			continue // health probes are covered by HealthRoutesAnonymousInStrict
+		}
+		gated++
+		// Substitute a concrete value for any {wildcard} segment so the request
+		// matches the pattern. Auth runs before path-parameter validation, so any
+		// non-empty segment is enough to reach the 401.
+		path := wildcardSegment.ReplaceAllString(rt.pattern, "probe")
 		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, httptest.NewRequest(r.method, r.path, nil))
+		mux.ServeHTTP(rec, httptest.NewRequest(rt.method, path, nil))
 		assert.Equal(t, http.StatusUnauthorized, rec.Code,
-			"%s %s must run the auth middleware (401 for anonymous in strict)", r.method, r.path)
+			"%s %s must run the auth middleware (401 for anonymous in strict)", rt.method, rt.pattern)
 	}
+	require.Positive(t, gated, "expected routes() to contain at least one gated route")
 }
