@@ -379,3 +379,42 @@ func TestApiServer_authenticatedRequestKeepsRouteMetricLabel(t *testing.T) {
 	unknown := testutil.ToFloat64(s.appMetrics.HTTP.RequestsTotal.WithLabelValues("unknown", "GET", "200"))
 	assert.Equal(t, float64(0), unknown, "authed request must not collapse to the unknown handler label")
 }
+
+// TestApiServer_initHandlers_AllUserFacingRoutesGatedInStrict guards the full set
+// of user-facing routes against one being added (or left) without the shared
+// authed wrapper — a silent fail-open. In strict mode the Auth middleware rejects
+// an anonymous request with 401 BEFORE the handler runs, so this needs no service
+// stubs: the nil services left by newTestAPIServer are never reached. A route
+// registered bare would instead reach its handler (returning 200/404, or panicking
+// on a nil service) and fail this assertion. Health probes are covered separately
+// by TestApiServer_initHandlers_HealthRoutesAnonymousInStrict.
+func TestApiServer_initHandlers_AllUserFacingRoutesGatedInStrict(t *testing.T) {
+	cfg := &config.Config{AppConfig: config.AppConfig{
+		ProtocolsConfigPath:        "testdata/protocols.json",
+		AccountHistoryDefaultLimit: 20,
+		AccountHistoryMaxLimit:     100,
+		AuthMode:                   "strict",
+	}}
+	mux, err := newTestAPIServer(t, cfg).initHandlers()
+	require.NoError(t, err)
+
+	userFacing := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/protocols"},
+		{http.MethodPost, "/api/v1/collectibles"},
+		{http.MethodPost, "/api/v1/ledger-key/accounts"},
+		{http.MethodGet, "/api/v1/feature-flags"},
+		{http.MethodPost, "/api/v1/accounts/balances"},
+		{http.MethodPost, "/api/v1/token-prices"},
+		{http.MethodGet, "/api/v1/accounts/GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF/transactions"},
+		{http.MethodGet, "/api/v1/auth/whoami"},
+	}
+	for _, r := range userFacing {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(r.method, r.path, nil))
+		assert.Equal(t, http.StatusUnauthorized, rec.Code,
+			"%s %s must run the auth middleware (401 for anonymous in strict)", r.method, r.path)
+	}
+}
