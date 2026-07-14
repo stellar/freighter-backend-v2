@@ -26,6 +26,9 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 			switch {
 			case err == nil:
 				metrics.RecordAuth(authMetrics, "authenticated", "ok", metrics.SanitizeClient(identity.Issuer))
+				f := logger.FieldsFromContext(r.Context())
+				f.Set("user_id", identity.UserID)
+				f.Set("iss", identity.Issuer)
 				r = r.WithContext(auth.ContextWithUserID(r.Context(), identity.UserID))
 
 			case errors.Is(err, auth.ErrNoToken):
@@ -45,8 +48,10 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				reason := auth.Reason(err)
 				iss := auth.IssuerFromRequestUnverified(r)
 				metrics.RecordAuth(authMetrics, "rejected", reason, metrics.SanitizeClient(iss))
+				logger.FieldsFromContext(r.Context()).Set("iss", iss)
 				logger.InfoWithContext(r.Context(), "rejected request with invalid auth token",
 					"reason", reason,
+					"iss", iss,
 					"detail", err.Error(),
 					"method", r.Method,
 					"path", r.URL.Path)
