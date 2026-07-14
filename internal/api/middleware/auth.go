@@ -3,12 +3,28 @@ package middleware
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	"github.com/stellar/freighter-backend-v2/internal/auth"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 )
+
+// maxLoggedIssuerLen bounds the client-controlled iss value written to logs.
+// The iss claim is client-controlled and, on the rejection path, unverified;
+// truncating caps log volume from an oversized claim. The metric label is
+// separately bounded by metrics.SanitizeClient.
+const maxLoggedIssuerLen = 64
+
+// truncateForLog returns s bounded to maxLoggedIssuerLen bytes, cut on a valid
+// UTF-8 boundary, with a marker when truncated.
+func truncateForLog(s string) string {
+	if len(s) <= maxLoggedIssuerLen {
+		return s
+	}
+	return strings.ToValidUTF8(s[:maxLoggedIssuerLen], "") + "…(truncated)"
+}
 
 // Auth returns middleware that verifies the request's JWT against the public key
 // in its `sub` claim. Behavior depends on mode:
@@ -28,7 +44,7 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				metrics.RecordAuth(authMetrics, "authenticated", "ok", metrics.SanitizeClient(identity.Issuer))
 				f := logger.FieldsFromContext(r.Context())
 				f.Set("user_id", identity.UserID)
-				f.Set("iss", identity.Issuer)
+				f.Set("iss", truncateForLog(identity.Issuer))
 				r = r.WithContext(auth.ContextWithUserID(r.Context(), identity.UserID))
 
 			case errors.Is(err, auth.ErrNoToken):
@@ -48,10 +64,11 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				reason := auth.Reason(err)
 				iss := auth.IssuerFromRequestUnverified(r)
 				metrics.RecordAuth(authMetrics, "rejected", reason, metrics.SanitizeClient(iss))
-				logger.FieldsFromContext(r.Context()).Set("iss", iss)
+				loggedIss := truncateForLog(iss)
+				logger.FieldsFromContext(r.Context()).Set("iss", loggedIss)
 				logger.InfoWithContext(r.Context(), "rejected request with invalid auth token",
 					"reason", reason,
-					"iss", iss,
+					"iss", loggedIss,
 					"detail", err.Error(),
 					"method", r.Method,
 					"path", r.URL.Path)

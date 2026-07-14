@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 
@@ -88,4 +90,14 @@ func TestLoggingAuth_AnonymousHasNoAuthFields(t *testing.T) {
 	out := buf.String()
 	assert.NotContains(t, out, "user_id=")
 	assert.NotContains(t, out, "iss=")
+}
+
+func TestTruncateForLog(t *testing.T) {
+	assert.Equal(t, "freighter-extension", truncateForLog("freighter-extension"))
+	long := strings.Repeat("a", 200)
+	got := truncateForLog(long)
+	assert.LessOrEqual(t, len(got), maxLoggedIssuerLen+len("…(truncated)"))
+	assert.Contains(t, got, "(truncated)")
+	// multi-byte safe: no invalid UTF-8 in the result
+	assert.True(t, utf8.ValidString(got))
 }

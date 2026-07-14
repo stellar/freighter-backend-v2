@@ -15,8 +15,9 @@ type Identity struct {
 	Issuer string // client type (the JWT `iss`), e.g. "freighter-extension"; trusted (from a signature-verified token)
 }
 
-// HTTPRequestVerifier verifies the JWT carried by an HTTP request and returns the
-// authenticated user ID (hex-encoded auth public key).
+// HTTPRequestVerifier verifies the JWT carried by an HTTP request and returns
+// the authenticated Identity: the user ID (hex-encoded auth public key, the
+// JWT `sub`) and the client-type issuer (the JWT `iss`).
 type HTTPRequestVerifier interface {
 	VerifyHTTPRequest(r *http.Request) (Identity, error)
 }
