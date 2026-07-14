@@ -9,30 +9,18 @@ import (
 	"testing"
 	"time"
 
-	jwtgo "github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/freighter-backend-v2/internal/auth"
+	"github.com/stellar/freighter-backend-v2/internal/auth/authtest"
 )
 
 const authTestPath = "/api/v1/auth/whoami"
 
 func mintToken(t *testing.T, priv ed25519.PrivateKey, sub, methodAndPath string, lifetime time.Duration, issuedAt time.Time) string {
 	t.Helper()
-	c := auth.Claims{
-		BodyHash:      auth.HashBody(nil),
-		MethodAndPath: methodAndPath,
-		RegisteredClaims: jwtgo.RegisteredClaims{
-			Subject:   sub,
-			Issuer:    "freighter-extension",
-			IssuedAt:  jwtgo.NewNumericDate(issuedAt),
-			ExpiresAt: jwtgo.NewNumericDate(issuedAt.Add(lifetime)),
-		},
-	}
-	s, err := jwtgo.NewWithClaims(jwtgo.SigningMethodEdDSA, c).SignedString(priv)
-	require.NoError(t, err)
-	return s
+	return authtest.MintToken(t, priv, sub, methodAndPath, lifetime, issuedAt)
 }
 
 func TestAuth_TruthTable(t *testing.T) {
