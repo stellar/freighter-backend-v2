@@ -9,10 +9,16 @@ import (
 	"strings"
 )
 
+// Identity is the authenticated principal extracted from a verified request JWT.
+type Identity struct {
+	UserID string // hex-encoded auth public key (the JWT `sub`); also the user ID
+	Issuer string // client type (the JWT `iss`), e.g. "freighter-extension"; trusted (from a signature-verified token)
+}
+
 // HTTPRequestVerifier verifies the JWT carried by an HTTP request and returns the
 // authenticated user ID (hex-encoded auth public key).
 type HTTPRequestVerifier interface {
-	VerifyHTTPRequest(r *http.Request) (userID string, err error)
+	VerifyHTTPRequest(r *http.Request) (Identity, error)
 }
 
 // Verifier is the default HTTPRequestVerifier. It holds no key material — the
@@ -31,38 +37,38 @@ func NewVerifier() *Verifier {
 // method+path and body, and verifies it. It returns ErrNoToken when no bearer
 // token is present (so callers can allow anonymous access in permissive mode);
 // any other error indicates a present-but-invalid token.
-func (v *Verifier) VerifyHTTPRequest(r *http.Request) (string, error) {
+func (v *Verifier) VerifyHTTPRequest(r *http.Request) (Identity, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
-		return "", ErrNoToken
+		return Identity{}, ErrNoToken
 	}
 	// RFC 6750: the "Bearer" auth scheme is case-insensitive.
 	scheme, token, _ := strings.Cut(authHeader, " ")
 	if !strings.EqualFold(scheme, "Bearer") {
 		// A different (or unparseable) auth scheme — not a bearer token this
 		// verifier handles, so treat it as no token (anonymous in permissive mode).
-		return "", ErrNoToken
+		return Identity{}, ErrNoToken
 	}
 	// A Bearer scheme with an empty or whitespace-only credential is a
 	// present-but-invalid token, not "no token": reject it (401 in both modes)
 	// rather than letting permissive mode pass it through as anonymous.
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return "", &VerificationError{Reason: ReasonMalformed, Err: errors.New("empty bearer credential")}
+		return Identity{}, &VerificationError{Reason: ReasonMalformed, Err: errors.New("empty bearer credential")}
 	}
 
 	body, err := readAndResetBody(r)
 	if err != nil {
 		// Operational failure, not an auth failure: don't wrap ErrUnauthorized.
-		return "", fmt.Errorf("reading request body: %w", err)
+		return Identity{}, fmt.Errorf("reading request body: %w", err)
 	}
 
 	methodAndPath := fmt.Sprintf("%s %s", r.Method, r.URL.RequestURI())
 	claims, err := ParseJWT(token, methodAndPath, body)
 	if err != nil {
-		return "", err
+		return Identity{}, err
 	}
-	return claims.Subject, nil
+	return Identity{UserID: claims.Subject, Issuer: claims.Issuer}, nil
 }
 
 // readAndResetBody reads the full body (already bounded upstream by

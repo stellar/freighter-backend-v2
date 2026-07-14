@@ -22,11 +22,11 @@ import (
 func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metrics.Auth) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			userID, err := verifier.VerifyHTTPRequest(r)
+			identity, err := verifier.VerifyHTTPRequest(r)
 			switch {
 			case err == nil:
 				metrics.RecordAuth(authMetrics, "authenticated", "ok")
-				r = r.WithContext(auth.ContextWithUserID(r.Context(), userID))
+				r = r.WithContext(auth.ContextWithUserID(r.Context(), identity.UserID))
 
 			case errors.Is(err, auth.ErrNoToken):
 				if mode == auth.Required {
