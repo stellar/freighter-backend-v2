@@ -25,17 +25,17 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 			identity, err := verifier.VerifyHTTPRequest(r)
 			switch {
 			case err == nil:
-				metrics.RecordAuth(authMetrics, "authenticated", "ok")
+				metrics.RecordAuth(authMetrics, "authenticated", "ok", metrics.SanitizeClient(identity.Issuer))
 				r = r.WithContext(auth.ContextWithUserID(r.Context(), identity.UserID))
 
 			case errors.Is(err, auth.ErrNoToken):
 				if mode == auth.Required {
-					metrics.RecordAuth(authMetrics, "rejected", "no_token")
+					metrics.RecordAuth(authMetrics, "rejected", "no_token", metrics.ClientNone)
 					httperror.Unauthorized("unauthorized", nil).Render(w)
 					return
 				}
 				// Permissive: allow through with no user ID attached.
-				metrics.RecordAuth(authMetrics, "anonymous", "no_token")
+				metrics.RecordAuth(authMetrics, "anonymous", "no_token", metrics.ClientNone)
 
 			case errors.Is(err, auth.ErrUnauthorized):
 				// A token was presented but did not verify — always rejected. The
@@ -43,7 +43,8 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				// per-request diagnosis. err.Error() carries only the failure
 				// category and request method/path, never the token or body bytes.
 				reason := auth.Reason(err)
-				metrics.RecordAuth(authMetrics, "rejected", reason)
+				iss := auth.IssuerFromRequestUnverified(r)
+				metrics.RecordAuth(authMetrics, "rejected", reason, metrics.SanitizeClient(iss))
 				logger.InfoWithContext(r.Context(), "rejected request with invalid auth token",
 					"reason", reason,
 					"detail", err.Error(),
@@ -57,13 +58,13 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				// runs upstream of this middleware), surfaced via the verifier's
 				// io.ReadAll. This is a client-controlled condition, so render the
 				// same 413 the body-reading handlers use, not a 500.
-				metrics.RecordAuth(authMetrics, "rejected", "too_large")
+				metrics.RecordAuth(authMetrics, "rejected", "too_large", metrics.SanitizeClient(auth.IssuerFromRequestUnverified(r)))
 				httperror.RequestEntityTooLarge("Request body too large", err).Render(w)
 				return
 
 			default:
 				// Operational failure (e.g. reading the body).
-				metrics.RecordAuth(authMetrics, "rejected", "internal")
+				metrics.RecordAuth(authMetrics, "rejected", "internal", metrics.SanitizeClient(auth.IssuerFromRequestUnverified(r)))
 				logger.ErrorWithContext(r.Context(), "auth check failed", "error", err)
 				httperror.InternalServerError("An unexpected error occurred", err).Render(w)
 				return

@@ -123,6 +123,19 @@ func TestRecord_NilServiceDoesNotPanic(t *testing.T) {
 	})
 }
 
+func TestSanitizeClient(t *testing.T) {
+	cases := map[string]string{
+		"freighter-extension": "freighter-extension",
+		"freighter-mobile":    "freighter-mobile",
+		"":                    "other",
+		"freighter-cli":       "other",
+		"attacker-supplied-🦄": "other",
+	}
+	for in, want := range cases {
+		assert.Equal(t, want, SanitizeClient(in), "input %q", in)
+	}
+}
+
 func TestUpstreamError_Error(t *testing.T) {
 	tests := []struct {
 		name     string
