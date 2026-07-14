@@ -25,9 +25,9 @@ func TestLogging_AnonymousLineUnchanged(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "Request completed")
-	for _, key := range []string{"status=", "method=", "url=", "duration=", "bodySize="} {
-		assert.Contains(t, out, key, "existing key %q must remain", key)
-	}
+	// Existing keys must appear in their original order with word boundaries, so a
+	// reorder or a substring-preserving rename (e.g. status -> req_status) fails.
+	assert.Regexp(t, `\bstatus=\S+ method=\S+ url=\S+ duration=\S+ bodySize=\S+`, out)
 	assert.NotContains(t, out, "user_id=")
 	assert.NotContains(t, out, "iss=")
 }
