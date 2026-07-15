@@ -101,3 +101,33 @@ func TestTruncateForLog(t *testing.T) {
 	// multi-byte safe: no invalid UTF-8 in the result
 	assert.True(t, utf8.ValidString(got))
 }
+
+// The too_large rejection branch must log best-effort iss like the other
+// rejection paths (IssuerFromRequestUnverified reads the header, which survives
+// the oversized-body read that trips this branch).
+func TestLoggingAuth_OversizedBodyLogsIss(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	defer logger.SetOutput(os.Stdout)
+
+	const limit = 16
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := hex.EncodeToString(pub)
+	token := mintToken(t, priv, sub, "POST "+authTestPath, auth.MaxTokenLifetime, time.Now())
+
+	rr := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, authTestPath, bytes.NewReader(make([]byte, limit+1)))
+	r.Header.Set("Authorization", "Bearer "+token)
+	// Simulate the upstream BodySizeLimit middleware wrapping the body.
+	r.Body = http.MaxBytesReader(rr, r.Body, limit)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	handler := Logging()(Auth(auth.NewVerifier(), auth.Permissive, nil)(next))
+	handler.ServeHTTP(rr, r)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
+	assert.Contains(t, buf.String(), "iss=freighter-extension")
+}

@@ -80,13 +80,17 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				// runs upstream of this middleware), surfaced via the verifier's
 				// io.ReadAll. This is a client-controlled condition, so render the
 				// same 413 the body-reading handlers use, not a 500.
-				metrics.RecordAuth(authMetrics, "rejected", "too_large", metrics.SanitizeClient(auth.IssuerFromRequestUnverified(r)))
+				iss := auth.IssuerFromRequestUnverified(r)
+				metrics.RecordAuth(authMetrics, "rejected", "too_large", metrics.SanitizeClient(iss))
+				logger.FieldsFromContext(r.Context()).Set("iss", truncateForLog(iss))
 				httperror.RequestEntityTooLarge("Request body too large", err).Render(w)
 				return
 
 			default:
 				// Operational failure (e.g. reading the body).
-				metrics.RecordAuth(authMetrics, "rejected", "internal", metrics.SanitizeClient(auth.IssuerFromRequestUnverified(r)))
+				iss := auth.IssuerFromRequestUnverified(r)
+				metrics.RecordAuth(authMetrics, "rejected", "internal", metrics.SanitizeClient(iss))
+				logger.FieldsFromContext(r.Context()).Set("iss", truncateForLog(iss))
 				logger.ErrorWithContext(r.Context(), "auth check failed", "error", err)
 				httperror.InternalServerError("An unexpected error occurred", err).Render(w)
 				return
