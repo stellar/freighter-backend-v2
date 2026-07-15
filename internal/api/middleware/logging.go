@@ -25,41 +25,37 @@ func Logging() Middleware {
 
 			duration := time.Since(startTime)
 			status := bw.StatusCode()
+			body := bw.Body()
 
-			if err != nil {
+			// withCommon prefixes the fields shared by every request log line and
+			// appends any request-scoped fields (e.g. user_id/iss) set by downstream
+			// middleware, so each branch specifies only what is unique to it. The
+			// request-scoped fields always come last, preserving the existing key
+			// order (log continuity).
+			withCommon := func(extra ...any) []any {
+				common := []any{
+					"status", status,
+					"method", r.Method,
+					"url", r.URL.String(),
+					"duration", duration,
+				}
+				return append(append(common, extra...), fields.Args()...)
+			}
+
+			switch {
+			case err != nil:
 				logger.ErrorWithContext(r.Context(), "Request failed to flush response",
-					append([]any{
-						"status", status,
-						"method", r.Method,
-						"url", r.URL.String(),
-						"duration", duration,
-						"error", err,
-						"bodySize", len(bw.Body()),
-					}, fields.Args()...)...)
-			} else if status >= 400 {
-				body := bw.Body()
+					withCommon("error", err, "bodySize", len(body))...)
+			case status >= 400:
 				bodyStr := string(body)
 				if len(bodyStr) > 1024 {
 					bodyStr = bodyStr[:1024] + "... (truncated)"
 				}
 				logger.ErrorWithContext(r.Context(), "Request completed with error",
-					append([]any{
-						"status", status,
-						"method", r.Method,
-						"url", r.URL.String(),
-						"duration", duration,
-						"bodySize", len(body),
-						"body", bodyStr,
-					}, fields.Args()...)...)
-			} else {
+					withCommon("bodySize", len(body), "body", bodyStr)...)
+			default:
 				logger.InfoWithContext(r.Context(), "Request completed",
-					append([]any{
-						"status", status,
-						"method", r.Method,
-						"url", r.URL.String(),
-						"duration", duration,
-						"bodySize", len(bw.Body()),
-					}, fields.Args()...)...)
+					withCommon("bodySize", len(body))...)
 			}
 		})
 	}
