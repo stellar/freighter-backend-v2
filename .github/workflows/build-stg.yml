@@ -1,0 +1,69 @@
+name: Build and push freighter-backend-v2 (stg)
+
+# Deployed to: https://github.com/stellar/freighter-backend-v2
+#
+# Converted from the Jenkins pipeline (Jenkinsfile-stg). On every push to main
+# (or manual dispatch) builds the freighter-backend-v2 docker image and pushes
+# it to the stg ECR repo (stg/freighter-backend-v2:<sha>).
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  SLACK_CHANNEL: ext-freighter-builds
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Determine image label
+        id: vars
+        run: echo "label=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: ECR login
+        id: ecr-login
+        uses: stellar/actions/sdf-ecr-login@main
+
+      - name: Build and push docker image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.ecr-registry }}
+          LABEL: ${{ steps.vars.outputs.label }}
+        run: |
+          set -eu
+          export TAG="${ECR_REGISTRY}/stg/freighter-backend-v2:${LABEL}"
+          make docker-build-tag
+          ecr-push "${TAG}"
+
+      - name: Slack notification — success
+        if: success()
+        uses: slackapi/slack-github-action@0d95c9a7becc1e6e297d76df9bc735c44f4cbcbc # v3.0.5
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL }}",
+              "text": "Freighter backend V2 *stg* build complete for ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}."
+            }
+
+      - name: Slack notification — failure
+        if: failure()
+        uses: slackapi/slack-github-action@0d95c9a7becc1e6e297d76df9bc735c44f4cbcbc # v3.0.5
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "channel": "${{ env.SLACK_CHANNEL }}",
+              "text": "Freighter backend V2 *stg* build failed for ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}."
+            }
