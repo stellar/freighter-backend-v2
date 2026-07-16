@@ -11,20 +11,27 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 )
 
-// maxLoggedIssuerLen bounds the client-controlled iss value written to logs.
-// The iss claim is client-controlled and, on the rejection path, unverified;
-// truncating caps log volume from an oversized claim. The metric label is
-// separately bounded by metrics.SanitizeClient.
-const maxLoggedIssuerLen = 64
+// Bounds on client-controlled values written to rejection logs. Both the iss
+// claim and the methodAndPath claim (echoed in a bad_method_path error's detail)
+// are client-controlled and, on the rejection path, unverified; truncating caps
+// log volume from an oversized claim. Metric labels are separately bounded by
+// metrics.SanitizeClient.
+const (
+	maxLoggedIssuerLen = 64
+	maxLoggedDetailLen = 256
+)
 
-// truncateForLog returns s bounded to maxLoggedIssuerLen bytes, cut on a valid
-// UTF-8 boundary, with a marker when truncated.
-func truncateForLog(s string) string {
-	if len(s) <= maxLoggedIssuerLen {
+// truncate returns s bounded to max bytes, cut on a valid UTF-8 boundary, with a
+// marker when truncated.
+func truncate(s string, max int) string {
+	if len(s) <= max {
 		return s
 	}
-	return strings.ToValidUTF8(s[:maxLoggedIssuerLen], "") + "…(truncated)"
+	return strings.ToValidUTF8(s[:max], "") + "…(truncated)"
 }
+
+// truncateForLog bounds an iss value for logging.
+func truncateForLog(s string) string { return truncate(s, maxLoggedIssuerLen) }
 
 // Auth returns middleware that verifies the request's JWT against the public key
 // in its `sub` claim. Behavior depends on mode:
@@ -59,8 +66,9 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 			case errors.Is(err, auth.ErrUnauthorized):
 				// A token was presented but did not verify — always rejected. The
 				// reason drives both the metric label and a structured log line for
-				// per-request diagnosis. err.Error() carries only the failure
-				// category and request method/path, never the token or body bytes.
+				// per-request diagnosis. err.Error() never contains the token or body
+				// bytes, but a bad_method_path error echoes the client-controlled
+				// methodAndPath claim, so the detail is length-bounded before logging.
 				reason := auth.Reason(err)
 				iss := auth.IssuerFromRequestUnverified(r)
 				metrics.RecordAuth(authMetrics, "rejected", reason, metrics.SanitizeClient(iss))
@@ -69,7 +77,7 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				logger.InfoWithContext(r.Context(), "rejected request with invalid auth token",
 					"reason", reason,
 					"iss", loggedIss,
-					"detail", err.Error(),
+					"detail", truncate(err.Error(), maxLoggedDetailLen),
 					"method", r.Method,
 					"path", r.URL.Path)
 				httperror.Unauthorized("unauthorized", nil).Render(w)
