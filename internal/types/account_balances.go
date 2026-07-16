@@ -1,5 +1,5 @@
 // ABOUTME: snake_case REST response types for the account balances endpoint.
-// ABOUTME: Mirrors the wallet-backend SDK balance variants with consistent snake_case keys; `available` is the spendable amount.
+// ABOUTME: Mirrors the wallet-backend SDK balance variants with v1-aligned key/token/total fields; `available` is the spendable amount.
 package types
 
 // Balance is a sealed interface implemented by every balance variant. The
@@ -7,13 +7,32 @@ package types
 // (token_type is 1:1 with the variants), so clients switch on "token_type".
 type Balance interface{ isBalance() }
 
-// BalanceBase holds the fields common to every balance variant. Balance is the
-// on-ledger amount and Available is the spendable portion (balance minus the
-// reserved amount for native/classic; equal to balance for contract tokens and
-// pool shares). Both are Stellar amount strings so JavaScript clients never
-// lose precision.
+// TokenIssuer identifies the entity behind a token: a classic asset's issuing
+// account or a Soroban token's contract id.
+type TokenIssuer struct {
+	Key string `json:"key"`
+}
+
+// Token is the v1-pattern token identity object. Type is omitted for SEP-41
+// tokens and Issuer is omitted for the native asset, matching the v1 shapes
+// clients already consume.
+type Token struct {
+	Type   string       `json:"type,omitempty"`
+	Code   string       `json:"code"`
+	Issuer *TokenIssuer `json:"issuer,omitempty"`
+}
+
+// BalanceBase holds the fields common to every balance variant. Key is the
+// v1-format balance-map key (native / "CODE:ISSUER" / "SYMBOL:CONTRACT_ID" /
+// "POOLID:lp") and Token is the v1 token identity (nil for liquidity-pool
+// shares, which carry no token in v1). Total is the raw on-ledger amount and
+// Available is the spendable portion (total minus the reserved amount for
+// native/classic; equal to total for contract tokens and pool shares). Both
+// are Stellar amount strings so JavaScript clients never lose precision.
 type BalanceBase struct {
-	Balance   string `json:"balance"`
+	Key       string `json:"key"`
+	Token     *Token `json:"token,omitempty"`
+	Total     string `json:"total"`
 	Available string `json:"available"`
 	TokenID   string `json:"token_id"`
 	TokenType string `json:"token_type"`
