@@ -9,11 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/freighter-backend-v2/internal/auth"
 	"github.com/stellar/freighter-backend-v2/internal/auth/authtest"
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 )
 
 const authTestPath = "/api/v1/auth/whoami"
@@ -115,4 +118,47 @@ func TestAuth_OversizedBodyReturns413(t *testing.T) {
 
 	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
 	assert.False(t, reached, "handler must not be reached when the body exceeds the limit")
+}
+
+func TestAuth_ClientLabel(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	sub := hex.EncodeToString(pub)
+	_, otherPriv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+
+	mAndP := "GET " + authTestPath
+	now := time.Now()
+	valid := mintToken(t, priv, sub, mAndP, auth.MaxTokenLifetime, now)
+	wrongKey := mintToken(t, otherPriv, sub, mAndP, auth.MaxTokenLifetime, now) // parses, bad signature
+
+	cases := []struct {
+		name       string
+		bearer     string
+		wantResult string
+		wantReason string
+		wantClient string
+	}{
+		{"authenticated", valid, "authenticated", "ok", "freighter-extension"},
+		{"anonymous", "", "anonymous", "no_token", "none"},
+		{"rejected readable iss", wrongKey, "rejected", "bad_signature", "freighter-extension"},
+		{"rejected malformed", "not-a-jwt", "rejected", "malformed", "other"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := prometheus.NewRegistry()
+			m := metrics.NewAuth(reg)
+			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+			handler := Auth(auth.NewVerifier(), auth.Permissive, m)(next)
+
+			r := httptest.NewRequest(http.MethodGet, authTestPath, nil)
+			if tc.bearer != "" {
+				r.Header.Set("Authorization", "Bearer "+tc.bearer)
+			}
+			handler.ServeHTTP(httptest.NewRecorder(), r)
+
+			got := testutil.ToFloat64(m.RequestsTotal.WithLabelValues(tc.wantResult, tc.wantReason, tc.wantClient))
+			assert.Equal(t, float64(1), got, "expected one %s/%s/%s", tc.wantResult, tc.wantReason, tc.wantClient)
+		})
+	}
 }

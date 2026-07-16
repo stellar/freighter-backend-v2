@@ -3,12 +3,35 @@ package middleware
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	"github.com/stellar/freighter-backend-v2/internal/auth"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 )
+
+// Bounds on client-controlled values written to rejection logs. Both the iss
+// claim and the methodAndPath claim (echoed in a bad_method_path error's detail)
+// are client-controlled and, on the rejection path, unverified; truncating caps
+// log volume from an oversized claim. Metric labels are separately bounded by
+// metrics.SanitizeClient.
+const (
+	maxLoggedIssuerLen = 64
+	maxLoggedDetailLen = 256
+)
+
+// truncate returns s bounded to max bytes, cut on a valid UTF-8 boundary, with a
+// marker when truncated.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return strings.ToValidUTF8(s[:max], "") + "…(truncated)"
+}
+
+// truncateForLog bounds an iss value for logging.
+func truncateForLog(s string) string { return truncate(s, maxLoggedIssuerLen) }
 
 // Auth returns middleware that verifies the request's JWT against the public key
 // in its `sub` claim. Behavior depends on mode:
@@ -22,31 +45,39 @@ import (
 func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metrics.Auth) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			userID, err := verifier.VerifyHTTPRequest(r)
+			identity, err := verifier.VerifyHTTPRequest(r)
 			switch {
 			case err == nil:
-				metrics.RecordAuth(authMetrics, "authenticated", "ok")
-				r = r.WithContext(auth.ContextWithUserID(r.Context(), userID))
+				metrics.RecordAuth(authMetrics, "authenticated", "ok", metrics.SanitizeClient(identity.Issuer))
+				f := logger.FieldsFromContext(r.Context())
+				f.Set("user_id", identity.UserID)
+				f.Set("iss", truncateForLog(identity.Issuer))
+				r = r.WithContext(auth.ContextWithUserID(r.Context(), identity.UserID))
 
 			case errors.Is(err, auth.ErrNoToken):
 				if mode == auth.Required {
-					metrics.RecordAuth(authMetrics, "rejected", "no_token")
+					metrics.RecordAuth(authMetrics, "rejected", "no_token", metrics.ClientNone)
 					httperror.Unauthorized("unauthorized", nil).Render(w)
 					return
 				}
 				// Permissive: allow through with no user ID attached.
-				metrics.RecordAuth(authMetrics, "anonymous", "no_token")
+				metrics.RecordAuth(authMetrics, "anonymous", "no_token", metrics.ClientNone)
 
 			case errors.Is(err, auth.ErrUnauthorized):
 				// A token was presented but did not verify — always rejected. The
 				// reason drives both the metric label and a structured log line for
-				// per-request diagnosis. err.Error() carries only the failure
-				// category and request method/path, never the token or body bytes.
+				// per-request diagnosis. err.Error() never contains the token or body
+				// bytes, but a bad_method_path error echoes the client-controlled
+				// methodAndPath claim, so the detail is length-bounded before logging.
 				reason := auth.Reason(err)
-				metrics.RecordAuth(authMetrics, "rejected", reason)
+				iss := auth.IssuerFromRequestUnverified(r)
+				metrics.RecordAuth(authMetrics, "rejected", reason, metrics.SanitizeClient(iss))
+				loggedIss := truncateForLog(iss)
+				logger.FieldsFromContext(r.Context()).Set("iss", loggedIss)
 				logger.InfoWithContext(r.Context(), "rejected request with invalid auth token",
 					"reason", reason,
-					"detail", err.Error(),
+					"iss", loggedIss,
+					"detail", truncate(err.Error(), maxLoggedDetailLen),
 					"method", r.Method,
 					"path", r.URL.Path)
 				httperror.Unauthorized("unauthorized", nil).Render(w)
@@ -57,13 +88,17 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				// runs upstream of this middleware), surfaced via the verifier's
 				// io.ReadAll. This is a client-controlled condition, so render the
 				// same 413 the body-reading handlers use, not a 500.
-				metrics.RecordAuth(authMetrics, "rejected", "too_large")
+				iss := auth.IssuerFromRequestUnverified(r)
+				metrics.RecordAuth(authMetrics, "rejected", "too_large", metrics.SanitizeClient(iss))
+				logger.FieldsFromContext(r.Context()).Set("iss", truncateForLog(iss))
 				httperror.RequestEntityTooLarge("Request body too large", err).Render(w)
 				return
 
 			default:
 				// Operational failure (e.g. reading the body).
-				metrics.RecordAuth(authMetrics, "rejected", "internal")
+				iss := auth.IssuerFromRequestUnverified(r)
+				metrics.RecordAuth(authMetrics, "rejected", "internal", metrics.SanitizeClient(iss))
+				logger.FieldsFromContext(r.Context()).Set("iss", truncateForLog(iss))
 				logger.ErrorWithContext(r.Context(), "auth check failed", "error", err)
 				httperror.InternalServerError("An unexpected error occurred", err).Render(w)
 				return

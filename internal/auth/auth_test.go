@@ -277,9 +277,10 @@ func TestVerifyHTTPRequest_Valid(t *testing.T) {
 	v := NewVerifier()
 	r := newRequest(t, http.MethodPost, "/api/v1/thing", body, token)
 
-	userID, err := v.VerifyHTTPRequest(r)
+	identity, err := v.VerifyHTTPRequest(r)
 	require.NoError(t, err)
-	assert.Equal(t, sub, userID)
+	assert.Equal(t, sub, identity.UserID)
+	assert.Equal(t, "freighter-extension", identity.Issuer)
 
 	// Body must remain readable by downstream handlers.
 	got, err := readAll(r)
@@ -308,9 +309,9 @@ func TestVerifyHTTPRequest_CaseInsensitiveBearer(t *testing.T) {
 	// RFC 6750: the auth scheme is case-insensitive.
 	r.Header.Set("Authorization", "bearer "+token)
 
-	userID, err := v.VerifyHTTPRequest(r)
+	identity, err := v.VerifyHTTPRequest(r)
 	require.NoError(t, err)
-	assert.Equal(t, sub, userID)
+	assert.Equal(t, sub, identity.UserID)
 }
 
 func TestVerifyHTTPRequest_LargeBodyNotTruncated(t *testing.T) {
@@ -321,9 +322,9 @@ func TestVerifyHTTPRequest_LargeBodyNotTruncated(t *testing.T) {
 	token := mint(t, priv, validClaims(sub, "POST /api/v1/thing", body))
 
 	v := NewVerifier()
-	userID, err := v.VerifyHTTPRequest(newRequest(t, http.MethodPost, "/api/v1/thing", body, token))
+	identity, err := v.VerifyHTTPRequest(newRequest(t, http.MethodPost, "/api/v1/thing", body, token))
 	require.NoError(t, err)
-	assert.Equal(t, sub, userID)
+	assert.Equal(t, sub, identity.UserID)
 }
 
 func TestReason(t *testing.T) {

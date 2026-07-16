@@ -102,3 +102,23 @@ func (s *MetricsTestSuite) TestMetricsNotExposedOnPublicAPI() {
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusNotFound, resp.StatusCode, "/metrics must not be served by the public API server")
 }
+
+func (s *MetricsTestSuite) TestAuthMetricHasClientLabel() {
+	t := s.T()
+
+	// Drive a gated route with no token so the auth middleware records a series.
+	resp, err := http.Get(fmt.Sprintf("%s/api/v1/protocols", s.apiURL))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	metricsResp, err := http.Get(fmt.Sprintf("%s/metrics", s.metricsURL))
+	require.NoError(t, err)
+	defer func() { _ = metricsResp.Body.Close() }()
+	body, err := io.ReadAll(metricsResp.Body)
+	require.NoError(t, err)
+	bodyStr := string(body)
+
+	require.Contains(t, bodyStr, "freighter_auth_requests_total")
+	require.Contains(t, bodyStr, `client="none"`)
+	require.Contains(t, bodyStr, `result="anonymous"`)
+}

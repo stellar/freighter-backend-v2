@@ -66,14 +66,42 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 }
 
+// Client-type label values for the auth metric. The set is closed so a
+// client-controlled `iss` cannot grow label cardinality without bound.
+const (
+	clientExtension = "freighter-extension"
+	clientMobile    = "freighter-mobile"
+	// ClientNone labels a request that carried no token at all (permissive
+	// anonymous path). Kept distinct from "other" so "has not adopted auth"
+	// is never confused with "token present, client unknown".
+	ClientNone  = "none"
+	clientOther = "other"
+)
+
+// SanitizeClient buckets a JWT `iss` (client type) into the closed allowlist.
+// Anything outside it — including "" — becomes "other". This bounds the
+// cardinality of the client label, which derives from a client-controlled
+// claim. The allowlist mirrors the design doc's `iss` contract; a client that
+// ships a different `iss` shows up as "other" (a useful drift canary).
+func SanitizeClient(iss string) string {
+	switch iss {
+	case clientExtension, clientMobile:
+		return iss
+	default:
+		return clientOther
+	}
+}
+
 // Auth holds JWT authentication metrics. During the client rollout these track
-// adoption (authenticated vs anonymous) and rejection reasons.
+// adoption (authenticated vs anonymous), rejection reasons, and client type.
 type Auth struct {
-	// RequestsTotal counts auth-checked requests, labeled by outcome and reason.
+	// RequestsTotal counts auth-checked requests, labeled by outcome, reason,
+	// and client.
 	//   result: "authenticated" | "anonymous" | "rejected"
 	//   reason: "ok" | "no_token" | "expired" | "bad_signature" | "bad_timing" |
 	//           "bad_method_path" | "bad_body_hash" | "bad_subject" | "malformed" |
 	//           "invalid" | "too_large" | "internal"
+	//   client: "freighter-extension" | "freighter-mobile" | "none" | "other"
 	RequestsTotal *prometheus.CounterVec
 }
 
@@ -82,8 +110,8 @@ func NewAuth(reg prometheus.Registerer) *Auth {
 	a := &Auth{
 		RequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_auth_requests_total",
-			Help: "Total number of auth-checked HTTP requests, by result and reason.",
-		}, []string{"result", "reason"}),
+			Help: "Total number of auth-checked HTTP requests, by result, reason, and client.",
+		}, []string{"result", "reason", "client"}),
 	}
 	reg.MustRegister(a.RequestsTotal)
 	return a
@@ -91,11 +119,11 @@ func NewAuth(reg prometheus.Registerer) *Auth {
 
 // RecordAuth records the outcome of an auth check. It is nil-safe so the
 // middleware and its tests can run without a metrics registry.
-func RecordAuth(a *Auth, result, reason string) {
+func RecordAuth(a *Auth, result, reason, client string) {
 	if a == nil {
 		return
 	}
-	a.RequestsTotal.WithLabelValues(result, reason).Inc()
+	a.RequestsTotal.WithLabelValues(result, reason, client).Inc()
 }
 
 // HTTP holds HTTP request metrics.
