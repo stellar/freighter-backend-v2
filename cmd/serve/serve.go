@@ -45,6 +45,12 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if d, m := s.Cfg.AppConfig.AccountHistoryDefaultLimit, s.Cfg.AppConfig.AccountHistoryMaxLimit; d <= 0 || m <= 0 || d > m || m > handlers.AccountHistoryUpstreamMaxLimit {
 				return fmt.Errorf("--account-history-default-limit=%d / --account-history-max-limit=%d must be positive, default <= max, and max <= %d", d, m, handlers.AccountHistoryUpstreamMaxLimit)
 			}
+			if n := s.Cfg.BlendConfig.PositionsCacheTTLSeconds; n < 0 {
+				return fmt.Errorf("--blend-positions-cache-ttl-seconds=%d must be >= 0", n)
+			}
+			if n := s.Cfg.BlendConfig.CatalogCacheTTLSeconds; n < 0 {
+				return fmt.Errorf("--blend-catalog-cache-ttl-seconds=%d must be >= 0", n)
+			}
 			if _, err := auth.ParseMode(s.Cfg.AppConfig.AuthMode); err != nil {
 				return fmt.Errorf("--auth-mode: %w", err)
 			}
@@ -135,6 +141,11 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.TestnetUrl, "wallet-backend-testnet-url", "", "Wallet backend testnet URL")
 	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.PubnetSigningKey, "wallet-backend-pubnet-signing-key", "", "Wallet backend pubnet JWT signing key (Stellar secret key)")
 	cmd.Flags().StringVar(&s.Cfg.WalletBackendConfig.TestnetSigningKey, "wallet-backend-testnet-signing-key", "", "Wallet backend testnet JWT signing key (Stellar secret key)")
+
+	// Blend Config (positions/catalog endpoints backed by wallet-backend's Blend GraphQL)
+	cmd.Flags().IntVar(&s.Cfg.BlendConfig.PositionsCacheTTLSeconds, "blend-positions-cache-ttl-seconds", 30, "TTL for cached per-address Blend position responses in Redis (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.BlendConfig.CatalogCacheTTLSeconds, "blend-catalog-cache-ttl-seconds", 60, "TTL for the cached per-network Blend market views (pools, earn options) in Redis (seconds)")
+	cmd.Flags().StringVar(&s.Cfg.BlendConfig.EarnPoolsConfigPath, "earn-pools-config-path", "", "Path to the JSON allowlist of Blend pool contract IDs offered in the Earn flow; curates earn-options only, never user positions. Empty disables curation.")
 
 	// Token Prices Config
 	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertPubnetURL, "stellar-expert-pubnet-url", "https://api.stellar.expert/explorer/public", "Stellar Expert base URL for pubnet")

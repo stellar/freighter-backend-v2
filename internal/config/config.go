@@ -17,6 +17,7 @@ type Config struct {
 	BlockaidConfig      BlockaidConfig
 	CoinbaseConfig      CoinbaseConfig
 	WalletBackendConfig WalletBackendConfig
+	BlendConfig         BlendConfig
 }
 
 type AppConfig struct {
@@ -145,4 +146,24 @@ type WalletBackendConfig struct {
 	TestnetUrl        string
 	PubnetSigningKey  string
 	TestnetSigningKey string
+}
+
+// BlendConfig tunes the Blend positions/catalog endpoints, which are served
+// from wallet-backend's Blend GraphQL surface (URLs and signing keys come
+// from WalletBackendConfig).
+type BlendConfig struct {
+	// PositionsCacheTTLSeconds is the Redis TTL for per-address position
+	// responses. User-visible staleness is this TTL plus wallet-backend's
+	// own ingestion lag, so keep it short.
+	PositionsCacheTTLSeconds int
+	// CatalogCacheTTLSeconds is the Redis TTL for the address-independent
+	// market views (pools, earn options). One cache entry per network serves
+	// every user.
+	CatalogCacheTTLSeconds int
+	// EarnPoolsConfigPath points to a JSON allowlist of pool contract IDs
+	// per network that Freighter offers for new deposits. It curates the
+	// earn-options endpoint only — user positions are never filtered by it,
+	// since users may hold positions in non-curated pools. Empty path
+	// disables curation (all pools are offered).
+	EarnPoolsConfigPath string
 }
