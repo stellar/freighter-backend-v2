@@ -49,6 +49,16 @@ type WalletBackendService interface {
 	GetHealth(ctx context.Context, network string) (GetHealthResponse, error)
 	GetBalancesByAccountAddresses(ctx context.Context, addresses []string, network string) (interface{}, error)
 	GetAccountTransactions(ctx context.Context, address, network string, params AccountHistoryParams) (*PaginatedResponse[*AccountTransaction], error)
+	// GetBlendPositions returns the account's Blend v2 positions across every
+	// pool it touched. An account unknown to wallet-backend returns empty
+	// positions, not an error — indistinguishable from "no positions" by
+	// design.
+	GetBlendPositions(ctx context.Context, address, network string) (*BlendAccountPositions, error)
+	// GetBlendPools returns the pool-wide Blend catalog (no account data).
+	GetBlendPools(ctx context.Context, network string) ([]BlendPool, error)
+	// GetBlendEarnOptions returns the asset-first earn catalog, pre-filtered
+	// upstream to enabled reserves in supply-accepting pools.
+	GetBlendEarnOptions(ctx context.Context, network string) ([]BlendEarnOption, error)
 }
 
 // StellarExpertAsset is the subset of the Stellar Expert /asset/{id} response
