@@ -188,6 +188,58 @@ func TestServeCmd_RejectsNegativePriceFetchTimeout(t *testing.T) {
 	assert.Contains(t, err.Error(), "--price-fetch-timeout-seconds=-1 must be >= 0")
 }
 
+func TestServeCmd_ValidatesBlendCacheTTLs(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "rejects negative positions cache TTL",
+			args:    []string{"--blend-positions-cache-ttl-seconds", "-1"},
+			wantErr: "--blend-positions-cache-ttl-seconds=-1 must be >= 0",
+		},
+		{
+			name:    "rejects negative catalog cache TTL",
+			args:    []string{"--blend-catalog-cache-ttl-seconds", "-30"},
+			wantErr: "--blend-catalog-cache-ttl-seconds=-30 must be >= 0",
+		},
+		{
+			// Zero is the documented boundary: accepted by validation
+			// (consumers substitute their own defaults for non-positive TTLs).
+			name: "accepts zero for both TTLs",
+			args: []string{
+				"--blend-positions-cache-ttl-seconds", "0",
+				"--blend-catalog-cache-ttl-seconds", "0",
+				"--database-url", "postgres://localhost/test",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			serveCmd := &ServeCmd{Cfg: &config.Config{}}
+			cmd := serveCmd.Command()
+			cmd.RunE = func(*cobra.Command, []string) error { return nil }
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(tc.args)
+
+			err := cmd.Execute()
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
 func TestServeCmd_RejectsAccountHistoryMaxLimitAbove100(t *testing.T) {
 	t.Parallel()
 
