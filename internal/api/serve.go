@@ -230,6 +230,18 @@ func (s *ApiServer) routes() ([]route, error) {
 	)
 	accountPositionsHandler := handlers.NewAccountPositionsHandler(positionsService)
 
+	blendCatalogService, err := services.NewBlendCatalogService(
+		s.walletBackendService,
+		s.redis,
+		time.Duration(s.cfg.BlendConfig.CatalogCacheTTLSeconds)*time.Second,
+		s.cfg.BlendConfig.EarnPoolsConfigPath,
+		s.appMetrics.Service,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("init blend catalog service: %w", err)
+	}
+	blendCatalogHandler := handlers.NewBlendCatalogHandler(blendCatalogService)
+
 	return []route{
 		// Health/liveness/readiness probes: gated=false, registered BARE — never
 		// wrapped by Auth. K8s and the docker-compose wget healthcheck cannot present
@@ -252,6 +264,8 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true},
 		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true},
 		{http.MethodGet, "/api/v1/accounts/{address}/positions", handlers.CustomHandler(accountPositionsHandler.GetAccountPositions), true},
+		{http.MethodGet, "/api/v1/protocols/blend/pools", handlers.CustomHandler(blendCatalogHandler.GetPools), true},
+		{http.MethodGet, "/api/v1/protocols/blend/earn-options", handlers.CustomHandler(blendCatalogHandler.GetEarnOptions), true},
 		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true},
 	}, nil
 }

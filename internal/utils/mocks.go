@@ -219,6 +219,37 @@ func (m *MockPositionsService) GetAccountPositions(ctx context.Context, address,
 	return &types.AccountPositions{Positions: []types.PoolPosition{}}, nil
 }
 
+// MockBlendCatalogService stubs types.BlendCatalogService for handler tests.
+type MockBlendCatalogService struct {
+	GetPoolsResult *types.BlendPoolsCatalog
+	GetPoolsError  error
+
+	GetEarnOptionsResult *types.BlendEarnOptionsCatalog
+	GetEarnOptionsError  error
+}
+
+func (m *MockBlendCatalogService) Name() string { return "mock-blend-catalog" }
+
+func (m *MockBlendCatalogService) GetPools(ctx context.Context, network string) (*types.BlendPoolsCatalog, error) {
+	if m.GetPoolsError != nil {
+		return nil, m.GetPoolsError
+	}
+	if m.GetPoolsResult != nil {
+		return m.GetPoolsResult, nil
+	}
+	return &types.BlendPoolsCatalog{Pools: []types.BlendCatalogPool{}}, nil
+}
+
+func (m *MockBlendCatalogService) GetEarnOptions(ctx context.Context, network string) (*types.BlendEarnOptionsCatalog, error) {
+	if m.GetEarnOptionsError != nil {
+		return nil, m.GetEarnOptionsError
+	}
+	if m.GetEarnOptionsResult != nil {
+		return m.GetEarnOptionsResult, nil
+	}
+	return &types.BlendEarnOptionsCatalog{Options: []types.BlendEarnAssetOption{}}, nil
+}
+
 type MockPricesService struct {
 	GetPricesFunc     func(ctx context.Context, tokens []string, network string) (map[string]*types.PriceEntry, error)
 	GetPricesOverride map[string]*types.PriceEntry
