@@ -222,6 +222,14 @@ func (s *ApiServer) routes() ([]route, error) {
 	}
 	whoamiHandler := handlers.NewWhoamiHandler()
 
+	positionsService := services.NewPositionsService(
+		s.walletBackendService,
+		s.redis,
+		time.Duration(s.cfg.BlendConfig.PositionsCacheTTLSeconds)*time.Second,
+		s.appMetrics.Service,
+	)
+	accountPositionsHandler := handlers.NewAccountPositionsHandler(positionsService)
+
 	return []route{
 		// Health/liveness/readiness probes: gated=false, registered BARE — never
 		// wrapped by Auth. K8s and the docker-compose wget healthcheck cannot present
@@ -243,6 +251,7 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodPost, "/api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances), true},
 		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true},
 		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true},
+		{http.MethodGet, "/api/v1/accounts/{address}/positions", handlers.CustomHandler(accountPositionsHandler.GetAccountPositions), true},
 		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true},
 	}, nil
 }
