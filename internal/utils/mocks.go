@@ -120,6 +120,14 @@ type MockWalletBackendService struct {
 	GetAccountTransactionsError error
 	// GetAccountTransactionsFunc overrides Result/Error when set.
 	GetAccountTransactionsFunc func(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[*types.AccountTransaction], error)
+
+	// Blend method stubs follow the same Result/Error/Func precedence.
+	GetBlendPositionsResult *types.BlendAccountPositions
+	GetBlendPositionsError  error
+	GetBlendPositionsFunc   func(ctx context.Context, address, network string) (*types.BlendAccountPositions, error)
+
+	GetBlendPoolsResult []types.BlendPool
+	GetBlendPoolsError  error
 }
 
 func (m *MockWalletBackendService) Name() string {
@@ -151,6 +159,29 @@ func (m *MockWalletBackendService) GetAccountTransactions(ctx context.Context, a
 		return nil, m.GetAccountTransactionsError
 	}
 	return m.GetAccountTransactionsResult, nil
+}
+
+func (m *MockWalletBackendService) GetBlendPositions(ctx context.Context, address, network string) (*types.BlendAccountPositions, error) {
+	if m.GetBlendPositionsFunc != nil {
+		return m.GetBlendPositionsFunc(ctx, address, network)
+	}
+	if m.GetBlendPositionsError != nil {
+		return nil, m.GetBlendPositionsError
+	}
+	if m.GetBlendPositionsResult != nil {
+		return m.GetBlendPositionsResult, nil
+	}
+	return &types.BlendAccountPositions{Pools: []types.BlendPoolPosition{}}, nil
+}
+
+func (m *MockWalletBackendService) GetBlendPools(ctx context.Context, network string) ([]types.BlendPool, error) {
+	if m.GetBlendPoolsError != nil {
+		return nil, m.GetBlendPoolsError
+	}
+	if m.GetBlendPoolsResult != nil {
+		return m.GetBlendPoolsResult, nil
+	}
+	return []types.BlendPool{}, nil
 }
 
 type MockPricesService struct {
