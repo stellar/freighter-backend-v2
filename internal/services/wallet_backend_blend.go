@@ -1,5 +1,5 @@
-// ABOUTME: Blend GraphQL queries against wallet-backend: account positions, the
-// ABOUTME: pool catalog, and earn options, via a hand-rolled signed GraphQL POST.
+// ABOUTME: Blend GraphQL queries against wallet-backend: account positions and
+// ABOUTME: the pool catalog, via a hand-rolled signed GraphQL POST.
 package services
 
 import (
@@ -50,7 +50,8 @@ const (
           borrowedUsd
           supplyApy
           borrowApy
-          emissionsApr
+          emissionsSupplyApr
+          emissionsBorrowApr
           interestEarned
           emissionsEarnedBlnd
           emissionsEarnedUsd
@@ -86,22 +87,6 @@ const (
     }
   }
 }`
-
-	blendEarnOptionsQuery = `query FreighterBlendEarnOptions {
-  blendEarnOptions {
-    assetContractId
-    tokenName
-    tokenSymbol
-    tokenDecimals
-    pools {
-      poolAddress
-      poolName
-      supplyApy
-      emissionsSupplyApr
-      suppliedUsd
-    }
-  }
-}`
 )
 
 // Root-field wrappers for each query document.
@@ -113,10 +98,6 @@ type blendPositionsData struct {
 
 type blendPoolsData struct {
 	BlendPools []types.BlendPool `json:"blendPools"`
-}
-
-type blendEarnOptionsData struct {
-	BlendEarnOptions []types.BlendEarnOption `json:"blendEarnOptions"`
 }
 
 // GetBlendPositions returns the account's Blend positions. accountByAddress
@@ -154,22 +135,6 @@ func (w *walletBackendService) GetBlendPools(ctx context.Context, network string
 		return []types.BlendPool{}, nil
 	}
 	return data.BlendPools, nil
-}
-
-// GetBlendEarnOptions returns the asset-first earn catalog. Always a non-nil
-// slice.
-func (w *walletBackendService) GetBlendEarnOptions(ctx context.Context, network string) (_ []types.BlendEarnOption, err error) {
-	start := time.Now()
-	defer func() { w.recordWBCall("GetBlendEarnOptions", network, start, err) }()
-
-	data, err := wbGraphQL[blendEarnOptionsData](ctx, w, network, "GetBlendEarnOptions", blendEarnOptionsQuery, nil)
-	if err != nil {
-		return nil, err
-	}
-	if data.BlendEarnOptions == nil {
-		return []types.BlendEarnOption{}, nil
-	}
-	return data.BlendEarnOptions, nil
 }
 
 // wbGraphQL executes one GraphQL document against the network's

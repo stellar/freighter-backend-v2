@@ -46,9 +46,6 @@ func TestLiveBlendQueries(t *testing.T) {
 	pools, err := svc.GetBlendPools(ctx, "TESTNET")
 	dump("blend_pools", pools, err)
 
-	options, err := svc.GetBlendEarnOptions(ctx, "TESTNET")
-	dump("blend_earn_options", options, err)
-
 	address := os.Getenv("WB_LIVE_ADDRESS")
 	if address == "" {
 		address = "GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552"

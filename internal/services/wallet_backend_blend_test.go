@@ -72,7 +72,8 @@ func TestGetBlendPositionsDecode(t *testing.T) {
 								"borrowedUsd": 495221.33,
 								"supplyApy": 0.0741,
 								"borrowApy": 0.1151,
-								"emissionsApr": 0.002,
+								"emissionsSupplyApr": 0.002,
+								"emissionsBorrowApr": 0.001,
 								"interestEarned": "6843215",
 								"emissionsEarnedBlnd": "12345678",
 								"emissionsEarnedUsd": 0.53,
@@ -90,7 +91,8 @@ func TestGetBlendPositionsDecode(t *testing.T) {
 								"borrowedUsd": null,
 								"supplyApy": null,
 								"borrowApy": null,
-								"emissionsApr": null,
+								"emissionsSupplyApr": null,
+								"emissionsBorrowApr": null,
 								"interestEarned": "0",
 								"emissionsEarnedBlnd": "0",
 								"emissionsEarnedUsd": null,
@@ -125,10 +127,15 @@ func TestGetBlendPositionsDecode(t *testing.T) {
 	assert.Equal(t, "6843215", priced.InterestEarned)
 	require.NotNil(t, priced.SupplyAPY)
 	assert.InDelta(t, 0.0741, *priced.SupplyAPY, 1e-9)
+	require.NotNil(t, priced.EmissionsSupplyAPR)
+	assert.InDelta(t, 0.002, *priced.EmissionsSupplyAPR, 1e-9)
+	require.NotNil(t, priced.EmissionsBorrowAPR)
+	assert.InDelta(t, 0.001, *priced.EmissionsBorrowAPR, 1e-9)
 
 	// Null Floats and null registry metadata decode to nil, not zero.
 	assert.Nil(t, unpriced.SuppliedUSD)
 	assert.Nil(t, unpriced.SupplyAPY)
+	assert.Nil(t, unpriced.EmissionsSupplyAPR)
 	assert.Nil(t, unpriced.PriceUSD)
 	assert.Nil(t, unpriced.TokenSymbol)
 	assert.Nil(t, unpriced.TokenDecimals)
@@ -156,7 +163,7 @@ func TestGetBlendPoolsDecode(t *testing.T) {
 				{
 					"address": "CAJJZSGMMM3PD7N33TAPHGBUGTB43OC73HVIK2L2G6BNGGGYOSSYBXBD",
 					"name": null,
-					"status": 1,
+					"status": "ACTIVE",
 					"suppliedUsd": 2100000.5,
 					"borrowedUsd": 900000.25,
 					"interestApy": 0.043,
@@ -205,32 +212,6 @@ func TestGetBlendPoolsDecode(t *testing.T) {
 	assert.Nil(t, pools[1].Status)
 	assert.Nil(t, pools[1].SuppliedUSD)
 	assert.Empty(t, pools[1].Reserves)
-}
-
-func TestGetBlendEarnOptionsDecode(t *testing.T) {
-	svc := newBlendTestService(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write(graphqlEnvelope(t, `{
-			"blendEarnOptions": [{
-				"assetContractId": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
-				"tokenName": "USD Coin",
-				"tokenSymbol": "USDC",
-				"tokenDecimals": 7,
-				"pools": [
-					{"poolAddress": "CAJJZSGMMM3PD7N33TAPHGBUGTB43OC73HVIK2L2G6BNGGGYOSSYBXBD", "poolName": "Fixed Pool V2", "supplyApy": 0.043, "emissionsSupplyApr": 0.008, "suppliedUsd": 1500000.0},
-					{"poolAddress": "CCCCIQSDILITHMM7PBSLVDT5MISSY7R26MNZXCX4H7J5JQ5FPIYOGYFS", "poolName": null, "supplyApy": 0.032, "emissionsSupplyApr": null, "suppliedUsd": null}
-				]
-			}]
-		}`))
-	})
-
-	options, err := svc.GetBlendEarnOptions(context.Background(), types.TESTNET)
-	require.NoError(t, err)
-
-	require.Len(t, options, 1)
-	require.Len(t, options[0].Pools, 2)
-	require.NotNil(t, options[0].Pools[0].EmissionsSupplyAPR)
-	assert.InDelta(t, 0.008, *options[0].Pools[0].EmissionsSupplyAPR, 1e-9)
-	assert.Nil(t, options[0].Pools[1].EmissionsSupplyAPR)
 }
 
 func TestBlendGraphQLErrorClassification(t *testing.T) {

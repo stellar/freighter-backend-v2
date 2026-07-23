@@ -1,5 +1,5 @@
-// ABOUTME: Decode types for wallet-backend's Blend v2 GraphQL surface (positions,
-// ABOUTME: pool catalog, earn options), mirroring blend.graphqls field for field.
+// ABOUTME: Decode types for wallet-backend's Blend v2 GraphQL surface (positions
+// ABOUTME: and pool catalog), mirroring blend.graphqls field for field.
 package types
 
 // Conventions, from the wallet-backend schema (blend.graphqls):
@@ -23,8 +23,10 @@ type BlendAccountPositions struct {
 }
 
 // BlendPoolPosition rolls up an account's reserve positions within one pool.
-// USDValue is supplied minus borrowed; NetAPY is the account's net rate for
-// this pool, netted against borrow interest.
+// USDValue is supplied minus borrowed. NetAPY nets supply earnings against
+// borrow interest over TOTAL SUPPLIED USD — the blend-sdk-js convention the
+// Blend UI shows: (Σ supplied·supplyApy − Σ borrowed·borrowApy) / Σ supplied;
+// 0 for a debt-only position, null when any reserve lacks a fresh price.
 type BlendPoolPosition struct {
 	PoolAddress string                 `json:"poolAddress"`
 	PoolName    *string                `json:"poolName"`
@@ -42,18 +44,23 @@ type BlendPoolPosition struct {
 // adjust the basis so the figure stays interest-only). EmissionsEarnedBLND
 // is claimable (uncollected) BLND across the reserve's emission streams.
 type BlendReservePosition struct {
-	AssetContractID     string   `json:"assetContractId"`
-	TokenName           *string  `json:"tokenName"`
-	TokenSymbol         *string  `json:"tokenSymbol"`
-	TokenDecimals       *int32   `json:"tokenDecimals"`
-	SuppliedTokens      string   `json:"suppliedTokens"`
-	CollateralTokens    string   `json:"collateralTokens"`
-	BorrowedTokens      string   `json:"borrowedTokens"`
-	SuppliedUSD         *float64 `json:"suppliedUsd"`
-	BorrowedUSD         *float64 `json:"borrowedUsd"`
-	SupplyAPY           *float64 `json:"supplyApy"`
-	BorrowAPY           *float64 `json:"borrowApy"`
-	EmissionsAPR        *float64 `json:"emissionsApr"`
+	AssetContractID  string   `json:"assetContractId"`
+	TokenName        *string  `json:"tokenName"`
+	TokenSymbol      *string  `json:"tokenSymbol"`
+	TokenDecimals    *int32   `json:"tokenDecimals"`
+	SuppliedTokens   string   `json:"suppliedTokens"`
+	CollateralTokens string   `json:"collateralTokens"`
+	BorrowedTokens   string   `json:"borrowedTokens"`
+	SuppliedUSD      *float64 `json:"suppliedUsd"`
+	BorrowedUSD      *float64 `json:"borrowedUsd"`
+	SupplyAPY        *float64 `json:"supplyApy"`
+	BorrowAPY        *float64 `json:"borrowApy"`
+	// EmissionsSupplyAPR / EmissionsBorrowAPR are the reserve's POOL-WIDE
+	// per-side emission-stream APRs (not scaled to this account's holding):
+	// 0 when the side has no active stream, null when the stream is active
+	// but a price is unavailable.
+	EmissionsSupplyAPR  *float64 `json:"emissionsSupplyApr"`
+	EmissionsBorrowAPR  *float64 `json:"emissionsBorrowApr"`
 	InterestEarned      string   `json:"interestEarned"`
 	EmissionsEarnedBLND string   `json:"emissionsEarnedBlnd"`
 	EmissionsEarnedUSD  *float64 `json:"emissionsEarnedUsd"`
@@ -69,7 +76,7 @@ type BlendReservePosition struct {
 type BlendPool struct {
 	Address     string         `json:"address"`
 	Name        *string        `json:"name"`
-	Status      *int32         `json:"status"`
+	Status      *string        `json:"status"`
 	SuppliedUSD *float64       `json:"suppliedUsd"`
 	BorrowedUSD *float64       `json:"borrowedUsd"`
 	InterestAPY *float64       `json:"interestApy"`
@@ -77,17 +84,17 @@ type BlendPool struct {
 	Reserves    []BlendReserve `json:"reserves"`
 }
 
-// Blend on-chain pool status values (BlendPool.Status). 0-3 accept supply
-// (deposits); 0-1 also allow borrowing; 4-6 reject both. Status is null
-// until the pool's config entry has been ingested.
+// BlendPoolStatus enum values (BlendPool.Status). The first four accept
+// supply (deposits); the first two also allow borrowing; the rest reject
+// both. Status is null until the pool's config entry has been ingested.
 const (
-	BlendPoolStatusAdminActive int32 = 0
-	BlendPoolStatusActive      int32 = 1
-	BlendPoolStatusAdminOnIce  int32 = 2
-	BlendPoolStatusOnIce       int32 = 3
-	BlendPoolStatusAdminFrozen int32 = 4
-	BlendPoolStatusFrozen      int32 = 5
-	BlendPoolStatusSetup       int32 = 6
+	BlendPoolStatusAdminActive = "ADMIN_ACTIVE"
+	BlendPoolStatusActive      = "ACTIVE"
+	BlendPoolStatusAdminOnIce  = "ADMIN_ON_ICE"
+	BlendPoolStatusOnIce       = "ON_ICE"
+	BlendPoolStatusAdminFrozen = "ADMIN_FROZEN"
+	BlendPoolStatusFrozen      = "FROZEN"
+	BlendPoolStatusSetup       = "SETUP"
 )
 
 // BlendReserve is a pool-wide reserve catalog row: rates and totals as of
@@ -105,26 +112,4 @@ type BlendReserve struct {
 	SuppliedUSD        *float64 `json:"suppliedUsd"`
 	BorrowedUSD        *float64 `json:"borrowedUsd"`
 	PriceUSD           *float64 `json:"priceUsd"`
-}
-
-// BlendEarnOption is one entry of Query.blendEarnOptions: an asset with at
-// least one enabled reserve in a pool that currently accepts supply.
-// Upstream already excludes disabled reserves and supply-rejecting pools
-// (status >= 4 or not yet ingested).
-type BlendEarnOption struct {
-	AssetContractID string                `json:"assetContractId"`
-	TokenName       *string               `json:"tokenName"`
-	TokenSymbol     *string               `json:"tokenSymbol"`
-	TokenDecimals   *int32                `json:"tokenDecimals"`
-	Pools           []BlendEarnPoolOption `json:"pools"`
-}
-
-// BlendEarnPoolOption is one pool's offer for an earn option's asset.
-// SupplyAPY + EmissionsSupplyAPR is the emissions-inclusive earn headline.
-type BlendEarnPoolOption struct {
-	PoolAddress        string   `json:"poolAddress"`
-	PoolName           *string  `json:"poolName"`
-	SupplyAPY          *float64 `json:"supplyApy"`
-	EmissionsSupplyAPR *float64 `json:"emissionsSupplyApr"`
-	SuppliedUSD        *float64 `json:"suppliedUsd"`
 }

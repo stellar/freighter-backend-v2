@@ -128,9 +128,6 @@ type MockWalletBackendService struct {
 
 	GetBlendPoolsResult []types.BlendPool
 	GetBlendPoolsError  error
-
-	GetBlendEarnOptionsResult []types.BlendEarnOption
-	GetBlendEarnOptionsError  error
 }
 
 func (m *MockWalletBackendService) Name() string {
@@ -185,16 +182,6 @@ func (m *MockWalletBackendService) GetBlendPools(ctx context.Context, network st
 		return m.GetBlendPoolsResult, nil
 	}
 	return []types.BlendPool{}, nil
-}
-
-func (m *MockWalletBackendService) GetBlendEarnOptions(ctx context.Context, network string) ([]types.BlendEarnOption, error) {
-	if m.GetBlendEarnOptionsError != nil {
-		return nil, m.GetBlendEarnOptionsError
-	}
-	if m.GetBlendEarnOptionsResult != nil {
-		return m.GetBlendEarnOptionsResult, nil
-	}
-	return []types.BlendEarnOption{}, nil
 }
 
 type MockPricesService struct {

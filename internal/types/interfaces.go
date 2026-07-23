@@ -56,9 +56,6 @@ type WalletBackendService interface {
 	GetBlendPositions(ctx context.Context, address, network string) (*BlendAccountPositions, error)
 	// GetBlendPools returns the pool-wide Blend catalog (no account data).
 	GetBlendPools(ctx context.Context, network string) ([]BlendPool, error)
-	// GetBlendEarnOptions returns the asset-first earn catalog, pre-filtered
-	// upstream to enabled reserves in supply-accepting pools.
-	GetBlendEarnOptions(ctx context.Context, network string) ([]BlendEarnOption, error)
 }
 
 // StellarExpertAsset is the subset of the Stellar Expert /asset/{id} response
