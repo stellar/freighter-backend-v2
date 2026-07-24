@@ -34,6 +34,11 @@ func TestMapStateChange_AllVariants(t *testing.T) {
 	t.Parallel()
 	base := wbtypes.BaseStateChangeFields{Category: wbtypes.StateChangeCategoryBalance, Reason: wbtypes.StateChangeReasonDebit}
 	wantBase := types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}
+	variantBase := func(v string) types.StateChangeBase {
+		b := wantBase
+		b.Variant = v
+		return b
+	}
 	s := "x"
 	oldW, newW := int32(1), int32(2)
 	cases := []struct {
@@ -43,79 +48,79 @@ func TestMapStateChange_AllVariants(t *testing.T) {
 	}{
 		{
 			"balance", &wbtypes.BalanceChange{BaseStateChangeFields: base, TokenID: "native", Amount: "10", ToMuxedID: &s},
-			&types.BalanceChange{StateChangeBase: wantBase, TokenID: "native", Amount: "10", ToMuxedID: &s},
+			&types.BalanceChange{StateChangeBase: variantBase("BalanceChange"), TokenID: "native", Amount: "10", ToMuxedID: &s},
 		},
 		{
 			"fee", &wbtypes.FeeChange{BaseStateChangeFields: base, TokenID: "native", Amount: "1"},
-			&types.FeeChange{StateChangeBase: wantBase, TokenID: "native", Amount: "1"},
+			&types.FeeChange{StateChangeBase: variantBase("FeeChange"), TokenID: "native", Amount: "1"},
 		},
 		{
 			"account_created", &wbtypes.AccountCreatedChange{BaseStateChangeFields: base, FunderAddress: "GFUNDER"},
-			&types.AccountCreatedChange{StateChangeBase: wantBase, FunderAddress: "GFUNDER"},
+			&types.AccountCreatedChange{StateChangeBase: variantBase("AccountCreatedChange"), FunderAddress: "GFUNDER"},
 		},
 		{
 			"contract_deployed", &wbtypes.ContractDeployedChange{BaseStateChangeFields: base, DeployerAddress: "GDEPLOY"},
-			&types.ContractDeployedChange{StateChangeBase: wantBase, DeployerAddress: "GDEPLOY"},
+			&types.ContractDeployedChange{StateChangeBase: variantBase("ContractDeployedChange"), DeployerAddress: "GDEPLOY"},
 		},
 		{
 			"account_merged", &wbtypes.AccountMergedChange{BaseStateChangeFields: base, DestinationAddress: "GDEST"},
-			&types.AccountMergedChange{StateChangeBase: wantBase, DestinationAddress: "GDEST"},
+			&types.AccountMergedChange{StateChangeBase: variantBase("AccountMergedChange"), DestinationAddress: "GDEST"},
 		},
 		{
 			"signer_added", &wbtypes.SignerAddedChange{BaseStateChangeFields: base, SignerAddress: "GSIGN", NewWeight: newW},
-			&types.SignerAddedChange{StateChangeBase: wantBase, SignerAddress: "GSIGN", NewWeight: newW},
+			&types.SignerAddedChange{StateChangeBase: variantBase("SignerAddedChange"), SignerAddress: "GSIGN", NewWeight: newW},
 		},
 		{
 			"signer_updated", &wbtypes.SignerUpdatedChange{BaseStateChangeFields: base, SignerAddress: "GSIGN", OldWeight: &oldW, NewWeight: newW},
-			&types.SignerUpdatedChange{StateChangeBase: wantBase, SignerAddress: "GSIGN", OldWeight: &oldW, NewWeight: newW},
+			&types.SignerUpdatedChange{StateChangeBase: variantBase("SignerUpdatedChange"), SignerAddress: "GSIGN", OldWeight: &oldW, NewWeight: newW},
 		},
 		{
 			"signer_removed", &wbtypes.SignerRemovedChange{BaseStateChangeFields: base, SignerAddress: "GSIGN", OldWeight: &oldW},
-			&types.SignerRemovedChange{StateChangeBase: wantBase, SignerAddress: "GSIGN", OldWeight: &oldW},
+			&types.SignerRemovedChange{StateChangeBase: variantBase("SignerRemovedChange"), SignerAddress: "GSIGN", OldWeight: &oldW},
 		},
 		{
 			"threshold", &wbtypes.ThresholdChange{BaseStateChangeFields: base, OldThreshold: &oldW, NewThreshold: newW},
-			&types.ThresholdChange{StateChangeBase: wantBase, OldThreshold: &oldW, NewThreshold: newW},
+			&types.ThresholdChange{StateChangeBase: variantBase("ThresholdChange"), OldThreshold: &oldW, NewThreshold: newW},
 		},
 		{
 			"account_flags", &wbtypes.AccountFlagsChange{BaseStateChangeFields: base, Flags: []wbtypes.AccountFlag{wbtypes.AccountFlagAuthRequired}},
-			&types.AccountFlagsChange{StateChangeBase: wantBase, Flags: []string{"AUTH_REQUIRED"}},
+			&types.AccountFlagsChange{StateChangeBase: variantBase("AccountFlagsChange"), Flags: []string{"AUTH_REQUIRED"}},
 		},
 		{
 			"home_domain", &wbtypes.HomeDomainChange{BaseStateChangeFields: base, OldHomeDomain: &s, NewHomeDomain: &s},
-			&types.HomeDomainChange{StateChangeBase: wantBase, OldHomeDomain: &s, NewHomeDomain: &s},
+			&types.HomeDomainChange{StateChangeBase: variantBase("HomeDomainChange"), OldHomeDomain: &s, NewHomeDomain: &s},
 		},
 		{
 			"data_entry", &wbtypes.DataEntryChange{BaseStateChangeFields: base, Name: "k", OldValue: &s, NewValue: &s},
-			&types.DataEntryChange{StateChangeBase: wantBase, Name: "k", OldValue: &s, NewValue: &s},
+			&types.DataEntryChange{StateChangeBase: variantBase("DataEntryChange"), Name: "k", OldValue: &s, NewValue: &s},
 		},
 		{
 			"allowance", &wbtypes.AllowanceChange{BaseStateChangeFields: base, TokenID: "CTOKEN", Spender: "GSPEND", Amount: "5", ExpirationLedger: 42},
-			&types.AllowanceChange{StateChangeBase: wantBase, TokenID: "CTOKEN", Spender: "GSPEND", Amount: "5", ExpirationLedger: 42},
+			&types.AllowanceChange{StateChangeBase: variantBase("AllowanceChange"), TokenID: "CTOKEN", Spender: "GSPEND", Amount: "5", ExpirationLedger: 42},
 		},
 		{
 			"trustline_added", &wbtypes.TrustlineAddedChange{BaseStateChangeFields: base, TokenID: &s, LiquidityPoolID: &s, Limit: "100"},
-			&types.TrustlineAddedChange{StateChangeBase: wantBase, TokenID: &s, LiquidityPoolID: &s, Limit: "100"},
+			&types.TrustlineAddedChange{StateChangeBase: variantBase("TrustlineAddedChange"), TokenID: &s, LiquidityPoolID: &s, Limit: "100"},
 		},
 		{
 			"trustline_updated", &wbtypes.TrustlineUpdatedChange{BaseStateChangeFields: base, TokenID: &s, LiquidityPoolID: &s, OldLimit: "10", NewLimit: "20"},
-			&types.TrustlineUpdatedChange{StateChangeBase: wantBase, TokenID: &s, LiquidityPoolID: &s, OldLimit: "10", NewLimit: "20"},
+			&types.TrustlineUpdatedChange{StateChangeBase: variantBase("TrustlineUpdatedChange"), TokenID: &s, LiquidityPoolID: &s, OldLimit: "10", NewLimit: "20"},
 		},
 		{
 			"trustline_removed", &wbtypes.TrustlineRemovedChange{BaseStateChangeFields: base, TokenID: &s, LiquidityPoolID: &s},
-			&types.TrustlineRemovedChange{StateChangeBase: wantBase, TokenID: &s, LiquidityPoolID: &s},
+			&types.TrustlineRemovedChange{StateChangeBase: variantBase("TrustlineRemovedChange"), TokenID: &s, LiquidityPoolID: &s},
 		},
 		{
 			"sponsorship", &wbtypes.SponsorshipChange{BaseStateChangeFields: base, SponsoredAddress: &s, SponsorAddress: &s, TokenID: &s, LiquidityPoolID: &s, ClaimableBalanceID: &s, DataName: &s, SignerAddress: &s},
-			&types.SponsorshipChange{StateChangeBase: wantBase, SponsoredAddress: &s, SponsorAddress: &s, TokenID: &s, LiquidityPoolID: &s, ClaimableBalanceID: &s, DataName: &s, SignerAddress: &s},
+			&types.SponsorshipChange{StateChangeBase: variantBase("SponsorshipChange"), SponsoredAddress: &s, SponsorAddress: &s, TokenID: &s, LiquidityPoolID: &s, ClaimableBalanceID: &s, DataName: &s, SignerAddress: &s},
 		},
 		{
 			"balance_authorization", &wbtypes.BalanceAuthorizationChange{BaseStateChangeFields: base, TokenID: &s, LiquidityPoolID: &s, Flags: []wbtypes.TrustlineFlag{wbtypes.TrustlineFlagAuthorized}},
-			&types.BalanceAuthorizationChange{StateChangeBase: wantBase, TokenID: &s, LiquidityPoolID: &s, Flags: []string{"AUTHORIZED"}},
+			&types.BalanceAuthorizationChange{StateChangeBase: variantBase("BalanceAuthorizationChange"), TokenID: &s, LiquidityPoolID: &s, Flags: []string{"AUTHORIZED"}},
 		},
 		{
 			"balance_authorization_nil_flags", &wbtypes.BalanceAuthorizationChange{BaseStateChangeFields: base, TokenID: &s},
-			&types.BalanceAuthorizationChange{StateChangeBase: wantBase, TokenID: &s},
+			&types.BalanceAuthorizationChange{StateChangeBase: variantBase("BalanceAuthorizationChange"), TokenID: &s},
 		},
 	}
 	for _, tc := range cases {

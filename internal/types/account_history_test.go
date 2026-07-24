@@ -29,12 +29,16 @@ func TestAccountTransaction_JSONWireContract(t *testing.T) {
 		}},
 		StateChanges: []types.StateChange{
 			&types.BalanceChange{
-				StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT", LedgerNumber: 51234567, LedgerCreatedAt: ts, IngestedAt: ts},
+				StateChangeBase: types.StateChangeBase{Variant: "BalanceChange", Type: "BALANCE", Reason: "DEBIT", LedgerNumber: 51234567, LedgerCreatedAt: ts, IngestedAt: ts},
 				TokenID:         "native", Amount: "10.0000000",
 			},
 			&types.AccountCreatedChange{
-				StateChangeBase: types.StateChangeBase{Type: "ACCOUNT", Reason: "CREATE", LedgerNumber: 51234567, LedgerCreatedAt: ts, IngestedAt: ts},
+				StateChangeBase: types.StateChangeBase{Variant: "AccountCreatedChange", Type: "ACCOUNT", Reason: "CREATE", LedgerNumber: 51234567, LedgerCreatedAt: ts, IngestedAt: ts},
 				FunderAddress:   funder,
+			},
+			&types.AccountFlagsChange{
+				StateChangeBase: types.StateChangeBase{Variant: "AccountFlagsChange", Type: "FLAGS", Reason: "SET", LedgerNumber: 51234567, LedgerCreatedAt: ts, IngestedAt: ts},
+				Flags:           []string{},
 			},
 		},
 	}
@@ -52,11 +56,17 @@ func TestAccountTransaction_JSONWireContract(t *testing.T) {
 	assert.NotContains(t, s, "operationType")
 	assert.NotContains(t, s, "ledgerCreatedAt")
 	assert.Contains(t, s, `"state_changes":`)
+	assert.Contains(t, s, `"variant":"BalanceChange"`)
 	assert.Contains(t, s, `"type":"BALANCE"`)
 	assert.Contains(t, s, `"token_id":"native"`)
 	assert.Contains(t, s, `"amount":"10.0000000"`)
+	assert.Contains(t, s, `"variant":"AccountCreatedChange"`)
 	assert.Contains(t, s, `"type":"ACCOUNT"`)
 	assert.Contains(t, s, `"funder_address":"GFUNDER"`)
+	// The upstream flags list is non-null, so an empty AccountFlagsChange
+	// encodes an empty array rather than null.
+	assert.Contains(t, s, `"flags":[]`)
+	assert.NotContains(t, s, `"flags":null`)
 }
 
 func TestAccountTransaction_EmptyDetailsMarshalAsArrays(t *testing.T) {

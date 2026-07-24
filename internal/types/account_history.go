@@ -40,6 +40,11 @@ type StateChange interface{ isStateChange() }
 // StateChangeBase holds the fields common to every state-change variant. Type
 // carries the state-change category (BALANCE, SIGNER, TRUSTLINE, ...).
 type StateChangeBase struct {
+	// Variant names the concrete state-change shape (the wallet-backend GraphQL
+	// type, e.g. "BalanceChange", "FeeChange"). Type/reason alone do not identify
+	// it: BalanceChange and FeeChange share (BALANCE, DEBIT/CREDIT), and account
+	// creation and contract deployment share (ACCOUNT, CREATE).
+	Variant         string    `json:"variant"`
 	Type            string    `json:"type"`
 	Reason          string    `json:"reason"`
 	LedgerNumber    uint32    `json:"ledger_number"`

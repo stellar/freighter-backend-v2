@@ -38,7 +38,8 @@ func mapOperation(o *wbtypes.Operation) types.Operation {
 // mapStateChange dispatches an SDK state-change node to the matching freighter
 // variant. The SDK's UnmarshalStateChangeNode rejects unknown __typename, so
 // the default branch is unreachable in practice; it degrades a hypothetical
-// future variant to type+reason rather than panicking or dropping the row.
+// future variant to base fields (with an empty variant) rather than panicking
+// or dropping the row.
 func mapStateChange(n wbtypes.StateChangeNode) types.StateChange {
 	base := types.StateChangeBase{
 		Type:            string(n.GetCategory()),
@@ -47,42 +48,62 @@ func mapStateChange(n wbtypes.StateChangeNode) types.StateChange {
 		LedgerCreatedAt: n.GetLedgerCreatedAt(),
 		IngestedAt:      n.GetIngestedAt(),
 	}
+	// Variant carries the concrete upstream shape: type/reason alone are
+	// ambiguous (BalanceChange vs FeeChange, AccountCreated vs ContractDeployed).
 	switch sc := n.(type) {
 	case *wbtypes.BalanceChange:
+		base.Variant = "BalanceChange"
 		return &types.BalanceChange{StateChangeBase: base, TokenID: sc.TokenID, Amount: sc.Amount, ToMuxedID: sc.ToMuxedID}
 	case *wbtypes.FeeChange:
+		base.Variant = "FeeChange"
 		return &types.FeeChange{StateChangeBase: base, TokenID: sc.TokenID, Amount: sc.Amount}
 	case *wbtypes.AccountCreatedChange:
+		base.Variant = "AccountCreatedChange"
 		return &types.AccountCreatedChange{StateChangeBase: base, FunderAddress: sc.FunderAddress}
 	case *wbtypes.ContractDeployedChange:
+		base.Variant = "ContractDeployedChange"
 		return &types.ContractDeployedChange{StateChangeBase: base, DeployerAddress: sc.DeployerAddress}
 	case *wbtypes.AccountMergedChange:
+		base.Variant = "AccountMergedChange"
 		return &types.AccountMergedChange{StateChangeBase: base, DestinationAddress: sc.DestinationAddress}
 	case *wbtypes.SignerAddedChange:
+		base.Variant = "SignerAddedChange"
 		return &types.SignerAddedChange{StateChangeBase: base, SignerAddress: sc.SignerAddress, NewWeight: sc.NewWeight}
 	case *wbtypes.SignerUpdatedChange:
+		base.Variant = "SignerUpdatedChange"
 		return &types.SignerUpdatedChange{StateChangeBase: base, SignerAddress: sc.SignerAddress, OldWeight: sc.OldWeight, NewWeight: sc.NewWeight}
 	case *wbtypes.SignerRemovedChange:
+		base.Variant = "SignerRemovedChange"
 		return &types.SignerRemovedChange{StateChangeBase: base, SignerAddress: sc.SignerAddress, OldWeight: sc.OldWeight}
 	case *wbtypes.ThresholdChange:
+		base.Variant = "ThresholdChange"
 		return &types.ThresholdChange{StateChangeBase: base, OldThreshold: sc.OldThreshold, NewThreshold: sc.NewThreshold}
 	case *wbtypes.AccountFlagsChange:
+		base.Variant = "AccountFlagsChange"
 		return &types.AccountFlagsChange{StateChangeBase: base, Flags: mapAccountFlags(sc.Flags)}
 	case *wbtypes.HomeDomainChange:
+		base.Variant = "HomeDomainChange"
 		return &types.HomeDomainChange{StateChangeBase: base, OldHomeDomain: sc.OldHomeDomain, NewHomeDomain: sc.NewHomeDomain}
 	case *wbtypes.DataEntryChange:
+		base.Variant = "DataEntryChange"
 		return &types.DataEntryChange{StateChangeBase: base, Name: sc.Name, OldValue: sc.OldValue, NewValue: sc.NewValue}
 	case *wbtypes.AllowanceChange:
+		base.Variant = "AllowanceChange"
 		return &types.AllowanceChange{StateChangeBase: base, TokenID: sc.TokenID, Spender: sc.Spender, Amount: sc.Amount, ExpirationLedger: sc.ExpirationLedger}
 	case *wbtypes.TrustlineAddedChange:
+		base.Variant = "TrustlineAddedChange"
 		return &types.TrustlineAddedChange{StateChangeBase: base, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID, Limit: sc.Limit}
 	case *wbtypes.TrustlineUpdatedChange:
+		base.Variant = "TrustlineUpdatedChange"
 		return &types.TrustlineUpdatedChange{StateChangeBase: base, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID, OldLimit: sc.OldLimit, NewLimit: sc.NewLimit}
 	case *wbtypes.TrustlineRemovedChange:
+		base.Variant = "TrustlineRemovedChange"
 		return &types.TrustlineRemovedChange{StateChangeBase: base, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID}
 	case *wbtypes.SponsorshipChange:
+		base.Variant = "SponsorshipChange"
 		return &types.SponsorshipChange{StateChangeBase: base, SponsoredAddress: sc.SponsoredAddress, SponsorAddress: sc.SponsorAddress, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID, ClaimableBalanceID: sc.ClaimableBalanceID, DataName: sc.DataName, SignerAddress: sc.SignerAddress}
 	case *wbtypes.BalanceAuthorizationChange:
+		base.Variant = "BalanceAuthorizationChange"
 		return &types.BalanceAuthorizationChange{StateChangeBase: base, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID, Flags: mapTrustlineFlags(sc.Flags)}
 	default:
 		return &base
@@ -90,11 +111,9 @@ func mapStateChange(n wbtypes.StateChangeNode) types.StateChange {
 }
 
 // mapAccountFlags converts SDK account flags to their string representations.
-// Returns nil for an empty input so the REST field marshals consistently.
+// Always returns a non-nil slice: the upstream field is a non-null list, so the
+// REST field encodes [] rather than null when empty.
 func mapAccountFlags(flags []wbtypes.AccountFlag) []string {
-	if len(flags) == 0 {
-		return nil
-	}
 	out := make([]string, len(flags))
 	for i, f := range flags {
 		out[i] = string(f)
