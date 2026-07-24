@@ -1,5 +1,5 @@
 // ABOUTME: Maps wallet-backend SDK transaction/operation/state-change types into freighter snake_case REST types.
-// ABOUTME: mapStateChange is the only non-trivial mapper — a type switch over the 9 SDK state-change variants.
+// ABOUTME: mapStateChange is the only non-trivial mapper — a type switch over the 18 SDK state-change variants.
 package services
 
 import (
@@ -41,34 +41,79 @@ func mapOperation(o *wbtypes.Operation) types.Operation {
 // future variant to type+reason rather than panicking or dropping the row.
 func mapStateChange(n wbtypes.StateChangeNode) types.StateChange {
 	base := types.StateChangeBase{
-		Type:            string(n.GetType()),
+		Type:            string(n.GetCategory()),
 		Reason:          string(n.GetReason()),
 		LedgerNumber:    n.GetLedgerNumber(),
 		LedgerCreatedAt: n.GetLedgerCreatedAt(),
 		IngestedAt:      n.GetIngestedAt(),
 	}
 	switch sc := n.(type) {
-	case *wbtypes.StandardBalanceChange:
-		return &types.StandardBalanceChange{StateChangeBase: base, StandardBalanceTokenID: sc.TokenID, Amount: sc.Amount}
-	case *wbtypes.AccountChange:
-		return &types.AccountChange{StateChangeBase: base, FunderAddress: sc.FunderAddress}
-	case *wbtypes.SignerChange:
-		return &types.SignerChange{StateChangeBase: base, SignerAddress: sc.SignerAddress, SignerWeights: sc.SignerWeights}
-	case *wbtypes.SignerThresholdsChange:
-		return &types.SignerThresholdsChange{StateChangeBase: base, Thresholds: sc.Thresholds}
-	case *wbtypes.MetadataChange:
-		return &types.MetadataChange{StateChangeBase: base, MetadataKeyValue: sc.KeyValue}
-	case *wbtypes.FlagsChange:
-		return &types.FlagsChange{StateChangeBase: base, Flags: sc.Flags}
-	case *wbtypes.TrustlineChange:
-		return &types.TrustlineChange{StateChangeBase: base, TrustlineTokenID: sc.TokenID, Limit: sc.Limit, TrustlineLiquidityPoolID: sc.LiquidityPoolID}
-	case *wbtypes.ReservesChange:
-		return &types.ReservesChange{StateChangeBase: base, SponsoredAddress: sc.SponsoredAddress, SponsorAddress: sc.SponsorAddress, SponsoredData: sc.SponsoredData, SponsoredTrustline: sc.SponsoredTrustline, ClaimableBalanceID: sc.ClaimableBalanceID, LiquidityPoolID: sc.LiquidityPoolID}
+	case *wbtypes.BalanceChange:
+		return &types.BalanceChange{StateChangeBase: base, TokenID: sc.TokenID, Amount: sc.Amount, ToMuxedID: sc.ToMuxedID}
+	case *wbtypes.FeeChange:
+		return &types.FeeChange{StateChangeBase: base, TokenID: sc.TokenID, Amount: sc.Amount}
+	case *wbtypes.AccountCreatedChange:
+		return &types.AccountCreatedChange{StateChangeBase: base, FunderAddress: sc.FunderAddress}
+	case *wbtypes.ContractDeployedChange:
+		return &types.ContractDeployedChange{StateChangeBase: base, DeployerAddress: sc.DeployerAddress}
+	case *wbtypes.AccountMergedChange:
+		return &types.AccountMergedChange{StateChangeBase: base, DestinationAddress: sc.DestinationAddress}
+	case *wbtypes.SignerAddedChange:
+		return &types.SignerAddedChange{StateChangeBase: base, SignerAddress: sc.SignerAddress, NewWeight: sc.NewWeight}
+	case *wbtypes.SignerUpdatedChange:
+		return &types.SignerUpdatedChange{StateChangeBase: base, SignerAddress: sc.SignerAddress, OldWeight: sc.OldWeight, NewWeight: sc.NewWeight}
+	case *wbtypes.SignerRemovedChange:
+		return &types.SignerRemovedChange{StateChangeBase: base, SignerAddress: sc.SignerAddress, OldWeight: sc.OldWeight}
+	case *wbtypes.ThresholdChange:
+		return &types.ThresholdChange{StateChangeBase: base, OldThreshold: sc.OldThreshold, NewThreshold: sc.NewThreshold}
+	case *wbtypes.AccountFlagsChange:
+		return &types.AccountFlagsChange{StateChangeBase: base, Flags: mapAccountFlags(sc.Flags)}
+	case *wbtypes.HomeDomainChange:
+		return &types.HomeDomainChange{StateChangeBase: base, OldHomeDomain: sc.OldHomeDomain, NewHomeDomain: sc.NewHomeDomain}
+	case *wbtypes.DataEntryChange:
+		return &types.DataEntryChange{StateChangeBase: base, Name: sc.Name, OldValue: sc.OldValue, NewValue: sc.NewValue}
+	case *wbtypes.AllowanceChange:
+		return &types.AllowanceChange{StateChangeBase: base, TokenID: sc.TokenID, Spender: sc.Spender, Amount: sc.Amount, ExpirationLedger: sc.ExpirationLedger}
+	case *wbtypes.TrustlineAddedChange:
+		return &types.TrustlineAddedChange{StateChangeBase: base, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID, Limit: sc.Limit}
+	case *wbtypes.TrustlineUpdatedChange:
+		return &types.TrustlineUpdatedChange{StateChangeBase: base, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID, OldLimit: sc.OldLimit, NewLimit: sc.NewLimit}
+	case *wbtypes.TrustlineRemovedChange:
+		return &types.TrustlineRemovedChange{StateChangeBase: base, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID}
+	case *wbtypes.SponsorshipChange:
+		return &types.SponsorshipChange{StateChangeBase: base, SponsoredAddress: sc.SponsoredAddress, SponsorAddress: sc.SponsorAddress, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID, ClaimableBalanceID: sc.ClaimableBalanceID, DataName: sc.DataName, SignerAddress: sc.SignerAddress}
 	case *wbtypes.BalanceAuthorizationChange:
-		return &types.BalanceAuthorizationChange{StateChangeBase: base, BalanceAuthTokenID: sc.TokenID, BalanceAuthLiquidityPoolID: sc.LiquidityPoolID, Flags: sc.Flags}
+		return &types.BalanceAuthorizationChange{StateChangeBase: base, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID, Flags: mapTrustlineFlags(sc.Flags)}
 	default:
 		return &base
 	}
+}
+
+// mapAccountFlags converts SDK account flags to their string representations.
+// Returns nil for an empty input so the REST field marshals consistently.
+func mapAccountFlags(flags []wbtypes.AccountFlag) []string {
+	if len(flags) == 0 {
+		return nil
+	}
+	out := make([]string, len(flags))
+	for i, f := range flags {
+		out[i] = string(f)
+	}
+	return out
+}
+
+// mapTrustlineFlags converts SDK trustline flags to their string
+// representations. Returns nil for a nil/empty input (SAC contract-holder
+// authorization carries no flags), which the REST field omits.
+func mapTrustlineFlags(flags []wbtypes.TrustlineFlag) []string {
+	if len(flags) == 0 {
+		return nil
+	}
+	out := make([]string, len(flags))
+	for i, f := range flags {
+		out[i] = string(f)
+	}
+	return out
 }
 
 // mapAccountTransactionEdge flattens one SDK edge into an AccountTransaction.

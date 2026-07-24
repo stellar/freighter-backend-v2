@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for the wbclient -> freighter snake_case mapping helpers.
-// ABOUTME: Covers transaction/operation field mapping, all 9 state-change variants, and edge flattening.
+// ABOUTME: Covers transaction/operation field mapping, all 18 state-change variants, and edge flattening.
 package services
 
 import (
@@ -32,48 +32,90 @@ func TestMapTransactionAndOperation(t *testing.T) {
 
 func TestMapStateChange_AllVariants(t *testing.T) {
 	t.Parallel()
-	base := wbtypes.BaseStateChangeFields{Type: wbtypes.StateChangeCategoryBalance, Reason: wbtypes.StateChangeReasonDebit}
+	base := wbtypes.BaseStateChangeFields{Category: wbtypes.StateChangeCategoryBalance, Reason: wbtypes.StateChangeReasonDebit}
+	wantBase := types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}
 	s := "x"
+	oldW, newW := int32(1), int32(2)
 	cases := []struct {
 		name string
 		in   wbtypes.StateChangeNode
 		want types.StateChange
 	}{
 		{
-			"standard_balance", &wbtypes.StandardBalanceChange{BaseStateChangeFields: base, TokenID: "native", Amount: "10"},
-			&types.StandardBalanceChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, StandardBalanceTokenID: "native", Amount: "10"},
+			"balance", &wbtypes.BalanceChange{BaseStateChangeFields: base, TokenID: "native", Amount: "10", ToMuxedID: &s},
+			&types.BalanceChange{StateChangeBase: wantBase, TokenID: "native", Amount: "10", ToMuxedID: &s},
 		},
 		{
-			"account", &wbtypes.AccountChange{BaseStateChangeFields: base, FunderAddress: &s},
-			&types.AccountChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, FunderAddress: &s},
+			"fee", &wbtypes.FeeChange{BaseStateChangeFields: base, TokenID: "native", Amount: "1"},
+			&types.FeeChange{StateChangeBase: wantBase, TokenID: "native", Amount: "1"},
 		},
 		{
-			"signer", &wbtypes.SignerChange{BaseStateChangeFields: base, SignerAddress: &s, SignerWeights: &s},
-			&types.SignerChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, SignerAddress: &s, SignerWeights: &s},
+			"account_created", &wbtypes.AccountCreatedChange{BaseStateChangeFields: base, FunderAddress: "GFUNDER"},
+			&types.AccountCreatedChange{StateChangeBase: wantBase, FunderAddress: "GFUNDER"},
 		},
 		{
-			"signer_thresholds", &wbtypes.SignerThresholdsChange{BaseStateChangeFields: base, Thresholds: "1,2,3"},
-			&types.SignerThresholdsChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, Thresholds: "1,2,3"},
+			"contract_deployed", &wbtypes.ContractDeployedChange{BaseStateChangeFields: base, DeployerAddress: "GDEPLOY"},
+			&types.ContractDeployedChange{StateChangeBase: wantBase, DeployerAddress: "GDEPLOY"},
 		},
 		{
-			"metadata", &wbtypes.MetadataChange{BaseStateChangeFields: base, KeyValue: "k=v"},
-			&types.MetadataChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, MetadataKeyValue: "k=v"},
+			"account_merged", &wbtypes.AccountMergedChange{BaseStateChangeFields: base, DestinationAddress: "GDEST"},
+			&types.AccountMergedChange{StateChangeBase: wantBase, DestinationAddress: "GDEST"},
 		},
 		{
-			"flags", &wbtypes.FlagsChange{BaseStateChangeFields: base, Flags: []string{"AUTH"}},
-			&types.FlagsChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, Flags: []string{"AUTH"}},
+			"signer_added", &wbtypes.SignerAddedChange{BaseStateChangeFields: base, SignerAddress: "GSIGN", NewWeight: newW},
+			&types.SignerAddedChange{StateChangeBase: wantBase, SignerAddress: "GSIGN", NewWeight: newW},
 		},
 		{
-			"trustline", &wbtypes.TrustlineChange{BaseStateChangeFields: base, TokenID: &s, Limit: &s, LiquidityPoolID: &s},
-			&types.TrustlineChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, TrustlineTokenID: &s, Limit: &s, TrustlineLiquidityPoolID: &s},
+			"signer_updated", &wbtypes.SignerUpdatedChange{BaseStateChangeFields: base, SignerAddress: "GSIGN", OldWeight: &oldW, NewWeight: newW},
+			&types.SignerUpdatedChange{StateChangeBase: wantBase, SignerAddress: "GSIGN", OldWeight: &oldW, NewWeight: newW},
 		},
 		{
-			"reserves", &wbtypes.ReservesChange{BaseStateChangeFields: base, SponsoredAddress: &s, SponsorAddress: &s, SponsoredData: &s, SponsoredTrustline: &s, ClaimableBalanceID: &s, LiquidityPoolID: &s},
-			&types.ReservesChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, SponsoredAddress: &s, SponsorAddress: &s, SponsoredData: &s, SponsoredTrustline: &s, ClaimableBalanceID: &s, LiquidityPoolID: &s},
+			"signer_removed", &wbtypes.SignerRemovedChange{BaseStateChangeFields: base, SignerAddress: "GSIGN", OldWeight: &oldW},
+			&types.SignerRemovedChange{StateChangeBase: wantBase, SignerAddress: "GSIGN", OldWeight: &oldW},
 		},
 		{
-			"balance_authorization", &wbtypes.BalanceAuthorizationChange{BaseStateChangeFields: base, TokenID: &s, LiquidityPoolID: &s, Flags: []string{"X"}},
-			&types.BalanceAuthorizationChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, BalanceAuthTokenID: &s, BalanceAuthLiquidityPoolID: &s, Flags: []string{"X"}},
+			"threshold", &wbtypes.ThresholdChange{BaseStateChangeFields: base, OldThreshold: &oldW, NewThreshold: newW},
+			&types.ThresholdChange{StateChangeBase: wantBase, OldThreshold: &oldW, NewThreshold: newW},
+		},
+		{
+			"account_flags", &wbtypes.AccountFlagsChange{BaseStateChangeFields: base, Flags: []wbtypes.AccountFlag{wbtypes.AccountFlagAuthRequired}},
+			&types.AccountFlagsChange{StateChangeBase: wantBase, Flags: []string{"AUTH_REQUIRED"}},
+		},
+		{
+			"home_domain", &wbtypes.HomeDomainChange{BaseStateChangeFields: base, OldHomeDomain: &s, NewHomeDomain: &s},
+			&types.HomeDomainChange{StateChangeBase: wantBase, OldHomeDomain: &s, NewHomeDomain: &s},
+		},
+		{
+			"data_entry", &wbtypes.DataEntryChange{BaseStateChangeFields: base, Name: "k", OldValue: &s, NewValue: &s},
+			&types.DataEntryChange{StateChangeBase: wantBase, Name: "k", OldValue: &s, NewValue: &s},
+		},
+		{
+			"allowance", &wbtypes.AllowanceChange{BaseStateChangeFields: base, TokenID: "CTOKEN", Spender: "GSPEND", Amount: "5", ExpirationLedger: 42},
+			&types.AllowanceChange{StateChangeBase: wantBase, TokenID: "CTOKEN", Spender: "GSPEND", Amount: "5", ExpirationLedger: 42},
+		},
+		{
+			"trustline_added", &wbtypes.TrustlineAddedChange{BaseStateChangeFields: base, TokenID: &s, LiquidityPoolID: &s, Limit: "100"},
+			&types.TrustlineAddedChange{StateChangeBase: wantBase, TokenID: &s, LiquidityPoolID: &s, Limit: "100"},
+		},
+		{
+			"trustline_updated", &wbtypes.TrustlineUpdatedChange{BaseStateChangeFields: base, TokenID: &s, LiquidityPoolID: &s, OldLimit: "10", NewLimit: "20"},
+			&types.TrustlineUpdatedChange{StateChangeBase: wantBase, TokenID: &s, LiquidityPoolID: &s, OldLimit: "10", NewLimit: "20"},
+		},
+		{
+			"trustline_removed", &wbtypes.TrustlineRemovedChange{BaseStateChangeFields: base, TokenID: &s, LiquidityPoolID: &s},
+			&types.TrustlineRemovedChange{StateChangeBase: wantBase, TokenID: &s, LiquidityPoolID: &s},
+		},
+		{
+			"sponsorship", &wbtypes.SponsorshipChange{BaseStateChangeFields: base, SponsoredAddress: &s, SponsorAddress: &s, TokenID: &s, LiquidityPoolID: &s, ClaimableBalanceID: &s, DataName: &s, SignerAddress: &s},
+			&types.SponsorshipChange{StateChangeBase: wantBase, SponsoredAddress: &s, SponsorAddress: &s, TokenID: &s, LiquidityPoolID: &s, ClaimableBalanceID: &s, DataName: &s, SignerAddress: &s},
+		},
+		{
+			"balance_authorization", &wbtypes.BalanceAuthorizationChange{BaseStateChangeFields: base, TokenID: &s, LiquidityPoolID: &s, Flags: []wbtypes.TrustlineFlag{wbtypes.TrustlineFlagAuthorized}},
+			&types.BalanceAuthorizationChange{StateChangeBase: wantBase, TokenID: &s, LiquidityPoolID: &s, Flags: []string{"AUTHORIZED"}},
+		},
+		{
+			"balance_authorization_nil_flags", &wbtypes.BalanceAuthorizationChange{BaseStateChangeFields: base, TokenID: &s},
+			&types.BalanceAuthorizationChange{StateChangeBase: wantBase, TokenID: &s},
 		},
 	}
 	for _, tc := range cases {
@@ -90,7 +132,7 @@ func TestMapAccountTransactionEdge_FlattensAndGuaranteesNonNilSlices(t *testing.
 		Node:         &wbtypes.GraphQLTransaction{Hash: "h1"},
 		Cursor:       "c1",
 		Operations:   []*wbtypes.Operation{{ID: 1, OperationType: wbtypes.OperationTypePayment}, nil},
-		StateChanges: []wbtypes.StateChangeNode{&wbtypes.StandardBalanceChange{BaseStateChangeFields: wbtypes.BaseStateChangeFields{Type: wbtypes.StateChangeCategoryBalance}, Amount: "5"}, nil},
+		StateChanges: []wbtypes.StateChangeNode{&wbtypes.BalanceChange{BaseStateChangeFields: wbtypes.BaseStateChangeFields{Category: wbtypes.StateChangeCategoryBalance}, Amount: "5"}, nil},
 	}
 	got := mapAccountTransactionEdge(edge)
 	assert.Equal(t, "h1", got.Hash)

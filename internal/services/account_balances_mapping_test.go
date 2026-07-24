@@ -66,7 +66,7 @@ func TestMapBalance_AllVariants(t *testing.T) {
 			"trustline", &wbtypes.TrustlineBalance{
 				BalanceValue: "50.0000000", TokenID: "USDC-GA5Z", TokenType: wbtypes.TokenTypeClassic,
 				Code: strPtr("USDC"), Issuer: strPtr("GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"),
-				Type: "credit_alphanum4", Limit: "922337203685.4775807",
+				AssetType: wbtypes.AssetTypeCreditAlphanum4, Limit: "922337203685.4775807",
 				BuyingLiabilities: "1.0000000", SellingLiabilities: "10.0000000",
 				LastModifiedLedger: 200, IsAuthorized: true, IsAuthorizedToMaintainLiabilities: true,
 			},
@@ -95,7 +95,7 @@ func TestMapBalance_AllVariants(t *testing.T) {
 			"trustline_underfunded", &wbtypes.TrustlineBalance{
 				BalanceValue: "5.0000000", TokenID: "USDC-GA5Z", TokenType: wbtypes.TokenTypeClassic,
 				Code: strPtr("USDC"), Issuer: strPtr("GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"),
-				Type: "credit_alphanum4", Limit: "1000.0000000",
+				AssetType: wbtypes.AssetTypeCreditAlphanum4, Limit: "1000.0000000",
 				BuyingLiabilities: "0.0000000", SellingLiabilities: "9.0000000",
 				LastModifiedLedger: 201, IsAuthorized: true, IsAuthorizedToMaintainLiabilities: false,
 			},
@@ -164,7 +164,6 @@ func TestMapBalance_AllVariants(t *testing.T) {
 			// LP: available == balance (pool shares, plain string copy).
 			"liquidity_pool", &wbtypes.LiquidityPoolBalance{
 				BalanceValue: "10.0000000", TokenID: "pool-1", TokenType: wbtypes.TokenTypeLiquidityPool,
-				LiquidityPoolID: "pool-1",
 				Reserves: []wbtypes.LiquidityPoolReserve{
 					{Asset: "native", Amount: "100.0000000"},
 					{Asset: "USDC-GA5Z", Amount: "200.0000000"},
@@ -212,7 +211,7 @@ func TestMapBalance_AllVariants(t *testing.T) {
 			// ":" with empty token fields rather than panicking.
 			"trustline_nil_code_issuer", &wbtypes.TrustlineBalance{
 				BalanceValue: "1.0000000", TokenID: "tl", TokenType: wbtypes.TokenTypeClassic,
-				Type: "credit_alphanum4", Limit: "10.0000000",
+				AssetType: wbtypes.AssetTypeCreditAlphanum4, Limit: "10.0000000",
 				BuyingLiabilities: "0.0000000", SellingLiabilities: "0.0000000",
 				LastModifiedLedger: 500,
 			},

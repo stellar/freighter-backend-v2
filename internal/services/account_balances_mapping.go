@@ -3,6 +3,8 @@
 package services
 
 import (
+	"strings"
+
 	"github.com/stellar/go/amount"
 
 	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
@@ -43,15 +45,17 @@ func mapBalance(b wbtypes.Balance) types.Balance {
 	case *wbtypes.TrustlineBalance:
 		code, issuer := deref(bal.Code), deref(bal.Issuer)
 		base.Key = code + ":" + issuer
-		// The SDK carries the trustline's asset type verbatim (e.g.
-		// credit_alphanum4), so no derivation is needed here.
-		base.Token = &types.Token{Type: bal.Type, Code: code, Issuer: &types.TokenIssuer{Key: issuer}}
+		// The SDK carries the trustline's asset type as an upper-case enum
+		// (CREDIT_ALPHANUM4); the v1 REST contract is the lower-case Horizon
+		// spelling, so it is lowered at this edge.
+		assetType := strings.ToLower(string(bal.AssetType))
+		base.Token = &types.Token{Type: assetType, Code: code, Issuer: &types.TokenIssuer{Key: issuer}}
 		base.Available = spendable(bal.BalanceValue, bal.SellingLiabilities)
 		return &types.TrustlineBalance{
 			BalanceBase:                       base,
 			Code:                              bal.Code,
 			Issuer:                            bal.Issuer,
-			Type:                              bal.Type,
+			Type:                              assetType,
 			Limit:                             bal.Limit,
 			BuyingLiabilities:                 bal.BuyingLiabilities,
 			SellingLiabilities:                bal.SellingLiabilities,
@@ -91,7 +95,8 @@ func mapBalance(b wbtypes.Balance) types.Balance {
 		}
 	case *wbtypes.LiquidityPoolBalance:
 		// v1 parity: LP share entries are keyed "<poolId>:lp" and carry no token.
-		base.Key = bal.LiquidityPoolID + ":lp"
+		// The SDK exposes the pool id as the balance's TokenID.
+		base.Key = bal.TokenID + ":lp"
 		base.Available = base.Total
 		reserves := make([]types.LiquidityPoolReserve, 0, len(bal.Reserves))
 		for _, r := range bal.Reserves {
@@ -99,7 +104,7 @@ func mapBalance(b wbtypes.Balance) types.Balance {
 		}
 		return &types.LiquidityPoolBalance{
 			BalanceBase:        base,
-			LiquidityPoolID:    bal.LiquidityPoolID,
+			LiquidityPoolID:    bal.TokenID,
 			Reserves:           reserves,
 			LastModifiedLedger: bal.LastModifiedLedger,
 		}

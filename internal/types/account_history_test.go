@@ -28,13 +28,13 @@ func TestAccountTransaction_JSONWireContract(t *testing.T) {
 			LedgerCreatedAt: ts, IngestedAt: ts,
 		}},
 		StateChanges: []types.StateChange{
-			&types.StandardBalanceChange{
-				StateChangeBase:        types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT", LedgerNumber: 51234567, LedgerCreatedAt: ts, IngestedAt: ts},
-				StandardBalanceTokenID: "native", Amount: "10.0000000",
+			&types.BalanceChange{
+				StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT", LedgerNumber: 51234567, LedgerCreatedAt: ts, IngestedAt: ts},
+				TokenID:         "native", Amount: "10.0000000",
 			},
-			&types.AccountChange{
+			&types.AccountCreatedChange{
 				StateChangeBase: types.StateChangeBase{Type: "ACCOUNT", Reason: "CREATE", LedgerNumber: 51234567, LedgerCreatedAt: ts, IngestedAt: ts},
-				FunderAddress:   &funder,
+				FunderAddress:   funder,
 			},
 		},
 	}
@@ -53,7 +53,7 @@ func TestAccountTransaction_JSONWireContract(t *testing.T) {
 	assert.NotContains(t, s, "ledgerCreatedAt")
 	assert.Contains(t, s, `"state_changes":`)
 	assert.Contains(t, s, `"type":"BALANCE"`)
-	assert.Contains(t, s, `"standard_balance_token_id":"native"`)
+	assert.Contains(t, s, `"token_id":"native"`)
 	assert.Contains(t, s, `"amount":"10.0000000"`)
 	assert.Contains(t, s, `"type":"ACCOUNT"`)
 	assert.Contains(t, s, `"funder_address":"GFUNDER"`)

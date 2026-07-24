@@ -148,7 +148,7 @@ func TestGetAccountTransactions_Handler(t *testing.T) {
 					Transaction: types.Transaction{Hash: "h1", FeeCharged: 100, LedgerNumber: 42},
 					Operations:  []types.Operation{{ID: 220000000000000, OperationType: "PAYMENT"}},
 					StateChanges: []types.StateChange{
-						&types.StandardBalanceChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, StandardBalanceTokenID: "native", Amount: "10"},
+						&types.BalanceChange{StateChangeBase: types.StateChangeBase{Type: "BALANCE", Reason: "DEBIT"}, TokenID: "native", Amount: "10"},
 					},
 				}},
 				Pagination: types.PaginationInfo{NextCursor: &nextCursor, HasNext: true},

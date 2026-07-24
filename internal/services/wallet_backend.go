@@ -249,16 +249,26 @@ func (w *walletBackendService) GetBalancesByAccountAddresses(ctx context.Context
 	return results, nil
 }
 
-// translateParams converts AccountHistoryParams into the (first, last, after,
-// before) tuple the wbclient SDK methods take. PaginationDirectionPrev maps
-// to (last, before); anything else (including the default "next") maps to
-// (first, after). Cursor is opaque and forwarded verbatim.
-func translateParams(p types.AccountHistoryParams) (first, last *int32, after, before *string) {
+// translateParams converts AccountHistoryParams into the wbclient.Page the SDK
+// methods take. PaginationDirectionPrev maps to (Last, Before); anything else
+// (including the default "next") maps to (First, After). Cursor is opaque and
+// forwarded verbatim.
+func translateParams(p types.AccountHistoryParams) *wbclient.Page {
 	limit := p.Limit
 	if p.Direction == types.PaginationDirectionPrev {
-		return nil, &limit, nil, p.Cursor
+		return &wbclient.Page{Last: &limit, Before: p.Cursor}
 	}
-	return &limit, nil, p.Cursor, nil
+	return &wbclient.Page{First: &limit, After: p.Cursor}
+}
+
+// translateTimeRange converts the optional Since/Until bounds into a
+// wbclient.TimeRange, returning nil when both are unset so the SDK applies no
+// time bounds.
+func translateTimeRange(p types.AccountHistoryParams) *wbclient.TimeRange {
+	if p.Since == nil && p.Until == nil {
+		return nil
+	}
+	return &wbclient.TimeRange{Since: p.Since, Until: p.Until}
 }
 
 // toPaginationInfo copies an upstream PageInfo into the freighter-backend
@@ -322,8 +332,7 @@ func (w *walletBackendService) GetAccountTransactions(ctx context.Context, addre
 		return nil, fmt.Errorf("wallet backend client not configured for network: %s", network)
 	}
 
-	first, last, after, before := translateParams(p)
-	conn, err := client.GetAccountTransactionsWithOpsAndStateChanges(ctx, address, p.Since, p.Until, first, last, after, before)
+	conn, err := client.GetAccountTransactionsWithOpsAndStateChanges(ctx, address, translateTimeRange(p), translateParams(p))
 	if err != nil {
 		if errors.Is(err, wbclient.ErrAccountNotFound) {
 			return nil, err
@@ -351,13 +360,16 @@ func (w *walletBackendService) GetAccountTransactions(ctx context.Context, addre
 // metrics.ClassifyError can emit a faithful sub-label
 // (graphql_error / http_error[:code]). The typed account-not-found case is
 // address-scoped and handled at the call site, so it is intentionally not
-// matched here. Falls back to substring inspection because wbclient builds
-// these errors via fmt.Errorf without %w wrapping.
+// matched here. GraphQL errors arrive as the typed wbclient.GraphQLErrors
+// slice, matched via errors.As; the HTTP branch falls back to substring
+// inspection because wbclient builds that error via fmt.Errorf without %w
+// wrapping.
 func classifyWBError(err error) error {
-	msg := err.Error()
-	if strings.Contains(msg, "GraphQL error:") {
+	var gqlErrs wbclient.GraphQLErrors
+	if errors.As(err, &gqlErrs) {
 		return &metrics.UpstreamError{Kind: "graphql_error", Err: err}
 	}
+	msg := err.Error()
 	if strings.Contains(msg, "unexpected statusCode=") {
 		code := 0
 		if m := httpStatusCodeRegex.FindStringSubmatch(msg); len(m) == 2 {
