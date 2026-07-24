@@ -21,11 +21,11 @@ type BlendCatalogPool struct {
 	ID string `json:"id"`
 	// Name is null when the metadata registry has no entry.
 	Name *string `json:"name"`
-	// Status is the raw on-chain pool status (0 Admin Active, 1 Active,
-	// 2 Admin On-Ice, 3 On-Ice, 4 Admin Frozen, 5 Frozen, 6 Setup;
-	// 0-3 accept deposits, 0-1 also allow borrowing). Null until the pool's
-	// config has been ingested.
-	Status *int32 `json:"status"`
+	// Status is the pool's operational status as the upstream enum name
+	// (ADMIN_ACTIVE, ACTIVE, ADMIN_ON_ICE, ON_ICE, ADMIN_FROZEN, FROZEN,
+	// SETUP; the first four accept deposits, the first two also allow
+	// borrowing). Null until the pool's config has been ingested.
+	Status *string `json:"status"`
 	// SuppliedUSD/BorrowedUSD are pool-wide totals with strict null
 	// propagation upstream: one unpriced reserve nulls the pool total.
 	SuppliedUSD *float64 `json:"supplied_usd"`
@@ -60,9 +60,9 @@ type BlendCatalogReserve struct {
 
 // BlendEarnOptionsCatalog is the response body for the earn-options
 // endpoint: "where can I earn this asset", serving the Earn select-token and
-// select-pool screens. Upstream already excludes disabled reserves and
-// pools that reject deposits; freighter additionally filters pools through
-// the operator-curated allowlist when one is configured.
+// select-pool screens. Derived from the pools catalog: disabled reserves and
+// deposit-rejecting pools are excluded, and pools are filtered through the
+// operator-curated allowlist when one is configured.
 type BlendEarnOptionsCatalog struct {
 	// Options has one entry per earnable asset. Always non-nil; assets whose
 	// every pool was removed by the allowlist are dropped.
