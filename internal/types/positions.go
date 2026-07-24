@@ -22,8 +22,9 @@ type AccountPositions struct {
 	// matching upstream's own convention for pool totals. 0 when the
 	// account has no positions.
 	TotalValueUSD *float64 `json:"total_value_usd"`
-	// NetAPY is the NetUSD-weighted mean of the pools' net APYs; null when
-	// any input is unavailable or the account has no priced value to weight.
+	// NetAPY is the supplied-USD-weighted mean of the pools' net APYs
+	// (matching the base the per-pool rate is defined over); null when any
+	// input is unavailable or there is no supplied value to weight.
 	NetAPY *float64 `json:"net_apy"`
 	// Positions has one row per (protocol, pool). Always non-nil; empty when
 	// the account has no DeFi positions (including accounts unknown to the
@@ -45,7 +46,9 @@ type PoolPosition struct {
 	NetUSD      *float64 `json:"net_usd"`
 	SuppliedUSD *float64 `json:"supplied_usd"`
 	BorrowedUSD *float64 `json:"borrowed_usd"`
-	// NetAPY is the account's net rate in this pool, as computed upstream.
+	// NetAPY is the account's net rate in this pool as computed upstream:
+	// supply earnings minus borrow interest over TOTAL SUPPLIED USD (the
+	// blend-sdk-js convention the Blend UI shows).
 	NetAPY *float64             `json:"net_apy"`
 	Blend  *BlendPositionDetail `json:"blend,omitempty"`
 }
@@ -78,7 +81,8 @@ type BlendSupplyRow struct {
 	// USDValue is the current USD value of TotalTokens.
 	USDValue *float64 `json:"usd_value"`
 	// APY is the current supply interest rate; EmissionsAPR is the BLND
-	// emission rate on the supply side.
+	// emission rate on the reserve's supply side (a pool-wide stream rate:
+	// 0 = no active stream, null = stream active but unpriceable).
 	APY          *float64 `json:"apy"`
 	EmissionsAPR *float64 `json:"emissions_apr"`
 	// InterestEarned is lifetime interest in raw token units (pure
@@ -105,9 +109,11 @@ type BlendBorrowRow struct {
 	BorrowedTokens string `json:"borrowed_tokens"`
 	// USDValue is the current USD value of the debt.
 	USDValue *float64 `json:"usd_value"`
-	// APY is the current borrow interest rate.
-	APY      *float64 `json:"apy"`
-	PriceUSD *float64 `json:"price_usd"`
+	// APY is the current borrow interest rate; EmissionsAPR is the BLND
+	// emission rate on the reserve's borrow side.
+	APY          *float64 `json:"apy"`
+	EmissionsAPR *float64 `json:"emissions_apr"`
+	PriceUSD     *float64 `json:"price_usd"`
 }
 
 // PositionsService assembles the account positions view.

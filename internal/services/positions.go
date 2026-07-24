@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
+
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/store"
@@ -85,17 +87,17 @@ func (p *positionsService) GetAccountPositions(ctx context.Context, address, net
 }
 
 // mapAccountPositions shapes the upstream Blend positions into the response.
-func mapAccountPositions(upstream *types.BlendAccountPositions) *types.AccountPositions {
+func mapAccountPositions(upstream *wbtypes.BlendAccountPositions) *types.AccountPositions {
 	positions := make([]types.PoolPosition, 0, len(upstream.Pools))
 	for _, pool := range upstream.Pools {
 		positions = append(positions, types.PoolPosition{
 			Protocol:    "blend",
 			ID:          pool.PoolAddress,
 			Name:        pool.PoolName,
-			NetUSD:      pool.USDValue,
-			SuppliedUSD: pool.SuppliedUSD,
-			BorrowedUSD: pool.BorrowedUSD,
-			NetAPY:      pool.NetAPY,
+			NetUSD:      pool.UsdValue,
+			SuppliedUSD: pool.SuppliedUsd,
+			BorrowedUSD: pool.BorrowedUsd,
+			NetAPY:      pool.NetApy,
 			Blend:       mapBlendDetail(pool.Reserves),
 		})
 	}
@@ -112,7 +114,7 @@ func mapAccountPositions(upstream *types.BlendAccountPositions) *types.AccountPo
 // balance on a side produce no row for that side; upstream deliberately
 // emits fully-exited (all-zero) reserve rows to carry earnings history, and
 // those are filtered here.
-func mapBlendDetail(reserves []types.BlendReservePosition) *types.BlendPositionDetail {
+func mapBlendDetail(reserves []wbtypes.BlendReservePosition) *types.BlendPositionDetail {
 	detail := &types.BlendPositionDetail{
 		Supply: []types.BlendSupplyRow{},
 		Borrow: []types.BlendBorrowRow{},
@@ -132,14 +134,14 @@ func mapBlendDetail(reserves []types.BlendReservePosition) *types.BlendPositionD
 				SuppliedTokens:    supplied.String(),
 				CollateralTokens:  collateral.String(),
 				TotalTokens:       total.String(),
-				USDValue:          r.SuppliedUSD,
-				APY:               r.SupplyAPY,
-				EmissionsAPR:      r.EmissionsAPR,
+				USDValue:          r.SuppliedUsd,
+				APY:               r.SupplyApy,
+				EmissionsAPR:      r.EmissionsSupplyApr,
 				InterestEarned:    r.InterestEarned,
-				InterestEarnedUSD: tokensToUSD(r.InterestEarned, r.TokenDecimals, r.PriceUSD),
-				ClaimableBLND:     r.EmissionsEarnedBLND,
-				ClaimableUSD:      r.EmissionsEarnedUSD,
-				PriceUSD:          r.PriceUSD,
+				InterestEarnedUSD: tokensToUSD(r.InterestEarned, r.TokenDecimals, r.PriceUsd),
+				ClaimableBLND:     r.EmissionsEarnedBlnd,
+				ClaimableUSD:      r.EmissionsEarnedUsd,
+				PriceUSD:          r.PriceUsd,
 			})
 		}
 		if borrowed.Sign() > 0 {
@@ -149,9 +151,10 @@ func mapBlendDetail(reserves []types.BlendReservePosition) *types.BlendPositionD
 				Name:           r.TokenName,
 				Decimals:       r.TokenDecimals,
 				BorrowedTokens: borrowed.String(),
-				USDValue:       r.BorrowedUSD,
-				APY:            r.BorrowAPY,
-				PriceUSD:       r.PriceUSD,
+				USDValue:       r.BorrowedUsd,
+				APY:            r.BorrowApy,
+				EmissionsAPR:   r.EmissionsBorrowApr,
+				PriceUSD:       r.PriceUsd,
 			})
 		}
 	}
@@ -165,36 +168,37 @@ func mapBlendDetail(reserves []types.BlendReservePosition) *types.BlendPositionD
 // than an honest null), mirroring upstream's convention for pool totals.
 // 0 for an account with no pools.
 //
-// NetAPY: mean of pool netApy weighted by pool usdValue — the weight basis
-// that makes rate × base reproduce the per-pool dollar earnings under the
-// upstream's current netApy definition. Null when any input is unavailable
-// or the weighted base is zero. Both rules are pending confirmation with
-// the wallet-backend team; each is isolated here so a decision lands as a
-// one-line change.
-func accountAggregate(pools []types.BlendPoolPosition) (total *float64, netAPY *float64) {
+// NetAPY: mean of pool netApy weighted by pool suppliedUsd — the base the
+// upstream rate is defined over (blend-sdk-js: net dollars / total
+// supplied), so rate × base reproduces the per-pool dollar earnings. Null
+// when any pool's netApy or suppliedUsd is unavailable or the supplied base
+// is zero.
+func accountAggregate(pools []wbtypes.BlendPoolPosition) (total *float64, netAPY *float64) {
 	if len(pools) == 0 {
 		zero := 0.0
 		return &zero, nil
 	}
 
 	sum := 0.0
+	suppliedSum := 0.0
 	apyNumerator := 0.0
 	apyKnown := true
 	for _, pool := range pools {
-		if pool.USDValue == nil {
+		if pool.UsdValue == nil {
 			return nil, nil
 		}
-		sum += *pool.USDValue
-		if pool.NetAPY == nil {
+		sum += *pool.UsdValue
+		if pool.NetApy == nil || pool.SuppliedUsd == nil {
 			apyKnown = false
 			continue
 		}
-		apyNumerator += *pool.NetAPY * *pool.USDValue
+		apyNumerator += *pool.NetApy * *pool.SuppliedUsd
+		suppliedSum += *pool.SuppliedUsd
 	}
 
 	total = &sum
-	if apyKnown && sum != 0 {
-		apy := apyNumerator / sum
+	if apyKnown && suppliedSum != 0 {
+		apy := apyNumerator / suppliedSum
 		if !math.IsInf(apy, 0) && !math.IsNaN(apy) {
 			netAPY = &apy
 		}

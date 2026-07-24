@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
+
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
@@ -20,10 +22,11 @@ func i32(v int32) *int32     { return &v }
 
 // reserveFixture mirrors the shape observed on the live testnet dev instance
 // (user account GDW6QB3B...): XLM held entirely as collateral with real
-// earned interest, USDC as collateral, a dust wBTC borrow, and a fully-exited
-// wETH row that must not become a display row.
-func reserveFixture() []types.BlendReservePosition {
-	return []types.BlendReservePosition{
+// earned interest, USDC as collateral, a dust wBTC borrow with a borrow-side
+// emission stream, and a fully-exited wETH row that must not become a
+// display row.
+func reserveFixture() []wbtypes.BlendReservePosition {
+	return []wbtypes.BlendReservePosition{
 		{
 			AssetContractID:     "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
 			TokenSymbol:         nil, // XLM SAC missing from the registry, observed live
@@ -31,12 +34,12 @@ func reserveFixture() []types.BlendReservePosition {
 			SuppliedTokens:      "0",
 			CollateralTokens:    "67125489343",
 			BorrowedTokens:      "0",
-			SuppliedUSD:         f64(2819.270552406),
-			SupplyAPY:           f64(3.240617830176194),
-			EmissionsAPR:        f64(0),
+			SuppliedUsd:         f64(2819.270552406),
+			SupplyApy:           f64(3.240617830176194),
+			EmissionsSupplyApr:  f64(0),
 			InterestEarned:      "2125489343",
-			EmissionsEarnedBLND: "0",
-			PriceUSD:            f64(0.42),
+			EmissionsEarnedBlnd: "0",
+			PriceUsd:            f64(0.42),
 		},
 		{
 			AssetContractID:     "CCYM3TPDGQODFOC2OQDND6C7SKHO3TWD37CYN35I6K66JO5X3SUANEHN",
@@ -45,24 +48,25 @@ func reserveFixture() []types.BlendReservePosition {
 			SuppliedTokens:      "0",
 			CollateralTokens:    "8000168408",
 			BorrowedTokens:      "0",
-			SuppliedUSD:         f64(800.0168408),
-			SupplyAPY:           f64(0.00104137909709201),
+			SuppliedUsd:         f64(800.0168408),
+			SupplyApy:           f64(0.00104137909709201),
 			InterestEarned:      "168408",
-			EmissionsEarnedBLND: "0",
-			PriceUSD:            f64(1),
+			EmissionsEarnedBlnd: "0",
+			PriceUsd:            f64(1),
 		},
 		{
-			AssetContractID:     "CBWBTCWBTCWBTCWBTCWBTCWBTCWBTCWBTCWBTCWBTCWBTCWBTCWBTC1",
+			AssetContractID:     "CAP5AMC2OHNVREO66DFIN6DHJMPOBAJ2KCDDIMFBR7WWJH5RZBFM3UEI",
 			TokenSymbol:         str("wBTC"),
 			TokenDecimals:       i32(7),
 			SuppliedTokens:      "0",
 			CollateralTokens:    "0",
 			BorrowedTokens:      "2",
-			BorrowedUSD:         f64(0.02),
-			BorrowAPY:           f64(4.72998834498228),
+			BorrowedUsd:         f64(0.02),
+			BorrowApy:           f64(4.72998834498228),
+			EmissionsBorrowApr:  f64(0.001),
 			InterestEarned:      "0",
-			EmissionsEarnedBLND: "0",
-			PriceUSD:            f64(100000),
+			EmissionsEarnedBlnd: "0",
+			PriceUsd:            f64(100000),
 		},
 		{
 			// Fully-exited row: upstream emits it for earnings history; it
@@ -73,10 +77,10 @@ func reserveFixture() []types.BlendReservePosition {
 			SuppliedTokens:      "0",
 			CollateralTokens:    "0",
 			BorrowedTokens:      "0",
-			SuppliedUSD:         f64(0),
+			SuppliedUsd:         f64(0),
 			InterestEarned:      "0",
-			EmissionsEarnedBLND: "0",
-			PriceUSD:            f64(4000),
+			EmissionsEarnedBlnd: "0",
+			PriceUsd:            f64(4000),
 		},
 	}
 }
@@ -107,19 +111,21 @@ func TestMapBlendDetailRows(t *testing.T) {
 	assert.Equal(t, "2", wbtc.BorrowedTokens)
 	require.NotNil(t, wbtc.USDValue)
 	assert.InDelta(t, 0.02, *wbtc.USDValue, 1e-9)
+	require.NotNil(t, wbtc.EmissionsAPR)
+	assert.InDelta(t, 0.001, *wbtc.EmissionsAPR, 1e-9)
 }
 
 func TestMapBlendDetailNullSafety(t *testing.T) {
-	rows := []types.BlendReservePosition{{
+	rows := []wbtypes.BlendReservePosition{{
 		AssetContractID:     "CUNPRICED",
 		TokenDecimals:       nil, // no registry entry
 		SuppliedTokens:      "100",
 		CollateralTokens:    "0",
 		BorrowedTokens:      "0",
-		SuppliedUSD:         nil, // no oracle price
+		SuppliedUsd:         nil, // no oracle price
 		InterestEarned:      "50",
-		EmissionsEarnedBLND: "0",
-		PriceUSD:            nil,
+		EmissionsEarnedBlnd: "0",
+		PriceUsd:            nil,
 	}}
 	detail := mapBlendDetail(rows)
 
@@ -134,34 +140,44 @@ func TestMapBlendDetailNullSafety(t *testing.T) {
 }
 
 func TestAccountAggregate(t *testing.T) {
-	pool := func(usd, apy *float64) types.BlendPoolPosition {
-		return types.BlendPoolPosition{USDValue: usd, NetAPY: apy}
+	pool := func(usd, supplied, apy *float64) wbtypes.BlendPoolPosition {
+		return wbtypes.BlendPoolPosition{UsdValue: usd, SuppliedUsd: supplied, NetApy: apy}
 	}
 
-	t.Run("weighted mean across pools", func(t *testing.T) {
-		total, apy := accountAggregate([]types.BlendPoolPosition{
-			pool(f64(9000), f64(0.05)),
-			pool(f64(1000), f64(0.01)),
+	t.Run("supplied-weighted mean across pools", func(t *testing.T) {
+		total, apy := accountAggregate([]wbtypes.BlendPoolPosition{
+			pool(f64(8000), f64(9000), f64(0.05)),
+			pool(f64(900), f64(1000), f64(0.01)),
 		})
 		require.NotNil(t, total)
-		assert.InDelta(t, 10000, *total, 1e-9)
+		assert.InDelta(t, 8900, *total, 1e-9) // the total sums net values...
 		require.NotNil(t, apy)
-		assert.InDelta(t, 0.046, *apy, 1e-9) // (9000×5% + 1000×1%) / 10000
+		assert.InDelta(t, 0.046, *apy, 1e-9) // ...but the rate weights by supplied
 	})
 
 	t.Run("strict null: one unpriced pool nulls the header", func(t *testing.T) {
-		total, apy := accountAggregate([]types.BlendPoolPosition{
-			pool(f64(9000), f64(0.05)),
-			pool(nil, nil),
+		total, apy := accountAggregate([]wbtypes.BlendPoolPosition{
+			pool(f64(9000), f64(9000), f64(0.05)),
+			pool(nil, nil, nil),
 		})
 		assert.Nil(t, total)
 		assert.Nil(t, apy)
 	})
 
 	t.Run("null netApy nulls the rate but keeps the total", func(t *testing.T) {
-		total, apy := accountAggregate([]types.BlendPoolPosition{
-			pool(f64(9000), f64(0.05)),
-			pool(f64(1000), nil),
+		total, apy := accountAggregate([]wbtypes.BlendPoolPosition{
+			pool(f64(9000), f64(9000), f64(0.05)),
+			pool(f64(1000), f64(1000), nil),
+		})
+		require.NotNil(t, total)
+		assert.InDelta(t, 10000, *total, 1e-9)
+		assert.Nil(t, apy)
+	})
+
+	t.Run("null suppliedUsd nulls the rate but keeps the total", func(t *testing.T) {
+		total, apy := accountAggregate([]wbtypes.BlendPoolPosition{
+			pool(f64(9000), f64(9000), f64(0.05)),
+			pool(f64(1000), nil, f64(0.01)),
 		})
 		require.NotNil(t, total)
 		assert.InDelta(t, 10000, *total, 1e-9)
@@ -175,9 +191,9 @@ func TestAccountAggregate(t *testing.T) {
 		assert.Nil(t, apy)
 	})
 
-	t.Run("zero net base yields null apy, zero total", func(t *testing.T) {
-		total, apy := accountAggregate([]types.BlendPoolPosition{
-			pool(f64(0), f64(0.05)),
+	t.Run("zero supplied base yields null apy", func(t *testing.T) {
+		total, apy := accountAggregate([]wbtypes.BlendPoolPosition{
+			pool(f64(0), f64(0), f64(0.05)),
 		})
 		require.NotNil(t, total)
 		assert.Equal(t, 0.0, *total)
@@ -188,14 +204,14 @@ func TestAccountAggregate(t *testing.T) {
 func TestGetAccountPositionsMapsAndPassesThrough(t *testing.T) {
 	name := "TestnetV2"
 	mockWB := &utils.MockWalletBackendService{
-		GetBlendPositionsResult: &types.BlendAccountPositions{
-			Pools: []types.BlendPoolPosition{{
+		GetBlendPositionsResult: &wbtypes.BlendAccountPositions{
+			Pools: []wbtypes.BlendPoolPosition{{
 				PoolAddress: "CCEBVDYMCCECIVWVOJSKUNLTVDIRLTRUCVZDVLKXKQZWSCF3DVQGJVIX",
 				PoolName:    &name,
-				USDValue:    f64(3619.267393206),
-				SuppliedUSD: f64(3619.287393206),
-				BorrowedUSD: f64(0.02),
-				NetAPY:      f64(2.5245032003462415),
+				UsdValue:    f64(3619.267393206),
+				SuppliedUsd: f64(3619.287393206),
+				BorrowedUsd: f64(0.02),
+				NetApy:      f64(2.5245032003462415),
 				Reserves:    reserveFixture(),
 			}},
 		},
