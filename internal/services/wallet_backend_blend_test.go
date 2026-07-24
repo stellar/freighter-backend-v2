@@ -1,5 +1,5 @@
-// ABOUTME: Tests for the Blend GraphQL client methods against httptest fakes,
-// ABOUTME: covering decode (incl. null Floats), auth signing, and error mapping.
+// ABOUTME: Tests for the Blend wallet-backend service methods, exercising the
+// ABOUTME: wrapper policies (normalization, error classification) through fake servers.
 package services
 
 import (
@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/wallet-backend/pkg/wbclient"
+	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
@@ -33,208 +34,125 @@ func newBlendTestService(t *testing.T, handler http.HandlerFunc) *walletBackendS
 	}
 }
 
-// graphqlEnvelope wraps data as a GraphQL success response body.
-func graphqlEnvelope(t *testing.T, data string) []byte {
-	t.Helper()
-	return []byte(`{"data":` + data + `}`)
-}
+func TestGetBlendPositions(t *testing.T) {
+	ctx := context.Background()
 
-func TestGetBlendPositionsDecode(t *testing.T) {
-	var gotPath string
-	var gotBody wbclient.GraphQLRequest
-	svc := newBlendTestService(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
-		// One pool, two reserves. The second reserve is null-heavy: unpriced
-		// asset (all USD/APY fields null, priceUsd null) and no registry
-		// metadata (tokenName/tokenSymbol/tokenDecimals null) — decode must
-		// yield nil pointers, never zeroes.
-		_, _ = w.Write(graphqlEnvelope(t, `{
-			"accountByAddress": {
-				"blendPositions": {
-					"pools": [{
-						"poolAddress": "CAJJZSGMMM3PD7N33TAPHGBUGTB43OC73HVIK2L2G6BNGGGYOSSYBXBD",
-						"poolName": "Fixed Pool V2",
-						"usdValue": 77876.27,
-						"suppliedUsd": 674117.02,
-						"borrowedUsd": 596240.75,
-						"netApy": -0.029,
-						"reserves": [
-							{
-								"assetContractId": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
-								"tokenName": "USD Coin",
-								"tokenSymbol": "USDC",
-								"tokenDecimals": 7,
-								"suppliedTokens": "1000000000",
-								"collateralTokens": "5563385856000",
-								"borrowedTokens": "4953691474632",
-								"suppliedUsd": 556438.59,
-								"borrowedUsd": 495221.33,
-								"supplyApy": 0.0741,
-								"borrowApy": 0.1151,
-								"emissionsSupplyApr": 0.002,
-								"emissionsBorrowApr": 0.001,
-								"interestEarned": "6843215",
-								"emissionsEarnedBlnd": "12345678",
-								"emissionsEarnedUsd": 0.53,
-								"priceUsd": 1.0
-							},
-							{
-								"assetContractId": "CBZPEXQLJCUS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI99",
+	t.Run("decodes positions through the SDK", func(t *testing.T) {
+		svc := newBlendTestService(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"data": {
+				"accountByAddress": {
+					"blendPositions": {
+						"pools": [{
+							"poolAddress": "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF",
+							"poolName": "TestnetV2",
+							"usdValue": 3619.27,
+							"suppliedUsd": 3619.29,
+							"borrowedUsd": 0.02,
+							"netApy": 0.025,
+							"claimedBlnd": "0",
+							"reserves": [{
+								"assetContractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
 								"tokenName": null,
 								"tokenSymbol": null,
-								"tokenDecimals": null,
-								"suppliedTokens": "68",
-								"collateralTokens": "0",
+								"tokenDecimals": 7,
+								"suppliedTokens": "0",
+								"collateralTokens": "67125489343",
 								"borrowedTokens": "0",
-								"suppliedUsd": null,
+								"suppliedUsd": 2819.27,
 								"borrowedUsd": null,
-								"supplyApy": null,
+								"supplyApy": 3.24,
 								"borrowApy": null,
-								"emissionsSupplyApr": null,
+								"emissionsSupplyApr": 0,
 								"emissionsBorrowApr": null,
-								"interestEarned": "0",
+								"interestEarned": "2125489343",
+								"interestPaid": "0",
 								"emissionsEarnedBlnd": "0",
 								"emissionsEarnedUsd": null,
-								"priceUsd": null
-							}
-						]
-					}]
+								"priceUsd": 0.42
+							}]
+						}],
+						"backstop": [],
+						"backstopClaimedLp": "0"
+					}
 				}
-			}
-		}`))
+			}}`))
+		})
+
+		positions, err := svc.GetBlendPositions(ctx, blendTestAddress, types.TESTNET)
+		require.NoError(t, err)
+
+		require.Len(t, positions.Pools, 1)
+		pool := positions.Pools[0]
+		require.NotNil(t, pool.NetApy)
+		assert.InDelta(t, 0.025, *pool.NetApy, 1e-9)
+		require.Len(t, pool.Reserves, 1)
+		reserve := pool.Reserves[0]
+		// Registry gaps and unpriced sides decode to nil, never zero.
+		assert.Nil(t, reserve.TokenSymbol)
+		assert.Nil(t, reserve.EmissionsBorrowApr)
+		assert.Equal(t, "67125489343", reserve.CollateralTokens)
+		assert.Equal(t, "2125489343", reserve.InterestEarned)
 	})
 
-	positions, err := svc.GetBlendPositions(context.Background(), blendTestAddress, types.TESTNET)
-	require.NoError(t, err)
+	t.Run("unknown account normalizes to empty positions", func(t *testing.T) {
+		svc := newBlendTestService(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"data": {"accountByAddress": null}}`))
+		})
 
-	assert.Equal(t, wbGraphQLPath, gotPath)
-	assert.Contains(t, gotBody.Query, "FreighterBlendPositions")
-	assert.Equal(t, blendTestAddress, gotBody.Variables["address"])
-
-	require.Len(t, positions.Pools, 1)
-	pool := positions.Pools[0]
-	require.NotNil(t, pool.PoolName)
-	assert.Equal(t, "Fixed Pool V2", *pool.PoolName)
-	require.NotNil(t, pool.NetAPY)
-	assert.InDelta(t, -0.029, *pool.NetAPY, 1e-9)
-
-	require.Len(t, pool.Reserves, 2)
-	priced, unpriced := pool.Reserves[0], pool.Reserves[1]
-
-	// Token amounts stay full-precision strings.
-	assert.Equal(t, "5563385856000", priced.CollateralTokens)
-	assert.Equal(t, "6843215", priced.InterestEarned)
-	require.NotNil(t, priced.SupplyAPY)
-	assert.InDelta(t, 0.0741, *priced.SupplyAPY, 1e-9)
-	require.NotNil(t, priced.EmissionsSupplyAPR)
-	assert.InDelta(t, 0.002, *priced.EmissionsSupplyAPR, 1e-9)
-	require.NotNil(t, priced.EmissionsBorrowAPR)
-	assert.InDelta(t, 0.001, *priced.EmissionsBorrowAPR, 1e-9)
-
-	// Null Floats and null registry metadata decode to nil, not zero.
-	assert.Nil(t, unpriced.SuppliedUSD)
-	assert.Nil(t, unpriced.SupplyAPY)
-	assert.Nil(t, unpriced.EmissionsSupplyAPR)
-	assert.Nil(t, unpriced.PriceUSD)
-	assert.Nil(t, unpriced.TokenSymbol)
-	assert.Nil(t, unpriced.TokenDecimals)
-	assert.Equal(t, "68", unpriced.SuppliedTokens)
+		positions, err := svc.GetBlendPositions(ctx, blendTestAddress, types.TESTNET)
+		require.NoError(t, err)
+		require.NotNil(t, positions)
+		assert.NotNil(t, positions.Pools)
+		assert.Empty(t, positions.Pools)
+	})
 }
 
-func TestGetBlendPositionsUnknownAccountIsEmpty(t *testing.T) {
+func TestGetBlendPools(t *testing.T) {
+	ctx := context.Background()
+
 	svc := newBlendTestService(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write(graphqlEnvelope(t, `{"accountByAddress": null}`))
+		var req wbclient.GraphQLRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		assert.Contains(t, req.Query, "blendPools")
+		_, _ = w.Write([]byte(`{"data": {"blendPools": [{
+			"address": "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF",
+			"name": "TestnetV2",
+			"status": "ACTIVE",
+			"suppliedUsd": 2100000.5,
+			"reserves": []
+		}]}}`))
 	})
 
-	positions, err := svc.GetBlendPositions(context.Background(), blendTestAddress, types.TESTNET)
+	pools, err := svc.GetBlendPools(ctx, types.TESTNET)
 	require.NoError(t, err)
-	require.NotNil(t, positions)
-	assert.NotNil(t, positions.Pools)
-	assert.Empty(t, positions.Pools)
-}
-
-func TestGetBlendPoolsDecode(t *testing.T) {
-	var gotBody wbclient.GraphQLRequest
-	svc := newBlendTestService(t, func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
-		_, _ = w.Write(graphqlEnvelope(t, `{
-			"blendPools": [
-				{
-					"address": "CAJJZSGMMM3PD7N33TAPHGBUGTB43OC73HVIK2L2G6BNGGGYOSSYBXBD",
-					"name": null,
-					"status": "ACTIVE",
-					"suppliedUsd": 2100000.5,
-					"borrowedUsd": 900000.25,
-					"interestApy": 0.043,
-					"netApy": 0.047,
-					"reserves": [{
-						"assetContractId": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
-						"tokenName": "USD Coin",
-						"tokenSymbol": "USDC",
-						"tokenDecimals": 7,
-						"enabled": true,
-						"utilization": 0.62,
-						"supplyApy": 0.043,
-						"borrowApy": 0.061,
-						"emissionsSupplyApr": 0.008,
-						"suppliedUsd": 1500000.0,
-						"borrowedUsd": 930000.0,
-						"priceUsd": 1.0
-					}]
-				},
-				{
-					"address": "CCCCIQSDILITHMM7PBSLVDT5MISSY7R26MNZXCX4H7J5JQ5FPIYOGYFS",
-					"name": "Second Pool",
-					"status": null,
-					"suppliedUsd": null,
-					"borrowedUsd": null,
-					"interestApy": null,
-					"netApy": null,
-					"reserves": []
-				}
-			]
-		}`))
-	})
-
-	pools, err := svc.GetBlendPools(context.Background(), types.TESTNET)
-	require.NoError(t, err)
-	assert.Contains(t, gotBody.Query, "FreighterBlendPools")
-
-	require.Len(t, pools, 2)
+	require.Len(t, pools, 1)
 	require.NotNil(t, pools[0].Status)
-	assert.Equal(t, types.BlendPoolStatusActive, *pools[0].Status)
-	assert.Nil(t, pools[0].Name)
-	require.Len(t, pools[0].Reserves, 1)
-	assert.True(t, pools[0].Reserves[0].Enabled)
-
-	// Not-yet-ingested pool: status and all totals null.
-	assert.Nil(t, pools[1].Status)
-	assert.Nil(t, pools[1].SuppliedUSD)
-	assert.Empty(t, pools[1].Reserves)
+	assert.Equal(t, wbtypes.BlendPoolStatusActive, *pools[0].Status)
+	assert.True(t, pools[0].Status.AcceptsSupply())
 }
 
-func TestBlendGraphQLErrorClassification(t *testing.T) {
-	t.Run("GraphQL errors array becomes graphql_error", func(t *testing.T) {
+func TestBlendErrorClassification(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("GraphQL errors classify as graphql_error", func(t *testing.T) {
 		svc := newBlendTestService(t, func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"errors":[{"message":"Cannot query field \"blendPools\" on type \"Query\"."}]}`))
 		})
 
-		_, err := svc.GetBlendPools(context.Background(), types.TESTNET)
+		_, err := svc.GetBlendPools(ctx, types.TESTNET)
 		require.Error(t, err)
 		var upErr *metrics.UpstreamError
 		require.ErrorAs(t, err, &upErr)
 		assert.Equal(t, "graphql_error", upErr.Kind)
-		assert.Contains(t, err.Error(), "blendPools")
 	})
 
-	t.Run("non-200 becomes http_error with code", func(t *testing.T) {
+	t.Run("non-200 classifies as http_error with code", func(t *testing.T) {
 		svc := newBlendTestService(t, func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadGateway)
 			_, _ = w.Write([]byte("upstream sad"))
 		})
 
-		_, err := svc.GetBlendPositions(context.Background(), blendTestAddress, types.TESTNET)
+		_, err := svc.GetBlendPositions(ctx, blendTestAddress, types.TESTNET)
 		require.Error(t, err)
 		var upErr *metrics.UpstreamError
 		require.ErrorAs(t, err, &upErr)
@@ -242,19 +160,16 @@ func TestBlendGraphQLErrorClassification(t *testing.T) {
 		assert.Equal(t, http.StatusBadGateway, upErr.Code)
 	})
 
-	t.Run("malformed data payload is a decode error", func(t *testing.T) {
-		svc := newBlendTestService(t, func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte(`{"data": {"blendPools": "not-a-list"}}`))
-		})
-
-		_, err := svc.GetBlendPools(context.Background(), types.TESTNET)
+	t.Run("unconfigured network errors without a request", func(t *testing.T) {
+		svc := &walletBackendService{maxBalanceConcurrency: 1}
+		_, err := svc.GetBlendPools(ctx, types.PUBLIC)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unmarshaling GetBlendPools data")
+		assert.Contains(t, err.Error(), "not configured")
 	})
 }
 
 // headerSigner is a fake auth.HTTPRequestSigner that stamps a header so the
-// test can assert the signing hook runs for raw GraphQL documents.
+// test can assert the SDK's signing hook runs for Blend calls.
 type headerSigner struct{}
 
 func (headerSigner) SignHTTPRequest(req *http.Request, _ time.Duration) error {
@@ -262,7 +177,7 @@ func (headerSigner) SignHTTPRequest(req *http.Request, _ time.Duration) error {
 	return nil
 }
 
-func TestBlendGraphQLRequestIsSigned(t *testing.T) {
+func TestBlendRequestIsSigned(t *testing.T) {
 	var gotAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -270,12 +185,14 @@ func TestBlendGraphQLRequestIsSigned(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := wbclient.NewClient(server.URL, headerSigner{})
-	svc := &walletBackendService{testnetClient: client, maxBalanceConcurrency: 1}
+	svc := &walletBackendService{
+		testnetClient:         wbclient.NewClient(server.URL, headerSigner{}),
+		maxBalanceConcurrency: 1,
+	}
 
 	pools, err := svc.GetBlendPools(context.Background(), types.TESTNET)
 	require.NoError(t, err)
-	assert.Empty(t, pools)
 	assert.NotNil(t, pools)
+	assert.Empty(t, pools)
 	assert.Equal(t, "Bearer test-jwt", gotAuth)
 }
