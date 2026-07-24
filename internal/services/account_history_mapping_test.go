@@ -71,24 +71,24 @@ func TestMapStateChange_AllVariants(t *testing.T) {
 			&types.SignerAddedChange{StateChangeBase: variantBase("SignerAddedChange"), SignerAddress: "GSIGN", NewWeight: newW},
 		},
 		{
-			"signer_updated", &wbtypes.SignerUpdatedChange{BaseStateChangeFields: base, SignerAddress: "GSIGN", OldWeight: &oldW, NewWeight: newW},
-			&types.SignerUpdatedChange{StateChangeBase: variantBase("SignerUpdatedChange"), SignerAddress: "GSIGN", OldWeight: &oldW, NewWeight: newW},
+			"signer_updated", &wbtypes.SignerUpdatedChange{BaseStateChangeFields: base, SignerAddress: "GSIGN", OldWeight: oldW, NewWeight: newW},
+			&types.SignerUpdatedChange{StateChangeBase: variantBase("SignerUpdatedChange"), SignerAddress: "GSIGN", OldWeight: oldW, NewWeight: newW},
 		},
 		{
-			"signer_removed", &wbtypes.SignerRemovedChange{BaseStateChangeFields: base, SignerAddress: "GSIGN", OldWeight: &oldW},
-			&types.SignerRemovedChange{StateChangeBase: variantBase("SignerRemovedChange"), SignerAddress: "GSIGN", OldWeight: &oldW},
+			"signer_removed", &wbtypes.SignerRemovedChange{BaseStateChangeFields: base, SignerAddress: "GSIGN", OldWeight: oldW},
+			&types.SignerRemovedChange{StateChangeBase: variantBase("SignerRemovedChange"), SignerAddress: "GSIGN", OldWeight: oldW},
 		},
 		{
-			"threshold", &wbtypes.ThresholdChange{BaseStateChangeFields: base, OldThreshold: &oldW, NewThreshold: newW},
-			&types.ThresholdChange{StateChangeBase: variantBase("ThresholdChange"), OldThreshold: &oldW, NewThreshold: newW},
+			"threshold", &wbtypes.ThresholdChange{BaseStateChangeFields: base, OldThreshold: oldW, NewThreshold: newW},
+			&types.ThresholdChange{StateChangeBase: variantBase("ThresholdChange"), OldThreshold: oldW, NewThreshold: newW},
 		},
 		{
 			"account_flags", &wbtypes.AccountFlagsChange{BaseStateChangeFields: base, Flags: []wbtypes.AccountFlag{wbtypes.AccountFlagAuthRequired}},
 			&types.AccountFlagsChange{StateChangeBase: variantBase("AccountFlagsChange"), Flags: []string{"AUTH_REQUIRED"}},
 		},
 		{
-			"home_domain", &wbtypes.HomeDomainChange{BaseStateChangeFields: base, OldHomeDomain: &s, NewHomeDomain: &s},
-			&types.HomeDomainChange{StateChangeBase: variantBase("HomeDomainChange"), OldHomeDomain: &s, NewHomeDomain: &s},
+			"home_domain", &wbtypes.HomeDomainChange{BaseStateChangeFields: base, OldHomeDomain: s, NewHomeDomain: s},
+			&types.HomeDomainChange{StateChangeBase: variantBase("HomeDomainChange"), OldHomeDomain: s, NewHomeDomain: s},
 		},
 		{
 			"data_entry", &wbtypes.DataEntryChange{BaseStateChangeFields: base, Name: "k", OldValue: &s, NewValue: &s},

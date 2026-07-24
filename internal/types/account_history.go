@@ -32,9 +32,9 @@ type Operation struct {
 }
 
 // StateChange is a sealed interface implemented by every state-change variant.
-// The concrete type is determined by the StateChangeBase.Type discriminator
-// (the state-change category is 1:1 with the variants), so clients switch on
-// "type".
+// The concrete shape is named by the StateChangeBase.Variant discriminator;
+// clients switch on "variant" (type/reason alone are ambiguous for the BALANCE
+// and ACCOUNT×CREATE splits).
 type StateChange interface{ isStateChange() }
 
 // StateChangeBase holds the fields common to every state-change variant. Type
@@ -98,7 +98,7 @@ type SignerAddedChange struct {
 type SignerUpdatedChange struct {
 	StateChangeBase
 	SignerAddress string `json:"signer_address"`
-	OldWeight     *int32 `json:"old_weight,omitempty"`
+	OldWeight     int32  `json:"old_weight"`
 	NewWeight     int32  `json:"new_weight"`
 }
 
@@ -106,14 +106,14 @@ type SignerUpdatedChange struct {
 type SignerRemovedChange struct {
 	StateChangeBase
 	SignerAddress string `json:"signer_address"`
-	OldWeight     *int32 `json:"old_weight,omitempty"`
+	OldWeight     int32  `json:"old_weight"`
 }
 
 // ThresholdChange — a signature-threshold change; Reason identifies which one.
 type ThresholdChange struct {
 	StateChangeBase
-	OldThreshold *int32 `json:"old_threshold,omitempty"`
-	NewThreshold int32  `json:"new_threshold"`
+	OldThreshold int32 `json:"old_threshold"`
+	NewThreshold int32 `json:"new_threshold"`
 }
 
 // AccountFlagsChange — account authorization flags set or cleared.
@@ -125,8 +125,8 @@ type AccountFlagsChange struct {
 // HomeDomainChange — a home-domain change on the account.
 type HomeDomainChange struct {
 	StateChangeBase
-	OldHomeDomain *string `json:"old_home_domain,omitempty"`
-	NewHomeDomain *string `json:"new_home_domain,omitempty"`
+	OldHomeDomain string `json:"old_home_domain"`
+	NewHomeDomain string `json:"new_home_domain"`
 }
 
 // DataEntryChange — a data entry created, updated, or removed on the account.
