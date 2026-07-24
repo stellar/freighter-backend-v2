@@ -905,7 +905,7 @@ func TestGetAccountTransactions(t *testing.T) {
 		assert.Equal(t, 503, upErr.Code)
 	})
 
-	t.Run("null transactions connection returns empty page", func(t *testing.T) {
+	t.Run("null transactions connection is an upstream error", func(t *testing.T) {
 		t.Parallel()
 		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
 			return 200, `{"data":{"accountByAddress":{"transactions":null}}}`
@@ -913,10 +913,9 @@ func TestGetAccountTransactions(t *testing.T) {
 		defer server.Close()
 		svc := newTestWalletBackendService(t, server.URL)
 		got, err := svc.GetAccountTransactions(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
-		require.NoError(t, err)
-		require.NotNil(t, got)
-		assert.Equal(t, []*types.AccountTransaction{}, got.Data)
-		assert.False(t, got.Pagination.HasNext)
+		require.Error(t, err, "the SDK rejects a null connection: the schema declares it non-null")
+		assert.False(t, errors.Is(err, wbclient.ErrAccountNotFound), "a malformed connection is not an account-not-found condition")
+		assert.Nil(t, got)
 	})
 
 	t.Run("ErrAccountNotFound does not increment ErrorsTotal", func(t *testing.T) {

@@ -43,7 +43,7 @@ func mapBalance(b wbtypes.Balance) types.Balance {
 			LastModifiedLedger: bal.LastModifiedLedger,
 		}
 	case *wbtypes.TrustlineBalance:
-		code, issuer := deref(bal.Code), deref(bal.Issuer)
+		code, issuer := bal.Code, bal.Issuer
 		base.Key = code + ":" + issuer
 		// The SDK carries the trustline's asset type as an upper-case enum
 		// (CREDIT_ALPHANUM4); the v1 REST contract is the lower-case Horizon
@@ -53,8 +53,8 @@ func mapBalance(b wbtypes.Balance) types.Balance {
 		base.Available = spendable(bal.BalanceValue, bal.SellingLiabilities)
 		return &types.TrustlineBalance{
 			BalanceBase:                       base,
-			Code:                              bal.Code,
-			Issuer:                            bal.Issuer,
+			Code:                              &code,
+			Issuer:                            &issuer,
 			Type:                              assetType,
 			Limit:                             bal.Limit,
 			BuyingLiabilities:                 bal.BuyingLiabilities,

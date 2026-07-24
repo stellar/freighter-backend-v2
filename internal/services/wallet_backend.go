@@ -309,16 +309,6 @@ func (w *walletBackendService) recordWBCall(method, network string, start time.T
 	}
 }
 
-// emptyTxPage is the empty-page response shape used when wallet-backend
-// returns a null transactions connection on an existing account (schema-
-// valid per wallet-backend PR #616 — distinct from ErrAccountNotFound).
-func emptyTxPage() *types.PaginatedResponse[*types.AccountTransaction] {
-	return &types.PaginatedResponse[*types.AccountTransaction]{
-		Data:       []*types.AccountTransaction{},
-		Pagination: types.PaginationInfo{},
-	}
-}
-
 // GetAccountTransactions returns one page of an account's transactions, each
 // embedding that account's operations and state changes, via the wallet-backend
 // single nested GraphQL call. ErrAccountNotFound is returned unwrapped so callers
@@ -332,15 +322,14 @@ func (w *walletBackendService) GetAccountTransactions(ctx context.Context, addre
 		return nil, fmt.Errorf("wallet backend client not configured for network: %s", network)
 	}
 
+	// The SDK enforces the schema's non-null contract: on success the connection
+	// is never nil (a null connection is an upstream error surfaced via err).
 	conn, err := client.GetAccountTransactionsWithOpsAndStateChanges(ctx, address, translateTimeRange(p), translateParams(p))
 	if err != nil {
 		if errors.Is(err, wbclient.ErrAccountNotFound) {
 			return nil, err
 		}
 		return nil, classifyWBError(err)
-	}
-	if conn == nil {
-		return emptyTxPage(), nil
 	}
 
 	items := make([]*types.AccountTransaction, 0, len(conn.Edges))
