@@ -6,6 +6,7 @@ import (
 
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
+	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
 )
 
 const (
@@ -53,12 +54,9 @@ type WalletBackendService interface {
 	// pool it touched. An account unknown to wallet-backend returns empty
 	// positions, not an error — indistinguishable from "no positions" by
 	// design.
-	GetBlendPositions(ctx context.Context, address, network string) (*BlendAccountPositions, error)
+	GetBlendPositions(ctx context.Context, address, network string) (*wbtypes.BlendAccountPositions, error)
 	// GetBlendPools returns the pool-wide Blend catalog (no account data).
-	GetBlendPools(ctx context.Context, network string) ([]BlendPool, error)
-	// GetBlendEarnOptions returns the asset-first earn catalog, pre-filtered
-	// upstream to enabled reserves in supply-accepting pools.
-	GetBlendEarnOptions(ctx context.Context, network string) ([]BlendEarnOption, error)
+	GetBlendPools(ctx context.Context, network string) ([]wbtypes.BlendPool, error)
 }
 
 // StellarExpertAsset is the subset of the Stellar Expert /asset/{id} response

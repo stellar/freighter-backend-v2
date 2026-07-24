@@ -3,6 +3,8 @@ package utils
 import (
 	"context"
 
+	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
+
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/go-stellar-sdk/clients/rpcclient"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
@@ -122,15 +124,12 @@ type MockWalletBackendService struct {
 	GetAccountTransactionsFunc func(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[*types.AccountTransaction], error)
 
 	// Blend method stubs follow the same Result/Error/Func precedence.
-	GetBlendPositionsResult *types.BlendAccountPositions
+	GetBlendPositionsResult *wbtypes.BlendAccountPositions
 	GetBlendPositionsError  error
-	GetBlendPositionsFunc   func(ctx context.Context, address, network string) (*types.BlendAccountPositions, error)
+	GetBlendPositionsFunc   func(ctx context.Context, address, network string) (*wbtypes.BlendAccountPositions, error)
 
-	GetBlendPoolsResult []types.BlendPool
+	GetBlendPoolsResult []wbtypes.BlendPool
 	GetBlendPoolsError  error
-
-	GetBlendEarnOptionsResult []types.BlendEarnOption
-	GetBlendEarnOptionsError  error
 }
 
 func (m *MockWalletBackendService) Name() string {
@@ -164,7 +163,7 @@ func (m *MockWalletBackendService) GetAccountTransactions(ctx context.Context, a
 	return m.GetAccountTransactionsResult, nil
 }
 
-func (m *MockWalletBackendService) GetBlendPositions(ctx context.Context, address, network string) (*types.BlendAccountPositions, error) {
+func (m *MockWalletBackendService) GetBlendPositions(ctx context.Context, address, network string) (*wbtypes.BlendAccountPositions, error) {
 	if m.GetBlendPositionsFunc != nil {
 		return m.GetBlendPositionsFunc(ctx, address, network)
 	}
@@ -174,27 +173,17 @@ func (m *MockWalletBackendService) GetBlendPositions(ctx context.Context, addres
 	if m.GetBlendPositionsResult != nil {
 		return m.GetBlendPositionsResult, nil
 	}
-	return &types.BlendAccountPositions{Pools: []types.BlendPoolPosition{}}, nil
+	return &wbtypes.BlendAccountPositions{Pools: []wbtypes.BlendPoolPosition{}}, nil
 }
 
-func (m *MockWalletBackendService) GetBlendPools(ctx context.Context, network string) ([]types.BlendPool, error) {
+func (m *MockWalletBackendService) GetBlendPools(ctx context.Context, network string) ([]wbtypes.BlendPool, error) {
 	if m.GetBlendPoolsError != nil {
 		return nil, m.GetBlendPoolsError
 	}
 	if m.GetBlendPoolsResult != nil {
 		return m.GetBlendPoolsResult, nil
 	}
-	return []types.BlendPool{}, nil
-}
-
-func (m *MockWalletBackendService) GetBlendEarnOptions(ctx context.Context, network string) ([]types.BlendEarnOption, error) {
-	if m.GetBlendEarnOptionsError != nil {
-		return nil, m.GetBlendEarnOptionsError
-	}
-	if m.GetBlendEarnOptionsResult != nil {
-		return m.GetBlendEarnOptionsResult, nil
-	}
-	return []types.BlendEarnOption{}, nil
+	return []wbtypes.BlendPool{}, nil
 }
 
 // MockPositionsService stubs types.PositionsService for handler tests.
