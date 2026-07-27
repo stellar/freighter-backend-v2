@@ -152,10 +152,6 @@ type WalletBackendConfig struct {
 // from wallet-backend's Blend GraphQL surface (URLs and signing keys come
 // from WalletBackendConfig).
 type BlendConfig struct {
-	// PositionsCacheTTLSeconds is the Redis TTL for per-address position
-	// responses. User-visible staleness is this TTL plus wallet-backend's
-	// own ingestion lag, so keep it short.
-	PositionsCacheTTLSeconds int
 	// CatalogCacheTTLSeconds is the Redis TTL for the address-independent
 	// market views (pools, earn options). One cache entry per network serves
 	// every user.
