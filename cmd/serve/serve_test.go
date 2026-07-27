@@ -235,3 +235,50 @@ func TestServeCmd_AcceptsStrictAuthMode(t *testing.T) {
 
 	require.NoError(t, cmd.Execute())
 }
+
+func TestServeCmd_RejectsNegativeAuthClockSkewLeeway(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--auth-clock-skew-leeway", "-1s"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--auth-clock-skew-leeway=-1s must be >= 0 and <= 10m")
+}
+
+func TestServeCmd_RejectsAuthClockSkewLeewayAbove10m(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--auth-clock-skew-leeway", "11m"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be >= 0 and <= 10m")
+}
+
+func TestServeCmd_AcceptsAuthClockSkewLeewayBoundaries(t *testing.T) {
+	t.Parallel()
+
+	// 0 and the 10m ceiling are both inclusive-valid.
+	for _, leeway := range []string{"0s", "10m"} {
+		serveCmd := &ServeCmd{Cfg: &config.Config{}}
+		cmd := serveCmd.Command()
+		cmd.RunE = func(*cobra.Command, []string) error { return nil }
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		// --database-url required to reach and pass the full validation chain.
+		cmd.SetArgs([]string{"--auth-clock-skew-leeway", leeway, "--database-url", "postgres://localhost/test"})
+
+		require.NoErrorf(t, cmd.Execute(), "leeway %s should be accepted", leeway)
+	}
+}

@@ -67,7 +67,7 @@ func TestLoggingAuth_AuthenticatedLineHasUserAndIss(t *testing.T) {
 	token := mintToken(t, priv, sub, "GET "+authTestPath, auth.MaxTokenLifetime, time.Now())
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	handler := Logging()(Auth(auth.NewVerifier(), auth.Permissive, nil)(next))
+	handler := Logging()(Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, nil)(next))
 
 	r := httptest.NewRequest(http.MethodGet, authTestPath, nil)
 	r.Header.Set("Authorization", "Bearer "+token)
@@ -84,7 +84,7 @@ func TestLoggingAuth_AnonymousHasNoAuthFields(t *testing.T) {
 	defer logger.SetOutput(os.Stdout)
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	handler := Logging()(Auth(auth.NewVerifier(), auth.Permissive, nil)(next))
+	handler := Logging()(Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, nil)(next))
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, authTestPath, nil))
 
 	out := buf.String()
@@ -125,7 +125,7 @@ func TestLoggingAuth_OversizedBodyLogsIss(t *testing.T) {
 	r.Body = http.MaxBytesReader(rr, r.Body, limit)
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	handler := Logging()(Auth(auth.NewVerifier(), auth.Permissive, nil)(next))
+	handler := Logging()(Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, nil)(next))
 	handler.ServeHTTP(rr, r)
 
 	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
@@ -153,7 +153,7 @@ func TestLoggingAuth_RejectionDetailIsBounded(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, authTestPath, nil)
 	r.Header.Set("Authorization", "Bearer "+token)
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	handler := Logging()(Auth(auth.NewVerifier(), auth.Permissive, nil)(next))
+	handler := Logging()(Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, nil)(next))
 	handler.ServeHTTP(httptest.NewRecorder(), r)
 
 	out := buf.String()

@@ -13,9 +13,21 @@ const (
 	// MaxTokenLifetime caps how long a token may be valid (exp - iat). Short
 	// lifetimes are the primary replay defense.
 	MaxTokenLifetime = 15 * time.Second
-	// ClockSkewLeeway tolerates clock drift between client and server when
-	// checking expiry, per the design doc (mobile clients especially).
-	ClockSkewLeeway = 5 * time.Second
+	// ClockSkewLeeway is the DEFAULT clock-drift tolerance between client and
+	// server when checking iat/exp, per the design doc (mobile clients
+	// especially). It is the default value of the --auth-clock-skew-leeway flag;
+	// the effective leeway is threaded in per-verifier (see NewVerifier). This
+	// const is read as that flag default and by the exported ParseJWT convenience
+	// wrapper (parser.go); production request verification goes through the
+	// verifier's configured leeway, not this const.
+	//
+	// Deliberately wide during the JWT rollout: the goal is to avoid rejecting
+	// real users whose device clocks drift or are set ahead, while the
+	// freighter_auth_requests_total{reason="bad_timing"|"expired"} counters
+	// gather the real-world skew distribution. Tighten once that data is in.
+	// Wider leeway proportionally widens the token replay window (~2*leeway +
+	// MaxTokenLifetime); it never weakens signature verification.
+	ClockSkewLeeway = 2 * time.Minute
 )
 
 // Claims is the JWT payload Freighter clients sign. Subject (the `sub` registered
@@ -32,7 +44,7 @@ type Claims struct {
 // expiry-vs-now are verified separately by ParseJWT. Failures are returned as
 // *VerificationError with a specific reason so the rejection can be classified
 // for metrics/logging.
-func (c *Claims) Validate(methodAndPath string, body []byte, maxLifetime time.Duration) error {
+func (c *Claims) Validate(methodAndPath string, body []byte, maxLifetime, leeway time.Duration) error {
 	if c.ExpiresAt == nil {
 		return &VerificationError{Reason: ReasonBadTiming, Err: errors.New("missing exp claim")}
 	}
@@ -56,12 +68,12 @@ func (c *Claims) Validate(methodAndPath string, body []byte, maxLifetime time.Du
 	// validates exp/nbf but does not reject a future iat, so without this a signer
 	// could date a token ahead of now (e.g. iat=exp=now+lifetime+leeway) and have
 	// it accepted, stretching the acceptance window past the intended ±skew.
-	if c.IssuedAt.After(now.Add(ClockSkewLeeway)) {
+	if c.IssuedAt.After(now.Add(leeway)) {
 		return &VerificationError{Reason: ReasonBadTiming, Err: errors.New("iat is in the future beyond the allowed skew")}
 	}
 	// Reject tokens dated implausibly far in the future. exp can legitimately be
 	// up to one full lifetime ahead, plus skew leeway.
-	if c.ExpiresAt.After(now.Add(maxLifetime + ClockSkewLeeway)) {
+	if c.ExpiresAt.After(now.Add(maxLifetime + leeway)) {
 		return &VerificationError{Reason: ReasonBadTiming, Err: errors.New("exp is too far in the future")}
 	}
 

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Identity is the authenticated principal extracted from a verified request JWT.
@@ -27,11 +28,16 @@ type HTTPRequestVerifier interface {
 // request bodies are bounded upstream by the BodySizeLimit middleware
 // (http.MaxBytesReader), so the verifier reads them in full rather than imposing
 // a second, divergent cap that could silently truncate the body it hashes.
-type Verifier struct{}
+type Verifier struct {
+	// leeway is the clock-skew tolerance applied to iat/exp validation
+	// (--auth-clock-skew-leeway). It does not affect signature verification.
+	leeway time.Duration
+}
 
-// NewVerifier returns a Verifier.
-func NewVerifier() *Verifier {
-	return &Verifier{}
+// NewVerifier returns a Verifier that tolerates the given clock-skew leeway when
+// validating token timing. Pass auth.ClockSkewLeeway for the default.
+func NewVerifier(leeway time.Duration) *Verifier {
+	return &Verifier{leeway: leeway}
 }
 
 // VerifyHTTPRequest extracts the bearer token, binds it to the request's
@@ -65,7 +71,7 @@ func (v *Verifier) VerifyHTTPRequest(r *http.Request) (Identity, error) {
 	}
 
 	methodAndPath := fmt.Sprintf("%s %s", r.Method, r.URL.RequestURI())
-	claims, err := ParseJWT(token, methodAndPath, body)
+	claims, err := parseJWT(token, methodAndPath, body, v.leeway)
 	if err != nil {
 		return Identity{}, err
 	}

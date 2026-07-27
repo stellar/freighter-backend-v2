@@ -48,6 +48,9 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if _, err := auth.ParseMode(s.Cfg.AppConfig.AuthMode); err != nil {
 				return fmt.Errorf("--auth-mode: %w", err)
 			}
+			if d := s.Cfg.AppConfig.AuthClockSkewLeeway; d < 0 || d > 10*time.Minute {
+				return fmt.Errorf("--auth-clock-skew-leeway=%s must be >= 0 and <= 10m", d)
+			}
 			// The database is validated only when enabled. With --db-enabled=false
 			// the service runs without a database (DB-backed features report
 			// unavailable), so an empty DATABASE_URL must not fail boot.
@@ -82,6 +85,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MetricsPort, "metrics-port", 9090, "The port of the internal metrics server (Prometheus /metrics)")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.Mode, "mode", "development", "The mode of the server")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.AuthMode, "auth-mode", "permissive", "JWT auth enforcement for gated routes: \"permissive\" (allow no-token requests, reject invalid tokens) or \"strict\" (require a valid token)")
+	cmd.Flags().DurationVar(&s.Cfg.AppConfig.AuthClockSkewLeeway, "auth-clock-skew-leeway", auth.ClockSkewLeeway, "Clock-skew tolerance for JWT iat/exp validation (e.g. 5s, 2m). Wider values tolerate more device clock drift but proportionally widen the token replay window; signature verification is unaffected.")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.SentryKey, "sentry-key", "", "The Sentry key")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.ProtocolsConfigPath, "protocols-config-path", "/app/config/protocols.json", "The path to the protocols config file while lists all supported protocols in Freighter")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.MeridianPayTreasureHuntAddress, "meridian-pay-treasure-hunt-address", "", "The Meridian Pay Treasure Hunt collection address")
