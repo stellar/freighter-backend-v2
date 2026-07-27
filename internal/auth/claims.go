@@ -16,8 +16,10 @@ const (
 	// ClockSkewLeeway is the DEFAULT clock-drift tolerance between client and
 	// server when checking iat/exp, per the design doc (mobile clients
 	// especially). It is the default value of the --auth-clock-skew-leeway flag;
-	// the effective leeway is threaded in per-verifier (see NewVerifier), so this
-	// const is used only as that flag default and by tests.
+	// the effective leeway is threaded in per-verifier (see NewVerifier). This
+	// const is read as that flag default and by the exported ParseJWT convenience
+	// wrapper (parser.go); production request verification goes through the
+	// verifier's configured leeway, not this const.
 	//
 	// Deliberately wide during the JWT rollout: the goal is to avoid rejecting
 	// real users whose device clocks drift or are set ahead, while the

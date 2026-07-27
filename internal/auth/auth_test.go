@@ -418,6 +418,29 @@ func readAll(r *http.Request) ([]byte, error) {
 
 // --- configurable clock-skew leeway (--auth-clock-skew-leeway) ---
 
+// The verifier forwards its configured leeway into verification: a token past
+// the default window is rejected by a default verifier but accepted by one built
+// with a wide leeway. Guards the v.leeway -> parseJWT forwarding (verifier.go)
+// against silent regression, since the other skew tests call parseJWT directly.
+func TestVerifyHTTPRequest_UsesConfiguredLeeway(t *testing.T) {
+	_, priv, sub := newKeypair(t)
+	beyond := ClockSkewLeeway + time.Minute // past the default future bound
+	token := mint(t, priv, skewedClaims(sub, "GET /api/v1/auth/whoami", nil, beyond))
+	newReq := func() *http.Request {
+		return newRequest(t, http.MethodGet, "/api/v1/auth/whoami", nil, token)
+	}
+
+	// Default verifier: token is outside the window -> rejected as bad_timing.
+	_, err := NewVerifier(ClockSkewLeeway).VerifyHTTPRequest(newReq())
+	require.Error(t, err)
+	assert.Equal(t, ReasonBadTiming, Reason(err))
+
+	// Verifier built with a leeway wide enough to cover it -> accepted.
+	id, err := NewVerifier(beyond + time.Minute).VerifyHTTPRequest(newReq())
+	require.NoError(t, err)
+	assert.Equal(t, sub, id.UserID)
+}
+
 // A wider leeway accepts tokens the default leeway rejects on timing — both a
 // fast clock (future iat -> bad_timing) and a lagging clock (past exp -> expired).
 func TestParseJWT_WideLeewayAcceptsClockSkew(t *testing.T) {
