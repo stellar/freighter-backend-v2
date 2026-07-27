@@ -28,7 +28,12 @@ type AppConfig struct {
 	// AuthMode selects JWT enforcement for gated routes: "permissive" (allow
 	// requests with no token through, reject invalid tokens) or "strict"
 	// (require a valid token). Parsed via auth.ParseMode; validated at startup.
-	AuthMode                       string
+	AuthMode string
+	// AuthClockSkewLeeway is the clock-skew tolerance applied to JWT iat/exp
+	// validation (--auth-clock-skew-leeway). Wider values tolerate more device
+	// clock drift but proportionally widen the token replay window. It does not
+	// affect signature verification. Defaults to auth.ClockSkewLeeway.
+	AuthClockSkewLeeway            time.Duration
 	SentryKey                      string
 	ProtocolsConfigPath            string
 	MeridianPayTreasureHuntAddress string

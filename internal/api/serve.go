@@ -256,7 +256,7 @@ func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 	// One Auth instance, bound to s.authMode (resolved once in Start), wraps every
 	// gated route. A future user-scoped route opts into auth simply by adding itself
 	// to routes() with gated=true.
-	verifier := auth.NewVerifier()
+	verifier := auth.NewVerifier(s.cfg.AppConfig.AuthClockSkewLeeway)
 	authed := middleware.Auth(verifier, s.authMode, s.appMetrics.Auth)
 
 	mux := http.NewServeMux()
