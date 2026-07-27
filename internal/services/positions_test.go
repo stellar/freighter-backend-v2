@@ -216,7 +216,7 @@ func TestGetAccountPositionsMapsAndPassesThrough(t *testing.T) {
 			}},
 		},
 	}
-	svc := NewPositionsService(mockWB, nil, 0, nil)
+	svc := NewPositionsService(mockWB, nil)
 
 	got, err := svc.GetAccountPositions(context.Background(), "GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552", types.TESTNET)
 	require.NoError(t, err)
@@ -241,7 +241,7 @@ func TestGetAccountPositionsMapsAndPassesThrough(t *testing.T) {
 }
 
 func TestGetAccountPositionsEmptyAccount(t *testing.T) {
-	svc := NewPositionsService(&utils.MockWalletBackendService{}, nil, 0, nil)
+	svc := NewPositionsService(&utils.MockWalletBackendService{}, nil)
 
 	got, err := svc.GetAccountPositions(context.Background(), "GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552", types.TESTNET)
 	require.NoError(t, err)
@@ -254,7 +254,7 @@ func TestGetAccountPositionsEmptyAccount(t *testing.T) {
 
 func TestGetAccountPositionsUpstreamError(t *testing.T) {
 	upErr := errors.New("wallet-backend on fire")
-	svc := NewPositionsService(&utils.MockWalletBackendService{GetBlendPositionsError: upErr}, nil, 0, nil)
+	svc := NewPositionsService(&utils.MockWalletBackendService{GetBlendPositionsError: upErr}, nil)
 
 	_, err := svc.GetAccountPositions(context.Background(), "GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552", types.TESTNET)
 	assert.ErrorIs(t, err, upErr)

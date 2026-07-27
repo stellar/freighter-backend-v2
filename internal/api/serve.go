@@ -222,12 +222,7 @@ func (s *ApiServer) routes() ([]route, error) {
 	}
 	whoamiHandler := handlers.NewWhoamiHandler()
 
-	positionsService := services.NewPositionsService(
-		s.walletBackendService,
-		s.redis,
-		time.Duration(s.cfg.BlendConfig.PositionsCacheTTLSeconds)*time.Second,
-		s.appMetrics.Service,
-	)
+	positionsService := services.NewPositionsService(s.walletBackendService, s.appMetrics.Service)
 	accountPositionsHandler := handlers.NewAccountPositionsHandler(positionsService)
 
 	return []route{

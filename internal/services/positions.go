@@ -1,89 +1,50 @@
 // ABOUTME: Positions service: maps wallet-backend Blend positions into the
-// ABOUTME: frontend-shaped account positions response, with per-address caching.
+// ABOUTME: frontend-shaped account positions response.
 package services
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"math/big"
-	"strings"
 	"time"
 
 	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
 
-	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
-	"github.com/stellar/freighter-backend-v2/internal/store"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
-const (
-	positionsServiceName = "positions"
-
-	defaultPositionsCacheTTL = 30 * time.Second
-
-	// positionsCacheKeyPrefix versions the cached response shape; bump on
-	// breaking changes so stale entries die at the key level.
-	positionsCacheKeyPrefix = "blend:positions:v1"
-)
+const positionsServiceName = "positions"
 
 type positionsService struct {
 	walletBackend types.WalletBackendService
-	redis         *store.RedisStore
-	cacheTTL      time.Duration
 	svcMetrics    *metrics.Service
 }
 
-// NewPositionsService wires the positions view. redis may be nil; every
-// request then bypasses the cache and hits wallet-backend.
-func NewPositionsService(walletBackend types.WalletBackendService, redis *store.RedisStore, cacheTTL time.Duration, m *metrics.Service) types.PositionsService {
-	if cacheTTL <= 0 {
-		cacheTTL = defaultPositionsCacheTTL
-	}
+// NewPositionsService wires the positions view.
+func NewPositionsService(walletBackend types.WalletBackendService, m *metrics.Service) types.PositionsService {
 	return &positionsService{
 		walletBackend: walletBackend,
-		redis:         redis,
-		cacheTTL:      cacheTTL,
 		svcMetrics:    m,
 	}
 }
 
 func (p *positionsService) Name() string { return positionsServiceName }
 
-// GetAccountPositions returns the account's positions, cached per
-// (network, address) for cacheTTL. User-visible staleness is the TTL plus
-// wallet-backend's own ingestion lag.
+// GetAccountPositions returns the account's positions, fetched from
+// wallet-backend on every request (like balances): no caching, so a fresh
+// deposit is visible as soon as the indexer ingests it.
 func (p *positionsService) GetAccountPositions(ctx context.Context, address, network string) (_ *types.AccountPositions, err error) {
 	start := time.Now()
 	defer func() {
 		metrics.Record(p.svcMetrics, positionsServiceName, "GetAccountPositions", network, time.Since(start).Seconds(), err)
 	}()
 
-	cacheKey := fmt.Sprintf("%s:%s:%s", positionsCacheKeyPrefix, strings.ToLower(network), address)
-	if p.redis != nil {
-		hits, cacheErr := p.redis.MGetJSON(ctx, []string{cacheKey}, func() any { return &types.AccountPositions{} })
-		if cacheErr != nil {
-			// Cache trouble must not fail the request; fall through to upstream.
-			logger.ErrorWithContext(ctx, "positions cache read failed", "error", cacheErr)
-		} else if hit, ok := hits[cacheKey].(*types.AccountPositions); ok {
-			return hit, nil
-		}
-	}
-
 	upstream, err := p.walletBackend.GetBlendPositions(ctx, address, network)
 	if err != nil {
 		return nil, err
 	}
-
-	result := mapAccountPositions(upstream)
-
-	if p.redis != nil {
-		if cacheErr := p.redis.SetJSON(ctx, cacheKey, result, p.cacheTTL); cacheErr != nil {
-			logger.ErrorWithContext(ctx, "positions cache write failed", "error", cacheErr)
-		}
-	}
-	return result, nil
+	return mapAccountPositions(upstream), nil
 }
 
 // mapAccountPositions shapes the upstream Blend positions into the response.
