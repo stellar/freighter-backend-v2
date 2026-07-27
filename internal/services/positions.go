@@ -95,12 +95,42 @@ func mapAccountPositions(upstream *wbtypes.BlendAccountPositions) *types.Account
 		})
 	}
 
-	total, netAPY := accountAggregate(upstream.Pools)
+	total, netAPY := accountAggregate(upstream.Pools, upstream.Backstop)
 	return &types.AccountPositions{
 		TotalValueUSD: total,
 		NetAPY:        netAPY,
 		Positions:     positions,
+		Backstop:      mapBackstop(upstream.Backstop),
 	}
+}
+
+// mapBackstop shapes the account's backstop deposits. Render-only in v1:
+// initiating backstop deposits is out of scope, but existing positions are
+// the user's money and must be visible.
+func mapBackstop(backstop []wbtypes.BlendBackstopPosition) []types.BlendBackstopRow {
+	rows := make([]types.BlendBackstopRow, 0, len(backstop))
+	for _, b := range backstop {
+		q4w := make([]types.BlendQ4WRow, 0, len(b.Q4W))
+		for _, q := range b.Q4W {
+			q4w = append(q4w, types.BlendQ4WRow{
+				Amount:     q.Amount,
+				LPTokens:   q.LpTokens,
+				USDValue:   q.UsdValue,
+				Expiration: q.Expiration,
+			})
+		}
+		rows = append(rows, types.BlendBackstopRow{
+			PoolID:        b.PoolAddress,
+			PoolName:      b.PoolName,
+			Shares:        b.Shares,
+			LPTokens:      b.LpTokens,
+			USDValue:      b.UsdValue,
+			ClaimableBLND: b.EmissionsEarnedBlnd,
+			ClaimableUSD:  b.EmissionsEarnedUsd,
+			Q4W:           q4w,
+		})
+	}
+	return rows
 }
 
 // mapBlendDetail turns reserve positions into display rows. Reserves with no
@@ -154,20 +184,23 @@ func mapBlendDetail(reserves []wbtypes.BlendReservePosition) *types.BlendPositio
 	return detail
 }
 
-// accountAggregate computes the header figures from the per-pool summaries.
+// accountAggregate computes the header figures from the per-pool summaries
+// and backstop deposits.
 //
-// TotalValueUSD: Σ pool usdValue with strict null propagation (any
-// unavailable pool value nulls the total — an undercounted "total" is worse
-// than an honest null), mirroring upstream's convention for pool totals.
-// 0 for an account with no pools.
+// TotalValueUSD: Σ pool usdValue + Σ backstop usdValue, with strict null
+// propagation (any unavailable value nulls the total — an undercounted
+// "total" is worse than an honest null), mirroring upstream's convention
+// for pool totals. 0 for an account with no positions.
 //
 // NetAPY: mean of pool netApy weighted by pool suppliedUsd — the base the
 // upstream rate is defined over (blend-sdk-js: net dollars / total
-// supplied), so rate × base reproduces the per-pool dollar earnings. Null
-// when any pool's netApy or suppliedUsd is unavailable or the supplied base
-// is zero.
-func accountAggregate(pools []wbtypes.BlendPoolPosition) (total *float64, netAPY *float64) {
-	if len(pools) == 0 {
+// supplied), so rate × base reproduces the per-pool dollar earnings.
+// Backstop deposits carry no interest APY (they earn BLND emissions,
+// reported per row), so they contribute to the total but not the rate.
+// Null when any pool's netApy or suppliedUsd is unavailable or the supplied
+// base is zero.
+func accountAggregate(pools []wbtypes.BlendPoolPosition, backstop []wbtypes.BlendBackstopPosition) (total *float64, netAPY *float64) {
+	if len(pools) == 0 && len(backstop) == 0 {
 		zero := 0.0
 		return &zero, nil
 	}
@@ -187,6 +220,12 @@ func accountAggregate(pools []wbtypes.BlendPoolPosition) (total *float64, netAPY
 		}
 		apyNumerator += *pool.NetApy * *pool.SuppliedUsd
 		suppliedSum += *pool.SuppliedUsd
+	}
+	for _, b := range backstop {
+		if b.UsdValue == nil {
+			return nil, nil
+		}
+		sum += *b.UsdValue
 	}
 
 	total = &sum

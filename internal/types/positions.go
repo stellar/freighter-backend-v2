@@ -33,6 +33,10 @@ type AccountPositions struct {
 	// the account has no DeFi positions (including accounts unknown to the
 	// indexer — indistinguishable by design).
 	Positions []PoolPosition `json:"positions"`
+	// Backstop lists the account's Blend backstop deposits, one row per
+	// backed pool. Render-only in v1 (initiating backstop deposits is out of
+	// scope). Always non-nil.
+	Backstop []BlendBackstopRow `json:"backstop"`
 }
 
 // PoolPosition is one pool row. The common fields render a Position Home row
@@ -117,6 +121,36 @@ type BlendBorrowRow struct {
 	APY          *float64 `json:"apy"`
 	EmissionsAPR *float64 `json:"emissions_apr"`
 	PriceUSD     *float64 `json:"price_usd"`
+}
+
+// BlendBackstopRow is the account's backstop deposit in one pool: first-loss
+// capital earning BLND emissions. Shares is the ACTIVE (non-queued) share
+// balance; LPTokens/USDValue value the whole deposit including
+// queued-for-withdrawal shares (queued shares keep earning pool interest and
+// remain slashable until withdrawn).
+type BlendBackstopRow struct {
+	// PoolID is the pool this backstop deposit backs.
+	PoolID   string  `json:"pool_id"`
+	PoolName *string `json:"pool_name"`
+	// Shares (active) and LPTokens (whole deposit) are raw integer strings.
+	Shares   string   `json:"shares"`
+	LPTokens string   `json:"lp_tokens"`
+	USDValue *float64 `json:"usd_value"`
+	// ClaimableBLND is uncollected BLND emissions (raw units); ClaimableUSD
+	// its upstream-computed value.
+	ClaimableBLND string   `json:"claimable_blnd"`
+	ClaimableUSD  *float64 `json:"claimable_usd"`
+	// Q4W lists queued withdrawals. Always non-nil.
+	Q4W []BlendQ4WRow `json:"q4w"`
+}
+
+// BlendQ4WRow is one queued backstop withdrawal, unlocking at Expiration
+// (unix seconds). Amount is in backstop shares.
+type BlendQ4WRow struct {
+	Amount     string   `json:"amount"`
+	LPTokens   string   `json:"lp_tokens"`
+	USDValue   *float64 `json:"usd_value"`
+	Expiration int64    `json:"expiration"`
 }
 
 // PositionsService assembles the account positions view.
