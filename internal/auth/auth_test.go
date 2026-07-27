@@ -418,7 +418,7 @@ func readAll(r *http.Request) ([]byte, error) {
 
 // --- configurable clock-skew leeway (--auth-clock-skew-leeway) ---
 
-// A wider leeway accepts tokens the default (5s) rejects on timing — both a
+// A wider leeway accepts tokens the default leeway rejects on timing — both a
 // fast clock (future iat -> bad_timing) and a lagging clock (past exp -> expired).
 func TestParseJWT_WideLeewayAcceptsClockSkew(t *testing.T) {
 	_, priv, sub := newKeypair(t)
@@ -481,7 +481,7 @@ func TestParseJWT_WideLeewayStillRejectsBadBinding(t *testing.T) {
 // existing callers is unchanged.
 func TestParseJWT_DefaultWrapperUsesDefaultLeeway(t *testing.T) {
 	_, priv, sub := newKeypair(t)
-	// Just inside the default 5s window is accepted...
+	// Just inside the default window is accepted...
 	ok := mint(t, priv, skewedClaims(sub, testMethodAndPath, nil, 3*time.Second))
 	_, err := ParseJWT(ok, testMethodAndPath, nil)
 	require.NoError(t, err)
