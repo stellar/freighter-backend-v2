@@ -16,6 +16,9 @@ import "context"
 // are full-precision integer strings in the asset's smallest unit (scale by
 // Decimals for display).
 type AccountPositions struct {
+	// Address is the account this entry describes; one entry per requested
+	// address, in first-seen request order (duplicates collapsed).
+	Address string `json:"address"`
 	// TotalValueUSD is the account's net position value across pools
 	// (Σ pool NetUSD). Strict null propagation: if any pool's value is
 	// unavailable the total is null rather than a silent undercount —
@@ -119,5 +122,9 @@ type BlendBorrowRow struct {
 // PositionsService assembles the account positions view.
 type PositionsService interface {
 	Service
-	GetAccountPositions(ctx context.Context, address, network string) (*AccountPositions, error)
+	// GetAccountsPositions fans out one wallet-backend positions fetch per
+	// unique address, mirroring the balances endpoint's semantics: unknown
+	// accounts are normal per-address outcomes (empty positions); any
+	// systemic upstream failure fails the whole request.
+	GetAccountsPositions(ctx context.Context, addresses []string, network string) ([]*AccountPositions, error)
 }

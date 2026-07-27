@@ -8,43 +8,75 @@ import (
 	"math/big"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
-const positionsServiceName = "positions"
+const (
+	positionsServiceName = "positions"
+
+	defaultPositionsConcurrency = 10
+)
 
 type positionsService struct {
-	walletBackend types.WalletBackendService
-	svcMetrics    *metrics.Service
+	walletBackend  types.WalletBackendService
+	maxConcurrency int
+	svcMetrics     *metrics.Service
 }
 
-// NewPositionsService wires the positions view.
-func NewPositionsService(walletBackend types.WalletBackendService, m *metrics.Service) types.PositionsService {
+// NewPositionsService wires the positions view. maxConcurrency caps the
+// per-request fan-out goroutines, like the balances fan-out.
+func NewPositionsService(walletBackend types.WalletBackendService, maxConcurrency int, m *metrics.Service) types.PositionsService {
+	if maxConcurrency <= 0 {
+		maxConcurrency = defaultPositionsConcurrency
+	}
 	return &positionsService{
-		walletBackend: walletBackend,
-		svcMetrics:    m,
+		walletBackend:  walletBackend,
+		maxConcurrency: maxConcurrency,
+		svcMetrics:     m,
 	}
 }
 
 func (p *positionsService) Name() string { return positionsServiceName }
 
-// GetAccountPositions returns the account's positions, fetched from
-// wallet-backend on every request (like balances): no caching, so a fresh
-// deposit is visible as soon as the indexer ingests it.
-func (p *positionsService) GetAccountPositions(ctx context.Context, address, network string) (_ *types.AccountPositions, err error) {
+// GetAccountsPositions returns positions for each unique requested address,
+// fetched from wallet-backend on every request (like balances): no caching,
+// so a fresh deposit is visible as soon as the indexer ingests it. Unknown
+// accounts are normal per-address outcomes (empty positions, already
+// normalized by the wallet-backend service); any other failure is systemic
+// and fails the whole request.
+func (p *positionsService) GetAccountsPositions(ctx context.Context, addresses []string, network string) (_ []*types.AccountPositions, err error) {
 	start := time.Now()
 	defer func() {
-		metrics.Record(p.svcMetrics, positionsServiceName, "GetAccountPositions", network, time.Since(start).Seconds(), err)
+		metrics.Record(p.svcMetrics, positionsServiceName, "GetAccountsPositions", network, time.Since(start).Seconds(), err)
 	}()
 
-	upstream, err := p.walletBackend.GetBlendPositions(ctx, address, network)
-	if err != nil {
+	unique := utils.DedupePreserveOrder(addresses)
+	results := make([]*types.AccountPositions, len(unique))
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(p.maxConcurrency)
+	for i, addr := range unique {
+		g.Go(func() error {
+			upstream, fetchErr := p.walletBackend.GetBlendPositions(gctx, addr, network)
+			if fetchErr != nil {
+				return fetchErr
+			}
+			entry := mapAccountPositions(upstream)
+			entry.Address = addr
+			results[i] = entry
+			return nil
+		})
+	}
+	if err = g.Wait(); err != nil {
 		return nil, err
 	}
-	return mapAccountPositions(upstream), nil
+	return results, nil
 }
 
 // mapAccountPositions shapes the upstream Blend positions into the response.

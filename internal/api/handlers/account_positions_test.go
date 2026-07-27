@@ -1,4 +1,4 @@
-// ABOUTME: Handler tests for GET /api/v1/accounts/{address}/positions:
+// ABOUTME: Handler tests for POST /api/v1/accounts/positions: request
 // ABOUTME: validation, error translation, and the success envelope.
 package handlers
 
@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -19,78 +20,94 @@ import (
 
 const positionsTestAddress = "GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552"
 
-func servePositions(t *testing.T, svc types.PositionsService, target string) *httptest.ResponseRecorder {
+func servePositions(t *testing.T, svc types.PositionsService, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	handler := NewAccountPositionsHandler(svc)
+	handler := NewAccountPositionsHandler(svc, 100)
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/v1/accounts/{address}/positions", CustomHandler(handler.GetAccountPositions))
+	mux.HandleFunc("POST /api/v1/accounts/positions", CustomHandler(handler.GetAccountsPositions))
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, target, strings.NewReader(body)))
 	return rec
 }
 
-func TestGetAccountPositionsSuccess(t *testing.T) {
+func TestGetAccountsPositionsSuccess(t *testing.T) {
 	total := 3619.27
 	svc := &utils.MockPositionsService{
-		GetAccountPositionsResult: &types.AccountPositions{
+		GetAccountsPositionsResult: []*types.AccountPositions{{
+			Address:       positionsTestAddress,
 			TotalValueUSD: &total,
 			Positions: []types.PoolPosition{{
 				Protocol: "blend",
 				ID:       "CCEBVDYMCCECIVWVOJSKUNLTVDIRLTRUCVZDVLKXKQZWSCF3DVQGJVIX",
 			}},
-		},
+		}},
 	}
 
-	rec := servePositions(t, svc, "/api/v1/accounts/"+positionsTestAddress+"/positions?network=TESTNET")
+	rec := servePositions(t, svc, "/api/v1/accounts/positions?network=TESTNET", `{"addresses": ["`+positionsTestAddress+`"]}`)
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	var body struct {
-		Data types.AccountPositions `json:"data"`
+		Data []types.AccountPositions `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-	require.NotNil(t, body.Data.TotalValueUSD)
-	assert.InDelta(t, 3619.27, *body.Data.TotalValueUSD, 1e-9)
-	require.Len(t, body.Data.Positions, 1)
-	assert.Equal(t, "blend", body.Data.Positions[0].Protocol)
+	require.Len(t, body.Data, 1)
+	assert.Equal(t, positionsTestAddress, body.Data[0].Address)
+	require.NotNil(t, body.Data[0].TotalValueUSD)
+	assert.InDelta(t, 3619.27, *body.Data[0].TotalValueUSD, 1e-9)
+	require.Len(t, body.Data[0].Positions, 1)
+	assert.Equal(t, "blend", body.Data[0].Positions[0].Protocol)
 }
 
-func TestGetAccountPositionsValidation(t *testing.T) {
+func TestGetAccountsPositionsValidation(t *testing.T) {
 	svc := &utils.MockPositionsService{}
+	valid := `{"addresses": ["` + positionsTestAddress + `"]}`
 
 	t.Run("invalid network", func(t *testing.T) {
-		rec := servePositions(t, svc, "/api/v1/accounts/"+positionsTestAddress+"/positions?network=DOGENET")
+		rec := servePositions(t, svc, "/api/v1/accounts/positions?network=DOGENET", valid)
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 
 	t.Run("missing network", func(t *testing.T) {
-		rec := servePositions(t, svc, "/api/v1/accounts/"+positionsTestAddress+"/positions")
+		rec := servePositions(t, svc, "/api/v1/accounts/positions", valid)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("empty addresses", func(t *testing.T) {
+		rec := servePositions(t, svc, "/api/v1/accounts/positions?network=TESTNET", `{"addresses": []}`)
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 
 	t.Run("invalid address", func(t *testing.T) {
-		rec := servePositions(t, svc, "/api/v1/accounts/not-an-address/positions?network=TESTNET")
+		rec := servePositions(t, svc, "/api/v1/accounts/positions?network=TESTNET", `{"addresses": ["nope"]}`)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		rec := servePositions(t, svc, "/api/v1/accounts/positions?network=TESTNET", `{`)
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 }
 
-func TestGetAccountPositionsErrorTranslation(t *testing.T) {
+func TestGetAccountsPositionsErrorTranslation(t *testing.T) {
+	body := `{"addresses": ["` + positionsTestAddress + `"]}`
+
 	t.Run("upstream error maps to 502", func(t *testing.T) {
 		svc := &utils.MockPositionsService{
-			GetAccountPositionsError: &metrics.UpstreamError{Kind: "graphql_error", Err: errors.New("boom")},
+			GetAccountsPositionsError: &metrics.UpstreamError{Kind: "graphql_error", Err: errors.New("boom")},
 		}
-		rec := servePositions(t, svc, "/api/v1/accounts/"+positionsTestAddress+"/positions?network=TESTNET")
+		rec := servePositions(t, svc, "/api/v1/accounts/positions?network=TESTNET", body)
 		assert.Equal(t, http.StatusBadGateway, rec.Code)
 	})
 
 	t.Run("unclassified error maps to 500", func(t *testing.T) {
-		svc := &utils.MockPositionsService{GetAccountPositionsError: errors.New("wat")}
-		rec := servePositions(t, svc, "/api/v1/accounts/"+positionsTestAddress+"/positions?network=TESTNET")
+		svc := &utils.MockPositionsService{GetAccountsPositionsError: errors.New("wat")}
+		rec := servePositions(t, svc, "/api/v1/accounts/positions?network=TESTNET", body)
 		assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	})
 }
 
-func TestGetAccountPositionsEmptyIs200(t *testing.T) {
-	rec := servePositions(t, &utils.MockPositionsService{}, "/api/v1/accounts/"+positionsTestAddress+"/positions?network=TESTNET")
+func TestGetAccountsPositionsEmptyIs200(t *testing.T) {
+	rec := servePositions(t, &utils.MockPositionsService{}, "/api/v1/accounts/positions?network=TESTNET", `{"addresses": ["`+positionsTestAddress+`"]}`)
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), `"positions":[]`)
+	assert.Contains(t, rec.Body.String(), `"data":[]`)
 }

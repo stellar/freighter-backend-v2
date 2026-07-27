@@ -201,7 +201,7 @@ func TestAccountAggregate(t *testing.T) {
 	})
 }
 
-func TestGetAccountPositionsMapsAndPassesThrough(t *testing.T) {
+func TestGetAccountsPositionsMapsAndPassesThrough(t *testing.T) {
 	name := "TestnetV2"
 	mockWB := &utils.MockWalletBackendService{
 		GetBlendPositionsResult: &wbtypes.BlendAccountPositions{
@@ -216,10 +216,13 @@ func TestGetAccountPositionsMapsAndPassesThrough(t *testing.T) {
 			}},
 		},
 	}
-	svc := NewPositionsService(mockWB, nil)
+	svc := NewPositionsService(mockWB, 0, nil)
 
-	got, err := svc.GetAccountPositions(context.Background(), "GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552", types.TESTNET)
+	results, err := svc.GetAccountsPositions(context.Background(), []string{"GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552"}, types.TESTNET)
 	require.NoError(t, err)
+	require.Len(t, results, 1)
+	got := results[0]
+	assert.Equal(t, "GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552", got.Address)
 
 	require.Len(t, got.Positions, 1)
 	row := got.Positions[0]
@@ -240,11 +243,17 @@ func TestGetAccountPositionsMapsAndPassesThrough(t *testing.T) {
 	assert.InDelta(t, 2.5245032003462415, *got.NetAPY, 1e-9)
 }
 
-func TestGetAccountPositionsEmptyAccount(t *testing.T) {
-	svc := NewPositionsService(&utils.MockWalletBackendService{}, nil)
+func TestGetAccountsPositionsEmptyAccountAndDedupe(t *testing.T) {
+	svc := NewPositionsService(&utils.MockWalletBackendService{}, 0, nil)
 
-	got, err := svc.GetAccountPositions(context.Background(), "GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552", types.TESTNET)
+	// Duplicates collapse, first-seen order preserved — like balances.
+	results, err := svc.GetAccountsPositions(context.Background(), []string{
+		"GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552",
+		"GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552",
+	}, types.TESTNET)
 	require.NoError(t, err)
+	require.Len(t, results, 1)
+	got := results[0]
 	assert.NotNil(t, got.Positions)
 	assert.Empty(t, got.Positions)
 	require.NotNil(t, got.TotalValueUSD)
@@ -252,10 +261,11 @@ func TestGetAccountPositionsEmptyAccount(t *testing.T) {
 	assert.Nil(t, got.NetAPY)
 }
 
-func TestGetAccountPositionsUpstreamError(t *testing.T) {
+func TestGetAccountsPositionsUpstreamError(t *testing.T) {
 	upErr := errors.New("wallet-backend on fire")
-	svc := NewPositionsService(&utils.MockWalletBackendService{GetBlendPositionsError: upErr}, nil)
+	svc := NewPositionsService(&utils.MockWalletBackendService{GetBlendPositionsError: upErr}, 0, nil)
 
-	_, err := svc.GetAccountPositions(context.Background(), "GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552", types.TESTNET)
+	// A systemic failure for any address fails the whole request.
+	_, err := svc.GetAccountsPositions(context.Background(), []string{"GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552"}, types.TESTNET)
 	assert.ErrorIs(t, err, upErr)
 }
