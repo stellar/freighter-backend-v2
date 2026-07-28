@@ -744,18 +744,19 @@ func TestGetAccountTransactions(t *testing.T) {
 	// state-change nodes use the polymorphic wire shape the SDK fragments emit:
 	// the interface discriminator is `category` (not `type`), each __typename is
 	// a *Change variant, and shared fields are aliased per type (balanceTokenId,
-	// feeTokenId, trustlineUpdatedTokenId, balanceAuthFlags). The five nodes
-	// cover a BalanceChange, a FeeChange, a SignerAddedChange (newWeight), a
-	// TrustlineUpdatedChange (oldLimit/newLimit), and a BalanceAuthorizationChange
-	// with null flags (SAC contract-holder authorization).
+	// trustlineUpdatedTokenId, balanceAuthFlags). The five nodes cover a
+	// BalanceChange, a fee row (also a BalanceChange, with no toMuxedId), a
+	// SignerAddedChange (newWeight), a TrustlineUpdatedChange
+	// (oldLimit/newLimit), and a BalanceAuthorizationChange with null flags (SAC
+	// contract-holder authorization).
 	const happyBody = `{
 		"data": {"accountByAddress": {"transactions": {
 			"edges": [
 				{"cursor": "cur-1", "node": {"hash": "h1", "feeCharged": 100, "resultCode": "tx_success", "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "isFeeBump": false, "ingestedAt": "2026-01-01T00:00:01Z"},
-				 "operations": [{"id": 7, "operationType": "PAYMENT", "operationXdr": "AAA", "resultCode": "op_success", "successful": true, "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z"}],
+				 "operations": [{"id": 7, "type": "PAYMENT", "operationXdr": "AAA", "resultCode": "op_success", "successful": true, "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z"}],
 				 "stateChanges": [
 					{"__typename": "BalanceChange", "category": "BALANCE", "reason": "DEBIT", "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z", "balanceTokenId": "native", "amount": "10", "toMuxedId": null},
-					{"__typename": "FeeChange", "category": "BALANCE", "reason": "DEBIT", "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z", "feeTokenId": "native", "amount": "1"},
+					{"__typename": "BalanceChange", "category": "BALANCE", "reason": "DEBIT", "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z", "balanceTokenId": "native", "amount": "1"},
 					{"__typename": "SignerAddedChange", "category": "SIGNER", "reason": "ADD", "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z", "signerAddress": "GSIGNER", "newWeight": 2},
 					{"__typename": "TrustlineUpdatedChange", "category": "TRUSTLINE", "reason": "UPDATE", "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z", "trustlineUpdatedTokenId": "USDC-GISSUER", "liquidityPoolId": null, "oldLimit": "100", "newLimit": "200"},
 					{"__typename": "BalanceAuthorizationChange", "category": "BALANCE_AUTHORIZATION", "reason": "UPDATE", "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z", "balanceAuthTokenId": "USDC-GISSUER", "liquidityPoolId": null, "balanceAuthFlags": null}
@@ -794,10 +795,11 @@ func TestGetAccountTransactions(t *testing.T) {
 		assert.Equal(t, "native", bc.TokenID)
 		assert.Equal(t, "10", bc.Amount)
 
-		fc, ok := got.Data[0].StateChanges[1].(*types.FeeChange)
-		require.True(t, ok, "second state change is a FeeChange, got %T", got.Data[0].StateChanges[1])
+		fc, ok := got.Data[0].StateChanges[1].(*types.BalanceChange)
+		require.True(t, ok, "second state change is a BalanceChange fee row, got %T", got.Data[0].StateChanges[1])
 		assert.Equal(t, "native", fc.TokenID)
 		assert.Equal(t, "1", fc.Amount)
+		assert.Nil(t, fc.ToMuxedID, "a fee row carries no muxed destination")
 
 		sa, ok := got.Data[0].StateChanges[2].(*types.SignerAddedChange)
 		require.True(t, ok, "third state change is a SignerAddedChange, got %T", got.Data[0].StateChanges[2])

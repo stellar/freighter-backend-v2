@@ -1,5 +1,5 @@
 // ABOUTME: Maps wallet-backend SDK transaction/operation/state-change types into freighter snake_case REST types.
-// ABOUTME: mapStateChange is the only non-trivial mapper — a type switch over the 18 SDK state-change variants.
+// ABOUTME: mapStateChange is the only non-trivial mapper — a type switch over the 16 SDK state-change variants.
 package services
 
 import (
@@ -25,7 +25,7 @@ func mapTransaction(t *wbtypes.GraphQLTransaction) types.Transaction {
 func mapOperation(o *wbtypes.Operation) types.Operation {
 	return types.Operation{
 		ID:              o.ID,
-		OperationType:   string(o.OperationType),
+		OperationType:   string(o.Type),
 		OperationXDR:    o.OperationXdr,
 		ResultCode:      o.ResultCode,
 		Successful:      o.Successful,
@@ -49,14 +49,12 @@ func mapStateChange(n wbtypes.StateChangeNode) types.StateChange {
 		IngestedAt:      n.GetIngestedAt(),
 	}
 	// Variant carries the concrete upstream shape: type/reason alone are
-	// ambiguous (BalanceChange vs FeeChange, AccountCreated vs ContractDeployed).
+	// ambiguous, since AccountCreatedChange and ContractDeployedChange both
+	// report (ACCOUNT, CREATE).
 	switch sc := n.(type) {
 	case *wbtypes.BalanceChange:
 		base.Variant = "BalanceChange"
 		return &types.BalanceChange{StateChangeBase: base, TokenID: sc.TokenID, Amount: sc.Amount, ToMuxedID: sc.ToMuxedID}
-	case *wbtypes.FeeChange:
-		base.Variant = "FeeChange"
-		return &types.FeeChange{StateChangeBase: base, TokenID: sc.TokenID, Amount: sc.Amount}
 	case *wbtypes.AccountCreatedChange:
 		base.Variant = "AccountCreatedChange"
 		return &types.AccountCreatedChange{StateChangeBase: base, FunderAddress: sc.FunderAddress}
@@ -99,9 +97,6 @@ func mapStateChange(n wbtypes.StateChangeNode) types.StateChange {
 	case *wbtypes.TrustlineRemovedChange:
 		base.Variant = "TrustlineRemovedChange"
 		return &types.TrustlineRemovedChange{StateChangeBase: base, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID}
-	case *wbtypes.SponsorshipChange:
-		base.Variant = "SponsorshipChange"
-		return &types.SponsorshipChange{StateChangeBase: base, SponsoredAddress: sc.SponsoredAddress, SponsorAddress: sc.SponsorAddress, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID, ClaimableBalanceID: sc.ClaimableBalanceID, DataName: sc.DataName, SignerAddress: sc.SignerAddress}
 	case *wbtypes.BalanceAuthorizationChange:
 		base.Variant = "BalanceAuthorizationChange"
 		return &types.BalanceAuthorizationChange{StateChangeBase: base, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID, Flags: mapTrustlineFlags(sc.Flags)}

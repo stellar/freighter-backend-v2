@@ -33,17 +33,17 @@ type Operation struct {
 
 // StateChange is a sealed interface implemented by every state-change variant.
 // The concrete shape is named by the StateChangeBase.Variant discriminator;
-// clients switch on "variant" (type/reason alone are ambiguous for the BALANCE
-// and ACCOUNT×CREATE splits).
+// clients switch on "variant" (type/reason alone are ambiguous for the
+// ACCOUNT×CREATE split).
 type StateChange interface{ isStateChange() }
 
 // StateChangeBase holds the fields common to every state-change variant. Type
 // carries the state-change category (BALANCE, SIGNER, TRUSTLINE, ...).
 type StateChangeBase struct {
 	// Variant names the concrete state-change shape (the wallet-backend GraphQL
-	// type, e.g. "BalanceChange", "FeeChange"). Type/reason alone do not identify
-	// it: BalanceChange and FeeChange share (BALANCE, DEBIT/CREDIT), and account
-	// creation and contract deployment share (ACCOUNT, CREATE).
+	// type, e.g. "BalanceChange", "AccountCreatedChange"). Type/reason alone do
+	// not identify it: account creation and contract deployment both report
+	// (ACCOUNT, CREATE).
 	Variant         string    `json:"variant"`
 	Type            string    `json:"type"`
 	Reason          string    `json:"reason"`
@@ -54,19 +54,13 @@ type StateChangeBase struct {
 
 func (StateChangeBase) isStateChange() {}
 
-// BalanceChange — a movement of value on the account's token balance.
+// BalanceChange — a movement of value on the account's token balance. Also
+// carries transaction fees, which arrive as (BALANCE, DEBIT) rows.
 type BalanceChange struct {
 	StateChangeBase
 	TokenID   string  `json:"token_id"`
 	Amount    string  `json:"amount"`
 	ToMuxedID *string `json:"to_muxed_id,omitempty"`
-}
-
-// FeeChange — the transaction fee debited from (or refunded to) the account.
-type FeeChange struct {
-	StateChangeBase
-	TokenID string `json:"token_id"`
-	Amount  string `json:"amount"`
 }
 
 // AccountCreatedChange — a classic account creation.
@@ -171,19 +165,6 @@ type TrustlineRemovedChange struct {
 	StateChangeBase
 	TokenID         *string `json:"token_id,omitempty"`
 	LiquidityPoolID *string `json:"liquidity_pool_id,omitempty"`
-}
-
-// SponsorshipChange — a base-reserve sponsorship established or released. At
-// most one of the entity fields identifies what is sponsored.
-type SponsorshipChange struct {
-	StateChangeBase
-	SponsoredAddress   *string `json:"sponsored_address,omitempty"`
-	SponsorAddress     *string `json:"sponsor_address,omitempty"`
-	TokenID            *string `json:"token_id,omitempty"`
-	LiquidityPoolID    *string `json:"liquidity_pool_id,omitempty"`
-	ClaimableBalanceID *string `json:"claimable_balance_id,omitempty"`
-	DataName           *string `json:"data_name,omitempty"`
-	SignerAddress      *string `json:"signer_address,omitempty"`
 }
 
 // BalanceAuthorizationChange — authorization to hold or transact an asset

@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for the wbclient -> freighter snake_case mapping helpers.
-// ABOUTME: Covers transaction/operation field mapping, all 18 state-change variants, and edge flattening.
+// ABOUTME: Covers transaction/operation field mapping, all 16 state-change variants, and edge flattening.
 package services
 
 import (
@@ -24,7 +24,7 @@ func TestMapTransactionAndOperation(t *testing.T) {
 	assert.Equal(t, types.Transaction{Hash: "h1", FeeCharged: 100, ResultCode: "txSUCCESS", LedgerNumber: 42, LedgerCreatedAt: ts, IsFeeBump: true, IngestedAt: ts}, tx)
 
 	op := mapOperation(&wbtypes.Operation{
-		ID: 7, OperationType: wbtypes.OperationTypePayment, OperationXdr: "AAA",
+		ID: 7, Type: wbtypes.OperationTypePayment, OperationXdr: "AAA",
 		ResultCode: "opSUCCESS", Successful: true, LedgerNumber: 42, LedgerCreatedAt: ts, IngestedAt: ts,
 	})
 	assert.Equal(t, types.Operation{ID: 7, OperationType: "PAYMENT", OperationXDR: "AAA", ResultCode: "opSUCCESS", Successful: true, LedgerNumber: 42, LedgerCreatedAt: ts, IngestedAt: ts}, op)
@@ -51,8 +51,9 @@ func TestMapStateChange_AllVariants(t *testing.T) {
 			&types.BalanceChange{StateChangeBase: variantBase("BalanceChange"), TokenID: "native", Amount: "10", ToMuxedID: &s},
 		},
 		{
-			"fee", &wbtypes.FeeChange{BaseStateChangeFields: base, TokenID: "native", Amount: "1"},
-			&types.FeeChange{StateChangeBase: variantBase("FeeChange"), TokenID: "native", Amount: "1"},
+			// A transaction fee arrives as a BalanceChange with no muxed destination.
+			"balance_fee", &wbtypes.BalanceChange{BaseStateChangeFields: base, TokenID: "native", Amount: "1"},
+			&types.BalanceChange{StateChangeBase: variantBase("BalanceChange"), TokenID: "native", Amount: "1"},
 		},
 		{
 			"account_created", &wbtypes.AccountCreatedChange{BaseStateChangeFields: base, FunderAddress: "GFUNDER"},
@@ -111,10 +112,6 @@ func TestMapStateChange_AllVariants(t *testing.T) {
 			&types.TrustlineRemovedChange{StateChangeBase: variantBase("TrustlineRemovedChange"), TokenID: &s, LiquidityPoolID: &s},
 		},
 		{
-			"sponsorship", &wbtypes.SponsorshipChange{BaseStateChangeFields: base, SponsoredAddress: &s, SponsorAddress: &s, TokenID: &s, LiquidityPoolID: &s, ClaimableBalanceID: &s, DataName: &s, SignerAddress: &s},
-			&types.SponsorshipChange{StateChangeBase: variantBase("SponsorshipChange"), SponsoredAddress: &s, SponsorAddress: &s, TokenID: &s, LiquidityPoolID: &s, ClaimableBalanceID: &s, DataName: &s, SignerAddress: &s},
-		},
-		{
 			"balance_authorization", &wbtypes.BalanceAuthorizationChange{BaseStateChangeFields: base, TokenID: &s, LiquidityPoolID: &s, Flags: []wbtypes.TrustlineFlag{wbtypes.TrustlineFlagAuthorized}},
 			&types.BalanceAuthorizationChange{StateChangeBase: variantBase("BalanceAuthorizationChange"), TokenID: &s, LiquidityPoolID: &s, Flags: []string{"AUTHORIZED"}},
 		},
@@ -136,7 +133,7 @@ func TestMapAccountTransactionEdge_FlattensAndGuaranteesNonNilSlices(t *testing.
 	edge := &wbtypes.AccountTransactionEdge{
 		Node:         &wbtypes.GraphQLTransaction{Hash: "h1"},
 		Cursor:       "c1",
-		Operations:   []*wbtypes.Operation{{ID: 1, OperationType: wbtypes.OperationTypePayment}, nil},
+		Operations:   []*wbtypes.Operation{{ID: 1, Type: wbtypes.OperationTypePayment}, nil},
 		StateChanges: []wbtypes.StateChangeNode{&wbtypes.BalanceChange{BaseStateChangeFields: wbtypes.BaseStateChangeFields{Category: wbtypes.StateChangeCategoryBalance}, Amount: "5"}, nil},
 	}
 	got := mapAccountTransactionEdge(edge)

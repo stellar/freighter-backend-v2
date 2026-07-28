@@ -14,7 +14,6 @@ func TestStateChangeBase_isStateChange(t *testing.T) {
 	variants := []StateChange{
 		StateChangeBase{},
 		&BalanceChange{},
-		&FeeChange{},
 		&AccountCreatedChange{},
 		&ContractDeployedChange{},
 		&AccountMergedChange{},
@@ -29,7 +28,6 @@ func TestStateChangeBase_isStateChange(t *testing.T) {
 		&TrustlineAddedChange{},
 		&TrustlineUpdatedChange{},
 		&TrustlineRemovedChange{},
-		&SponsorshipChange{},
 		&BalanceAuthorizationChange{},
 	}
 	for _, v := range variants {
