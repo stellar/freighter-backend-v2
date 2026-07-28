@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for the wbclient -> freighter snake_case mapping helpers.
-// ABOUTME: Covers transaction/operation field mapping, all 17 state-change variants, and edge flattening.
+// ABOUTME: Covers transaction/operation field mapping, all 19 state-change variants, and edge flattening.
 package services
 
 import (
@@ -86,8 +86,16 @@ func TestMapStateChange_AllVariants(t *testing.T) {
 			&types.AccountFlagsChange{StateChangeBase: variantBase("AccountFlagsChange"), Flags: []string{"AUTH_REQUIRED"}},
 		},
 		{
-			"home_domain", &wbtypes.HomeDomainChange{BaseStateChangeFields: base, OldHomeDomain: s, NewHomeDomain: s},
-			&types.HomeDomainChange{StateChangeBase: variantBase("HomeDomainChange"), OldHomeDomain: s, NewHomeDomain: s},
+			"home_domain_set", &wbtypes.HomeDomainSetChange{BaseStateChangeFields: base, HomeDomain: "example.com"},
+			&types.HomeDomainSetChange{StateChangeBase: variantBase("HomeDomainSetChange"), HomeDomain: "example.com"},
+		},
+		{
+			"home_domain_updated", &wbtypes.HomeDomainUpdatedChange{BaseStateChangeFields: base, OldHomeDomain: "old.example.com", NewHomeDomain: "new.example.com"},
+			&types.HomeDomainUpdatedChange{StateChangeBase: variantBase("HomeDomainUpdatedChange"), OldHomeDomain: "old.example.com", NewHomeDomain: "new.example.com"},
+		},
+		{
+			"home_domain_cleared", &wbtypes.HomeDomainClearedChange{BaseStateChangeFields: base, OldHomeDomain: "example.com"},
+			&types.HomeDomainClearedChange{StateChangeBase: variantBase("HomeDomainClearedChange"), OldHomeDomain: "example.com"},
 		},
 		{
 			"data_entry_added", &wbtypes.DataEntryAddedChange{BaseStateChangeFields: base, Name: "k", Value: "v"},

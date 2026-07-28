@@ -1,5 +1,5 @@
 // ABOUTME: Maps wallet-backend SDK transaction/operation/state-change types into freighter snake_case REST types.
-// ABOUTME: mapStateChange is the only non-trivial mapper — a type switch over the 17 SDK state-change variants.
+// ABOUTME: mapStateChange is the only non-trivial mapper — a type switch over the 19 SDK state-change variants.
 package services
 
 import (
@@ -76,9 +76,15 @@ func mapStateChange(n wbtypes.StateChangeNode) types.StateChange {
 	case *wbtypes.AccountFlagsChange:
 		base.Variant = "AccountFlagsChange"
 		return &types.AccountFlagsChange{StateChangeBase: base, Flags: mapAccountFlags(sc.Flags)}
-	case *wbtypes.HomeDomainChange:
-		base.Variant = "HomeDomainChange"
-		return &types.HomeDomainChange{StateChangeBase: base, OldHomeDomain: sc.OldHomeDomain, NewHomeDomain: sc.NewHomeDomain}
+	case *wbtypes.HomeDomainSetChange:
+		base.Variant = "HomeDomainSetChange"
+		return &types.HomeDomainSetChange{StateChangeBase: base, HomeDomain: sc.HomeDomain}
+	case *wbtypes.HomeDomainUpdatedChange:
+		base.Variant = "HomeDomainUpdatedChange"
+		return &types.HomeDomainUpdatedChange{StateChangeBase: base, OldHomeDomain: sc.OldHomeDomain, NewHomeDomain: sc.NewHomeDomain}
+	case *wbtypes.HomeDomainClearedChange:
+		base.Variant = "HomeDomainClearedChange"
+		return &types.HomeDomainClearedChange{StateChangeBase: base, OldHomeDomain: sc.OldHomeDomain}
 	case *wbtypes.DataEntryAddedChange:
 		base.Variant = "DataEntryAddedChange"
 		return &types.DataEntryAddedChange{StateChangeBase: base, Name: sc.Name, Value: sc.Value}

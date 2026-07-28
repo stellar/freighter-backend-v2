@@ -114,11 +114,23 @@ type AccountFlagsChange struct {
 	Flags []string `json:"flags"`
 }
 
-// HomeDomainChange — a home-domain change on the account.
-type HomeDomainChange struct {
+// HomeDomainSetChange — a home domain set on an account that had none.
+type HomeDomainSetChange struct {
+	StateChangeBase
+	HomeDomain string `json:"home_domain"`
+}
+
+// HomeDomainUpdatedChange — an existing home domain replaced by a different one.
+type HomeDomainUpdatedChange struct {
 	StateChangeBase
 	OldHomeDomain string `json:"old_home_domain"`
 	NewHomeDomain string `json:"new_home_domain"`
+}
+
+// HomeDomainClearedChange — a home domain removed from the account.
+type HomeDomainClearedChange struct {
+	StateChangeBase
+	OldHomeDomain string `json:"old_home_domain"`
 }
 
 // DataEntryAddedChange — a data entry created on the account.
