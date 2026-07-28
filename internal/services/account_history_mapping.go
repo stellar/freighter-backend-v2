@@ -1,5 +1,5 @@
 // ABOUTME: Maps wallet-backend SDK transaction/operation/state-change types into freighter snake_case REST types.
-// ABOUTME: mapStateChange is the only non-trivial mapper — a type switch over the 16 SDK state-change variants.
+// ABOUTME: mapStateChange is the only non-trivial mapper — a type switch over the 15 SDK state-change variants.
 package services
 
 import (
@@ -48,19 +48,16 @@ func mapStateChange(n wbtypes.StateChangeNode) types.StateChange {
 		LedgerCreatedAt: n.GetLedgerCreatedAt(),
 		IngestedAt:      n.GetIngestedAt(),
 	}
-	// Variant carries the concrete upstream shape: type/reason alone are
-	// ambiguous, since AccountCreatedChange and ContractDeployedChange both
-	// report (ACCOUNT, CREATE).
+	// Variant names the concrete upstream shape. It is a convenience
+	// discriminator — each (type, reason) pair maps to exactly one variant — so
+	// clients switch on one field instead of the (type, reason) pair.
 	switch sc := n.(type) {
 	case *wbtypes.BalanceChange:
 		base.Variant = "BalanceChange"
 		return &types.BalanceChange{StateChangeBase: base, TokenID: sc.TokenID, Amount: sc.Amount, ToMuxedID: sc.ToMuxedID}
 	case *wbtypes.AccountCreatedChange:
 		base.Variant = "AccountCreatedChange"
-		return &types.AccountCreatedChange{StateChangeBase: base, FunderAddress: sc.FunderAddress}
-	case *wbtypes.ContractDeployedChange:
-		base.Variant = "ContractDeployedChange"
-		return &types.ContractDeployedChange{StateChangeBase: base, DeployerAddress: sc.DeployerAddress}
+		return &types.AccountCreatedChange{StateChangeBase: base, CreatorAddress: sc.CreatorAddress}
 	case *wbtypes.AccountMergedChange:
 		base.Variant = "AccountMergedChange"
 		return &types.AccountMergedChange{StateChangeBase: base, DestinationAddress: sc.DestinationAddress}

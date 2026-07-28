@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for the wbclient -> freighter snake_case mapping helpers.
-// ABOUTME: Covers transaction/operation field mapping, all 16 state-change variants, and edge flattening.
+// ABOUTME: Covers transaction/operation field mapping, all 15 state-change variants, and edge flattening.
 package services
 
 import (
@@ -56,12 +56,10 @@ func TestMapStateChange_AllVariants(t *testing.T) {
 			&types.BalanceChange{StateChangeBase: variantBase("BalanceChange"), TokenID: "native", Amount: "1"},
 		},
 		{
-			"account_created", &wbtypes.AccountCreatedChange{BaseStateChangeFields: base, FunderAddress: "GFUNDER"},
-			&types.AccountCreatedChange{StateChangeBase: variantBase("AccountCreatedChange"), FunderAddress: "GFUNDER"},
-		},
-		{
-			"contract_deployed", &wbtypes.ContractDeployedChange{BaseStateChangeFields: base, DeployerAddress: "GDEPLOY"},
-			&types.ContractDeployedChange{StateChangeBase: variantBase("ContractDeployedChange"), DeployerAddress: "GDEPLOY"},
+			// One variant serves both classic account creation (creator = funding
+			// account) and contract deployment (creator = deploying address).
+			"account_created", &wbtypes.AccountCreatedChange{BaseStateChangeFields: base, CreatorAddress: "GFUNDER"},
+			&types.AccountCreatedChange{StateChangeBase: variantBase("AccountCreatedChange"), CreatorAddress: "GFUNDER"},
 		},
 		{
 			"account_merged", &wbtypes.AccountMergedChange{BaseStateChangeFields: base, DestinationAddress: "GDEST"},

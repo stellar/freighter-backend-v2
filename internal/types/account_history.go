@@ -32,18 +32,17 @@ type Operation struct {
 }
 
 // StateChange is a sealed interface implemented by every state-change variant.
-// The concrete shape is named by the StateChangeBase.Variant discriminator;
-// clients switch on "variant" (type/reason alone are ambiguous for the
-// ACCOUNT×CREATE split).
+// The concrete shape is named by the StateChangeBase.Variant discriminator, so
+// clients switch on "variant" alone instead of the (type, reason) pair.
 type StateChange interface{ isStateChange() }
 
 // StateChangeBase holds the fields common to every state-change variant. Type
 // carries the state-change category (BALANCE, SIGNER, TRUSTLINE, ...).
 type StateChangeBase struct {
 	// Variant names the concrete state-change shape (the wallet-backend GraphQL
-	// type, e.g. "BalanceChange", "AccountCreatedChange"). Type/reason alone do
-	// not identify it: account creation and contract deployment both report
-	// (ACCOUNT, CREATE).
+	// type, e.g. "BalanceChange", "AccountCreatedChange"). It is a convenience
+	// discriminator: each (type, reason) pair maps to exactly one variant, so
+	// clients switch on this single field rather than on the pair.
 	Variant         string    `json:"variant"`
 	Type            string    `json:"type"`
 	Reason          string    `json:"reason"`
@@ -63,16 +62,13 @@ type BalanceChange struct {
 	ToMuxedID *string `json:"to_muxed_id,omitempty"`
 }
 
-// AccountCreatedChange — a classic account creation.
+// AccountCreatedChange — a classic account creation or a smart-contract
+// deployment. The state change's account is the created G-address or the
+// deployed C-address; CreatorAddress is the funding account or the deploying
+// address respectively.
 type AccountCreatedChange struct {
 	StateChangeBase
-	FunderAddress string `json:"funder_address"`
-}
-
-// ContractDeployedChange — a smart-contract deployment.
-type ContractDeployedChange struct {
-	StateChangeBase
-	DeployerAddress string `json:"deployer_address"`
+	CreatorAddress string `json:"creator_address"`
 }
 
 // AccountMergedChange — an account merge.

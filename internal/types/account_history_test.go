@@ -16,7 +16,7 @@ import (
 func TestAccountTransaction_JSONWireContract(t *testing.T) {
 	t.Parallel()
 	ts := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	funder := "GFUNDER"
+	creator := "GFUNDER"
 	at := types.AccountTransaction{
 		Transaction: types.Transaction{
 			Hash: "h1", FeeCharged: 100, ResultCode: "txSUCCESS",
@@ -34,7 +34,7 @@ func TestAccountTransaction_JSONWireContract(t *testing.T) {
 			},
 			&types.AccountCreatedChange{
 				StateChangeBase: types.StateChangeBase{Variant: "AccountCreatedChange", Type: "ACCOUNT", Reason: "CREATE", LedgerNumber: 51234567, LedgerCreatedAt: ts, IngestedAt: ts},
-				FunderAddress:   funder,
+				CreatorAddress:  creator,
 			},
 			&types.AccountFlagsChange{
 				StateChangeBase: types.StateChangeBase{Variant: "AccountFlagsChange", Type: "FLAGS", Reason: "SET", LedgerNumber: 51234567, LedgerCreatedAt: ts, IngestedAt: ts},
@@ -62,7 +62,7 @@ func TestAccountTransaction_JSONWireContract(t *testing.T) {
 	assert.Contains(t, s, `"amount":"10.0000000"`)
 	assert.Contains(t, s, `"variant":"AccountCreatedChange"`)
 	assert.Contains(t, s, `"type":"ACCOUNT"`)
-	assert.Contains(t, s, `"funder_address":"GFUNDER"`)
+	assert.Contains(t, s, `"creator_address":"GFUNDER"`)
 	// The upstream flags list is non-null, so an empty AccountFlagsChange
 	// encodes an empty array rather than null.
 	assert.Contains(t, s, `"flags":[]`)

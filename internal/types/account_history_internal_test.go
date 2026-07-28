@@ -15,7 +15,6 @@ func TestStateChangeBase_isStateChange(t *testing.T) {
 		StateChangeBase{},
 		&BalanceChange{},
 		&AccountCreatedChange{},
-		&ContractDeployedChange{},
 		&AccountMergedChange{},
 		&SignerAddedChange{},
 		&SignerUpdatedChange{},

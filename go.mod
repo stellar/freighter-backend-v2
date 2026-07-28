@@ -17,7 +17,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/stellar/go v0.0.0-20250903085211-00c0b06cd7cc
 	github.com/stellar/go-stellar-sdk v0.6.1-0.20260625225930-6181cdf8bda5
-	github.com/stellar/wallet-backend v0.0.0-20260728174709-2f4145129b76
+	github.com/stellar/wallet-backend v0.0.0-20260728190113-247a36c8e5d4
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.37.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.37.0
