@@ -99,11 +99,13 @@ type SignerRemovedChange struct {
 	OldWeight     int32  `json:"old_weight"`
 }
 
-// ThresholdChange — a signature-threshold change; Reason identifies which one.
+// ThresholdChange — a signature-threshold change; Threshold identifies which of
+// the account's three thresholds (LOW, MEDIUM, HIGH) changed.
 type ThresholdChange struct {
 	StateChangeBase
-	OldThreshold int32 `json:"old_threshold"`
-	NewThreshold int32 `json:"new_threshold"`
+	Threshold    string `json:"threshold"`
+	OldThreshold int32  `json:"old_threshold"`
+	NewThreshold int32  `json:"new_threshold"`
 }
 
 // AccountFlagsChange — account authorization flags set or cleared.
@@ -119,12 +121,26 @@ type HomeDomainChange struct {
 	NewHomeDomain string `json:"new_home_domain"`
 }
 
-// DataEntryChange — a data entry created, updated, or removed on the account.
-type DataEntryChange struct {
+// DataEntryAddedChange — a data entry created on the account.
+type DataEntryAddedChange struct {
 	StateChangeBase
-	Name     string  `json:"name"`
-	OldValue *string `json:"old_value,omitempty"`
-	NewValue *string `json:"new_value,omitempty"`
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// DataEntryUpdatedChange — an existing data entry whose value changed.
+type DataEntryUpdatedChange struct {
+	StateChangeBase
+	Name     string `json:"name"`
+	OldValue string `json:"old_value"`
+	NewValue string `json:"new_value"`
+}
+
+// DataEntryRemovedChange — a data entry removed from the account.
+type DataEntryRemovedChange struct {
+	StateChangeBase
+	Name     string `json:"name"`
+	OldValue string `json:"old_value"`
 }
 
 // AllowanceChange — a SEP-41 allowance approval.

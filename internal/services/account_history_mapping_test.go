@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for the wbclient -> freighter snake_case mapping helpers.
-// ABOUTME: Covers transaction/operation field mapping, all 15 state-change variants, and edge flattening.
+// ABOUTME: Covers transaction/operation field mapping, all 17 state-change variants, and edge flattening.
 package services
 
 import (
@@ -78,8 +78,8 @@ func TestMapStateChange_AllVariants(t *testing.T) {
 			&types.SignerRemovedChange{StateChangeBase: variantBase("SignerRemovedChange"), SignerAddress: "GSIGN", OldWeight: oldW},
 		},
 		{
-			"threshold", &wbtypes.ThresholdChange{BaseStateChangeFields: base, OldThreshold: oldW, NewThreshold: newW},
-			&types.ThresholdChange{StateChangeBase: variantBase("ThresholdChange"), OldThreshold: oldW, NewThreshold: newW},
+			"threshold", &wbtypes.ThresholdChange{BaseStateChangeFields: base, Threshold: wbtypes.ThresholdLevelMedium, OldThreshold: oldW, NewThreshold: newW},
+			&types.ThresholdChange{StateChangeBase: variantBase("ThresholdChange"), Threshold: "MEDIUM", OldThreshold: oldW, NewThreshold: newW},
 		},
 		{
 			"account_flags", &wbtypes.AccountFlagsChange{BaseStateChangeFields: base, Flags: []wbtypes.AccountFlag{wbtypes.AccountFlagAuthRequired}},
@@ -90,8 +90,16 @@ func TestMapStateChange_AllVariants(t *testing.T) {
 			&types.HomeDomainChange{StateChangeBase: variantBase("HomeDomainChange"), OldHomeDomain: s, NewHomeDomain: s},
 		},
 		{
-			"data_entry", &wbtypes.DataEntryChange{BaseStateChangeFields: base, Name: "k", OldValue: &s, NewValue: &s},
-			&types.DataEntryChange{StateChangeBase: variantBase("DataEntryChange"), Name: "k", OldValue: &s, NewValue: &s},
+			"data_entry_added", &wbtypes.DataEntryAddedChange{BaseStateChangeFields: base, Name: "k", Value: "v"},
+			&types.DataEntryAddedChange{StateChangeBase: variantBase("DataEntryAddedChange"), Name: "k", Value: "v"},
+		},
+		{
+			"data_entry_updated", &wbtypes.DataEntryUpdatedChange{BaseStateChangeFields: base, Name: "k", OldValue: "v1", NewValue: "v2"},
+			&types.DataEntryUpdatedChange{StateChangeBase: variantBase("DataEntryUpdatedChange"), Name: "k", OldValue: "v1", NewValue: "v2"},
+		},
+		{
+			"data_entry_removed", &wbtypes.DataEntryRemovedChange{BaseStateChangeFields: base, Name: "k", OldValue: "v1"},
+			&types.DataEntryRemovedChange{StateChangeBase: variantBase("DataEntryRemovedChange"), Name: "k", OldValue: "v1"},
 		},
 		{
 			"allowance", &wbtypes.AllowanceChange{BaseStateChangeFields: base, TokenID: "CTOKEN", Spender: "GSPEND", Amount: "5", ExpirationLedger: 42},
