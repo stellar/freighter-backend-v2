@@ -246,12 +246,22 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodPost, "/api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles), true, true},
 		{http.MethodPost, "/api/v1/ledger-key/accounts", handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts), true, true},
 		{http.MethodGet, "/api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags), true, true},
-		// balances is the one config-gated route: it fronts wallet-backend, which is
-		// unconfigured outside dev, so it is disabled in production until that upstream
-		// is wired up. enabled=false leaves the path 404ing.
-		{http.MethodPost, "/api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances), true, s.cfg.AppConfig.BalancesEnabled},
+		// The wallet-backend-fronted routes, config-gated together by
+		// --wallet-backend-routes-enabled. These are the ONLY two routes that touch
+		// walletBackendService, and both fail identically when it is unconfigured:
+		// configureNetworkClient returns nil and the handler errors before any network
+		// call, so every request 500s. wallet-backend is configured only in dev, so
+		// they are disabled in production until that upstream is wired up.
+		// enabled=false leaves both paths 404ing.
+		//
+		// They share one flag deliberately: they share one dependency and one failure
+		// mode, so there is no state where enabling exactly one is correct. If a route
+		// is ever added here that can work without wallet-backend, give it its own
+		// gate rather than widening this one.
+		{http.MethodPost, "/api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
+		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
+
 		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true, true},
-		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true, true},
 		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, true},
 	}, nil
 }

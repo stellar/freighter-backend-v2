@@ -36,13 +36,13 @@ func testCfg(authMode string) *config.Config {
 		AccountHistoryDefaultLimit: 20,
 		AccountHistoryMaxLimit:     100,
 		AuthMode:                   authMode,
-		// Mirrors the --balances-enabled default (true). Without this the
-		// zero-value false would leave the balances route unregistered, and
-		// AllUserFacingRoutesGatedInStrict — which probes every gated route in
-		// routes() for a 401 — would see a 404 and fail in a way that looks like
-		// an auth regression. Tests that want the off state set it false
-		// explicitly (see BalancesDisabledNotRegistered).
-		BalancesEnabled: true,
+		// Mirrors the --wallet-backend-routes-enabled default (true). Without this the
+		// zero-value false would leave the balances and account-history routes
+		// unregistered, and AllUserFacingRoutesGatedInStrict — which probes every
+		// gated route in routes() for a 401 — would see a 404 and fail in a way that
+		// looks like an auth regression. Tests that want the off state set it false
+		// explicitly (see WalletBackendRoutesDisabledNotRegistered).
+		WalletBackendRoutesEnabled: true,
 	}}
 }
 
@@ -186,44 +186,92 @@ func TestApiServer_initHandlers_RegistersAccountHistoryRoutes(t *testing.T) {
 	assert.NotEmpty(t, pattern, "no pattern matched for %s", path)
 }
 
-// TestApiServer_initHandlers_BalancesDisabledNotRegistered pins the off state of
-// the --balances-enabled toggle: with the flag false the route is absent from the
-// mux entirely, so the path 404s exactly as an unknown path would. Asserting on the
-// status (rather than that mux.Handler returns nil) is what a caller actually
-// observes, and it distinguishes non-registration from a registered-but-short-
-// circuiting route, which would answer 500/503 here instead. balances is POST-only,
-// so an unregistered pattern yields 404 rather than 405 — ServeMux only reports 405
-// when the same pattern exists under another method.
-func TestApiServer_initHandlers_BalancesDisabledNotRegistered(t *testing.T) {
-	cfg := testCfg("permissive")
-	cfg.AppConfig.BalancesEnabled = false
-
-	mux, err := newTestAPIServer(t, cfg).initHandlers()
-	require.NoError(t, err)
-
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/accounts/balances", nil))
-	assert.Equal(t, http.StatusNotFound, rec.Code,
-		"a disabled balances route must 404 without reaching a handler")
+// walletBackendRoutes is every route gated by --wallet-backend-routes-enabled.
+// Both tests below iterate it, so adding a third wallet-backend-fronted route
+// extends the on/off coverage by one line here rather than being silently missed.
+// The {address} wildcard is pre-substituted: auth and registration both run before
+// path-parameter validation, so any non-empty segment reaches the assertion.
+var walletBackendRoutes = []struct {
+	name   string
+	method string
+	path   string
+}{
+	{"balances", http.MethodPost, "/api/v1/accounts/balances"},
+	{"account-history", http.MethodGet, "/api/v1/accounts/GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF/transactions"},
 }
 
-// TestApiServer_initHandlers_BalancesEnabledStaysGated guards the on state against
-// the toggle silently becoming an auth bypass: enabling the route must register it
-// AND keep it wrapped in Auth. In strict mode Auth rejects an anonymous request with
-// 401 before the handler runs, so no wallet-backend stub is needed — the nil service
-// left by newTestAPIServer is never reached. A 404 here would mean the flag failed to
-// register the route; a 200 or 500 would mean it registered bare, skipping auth.
-func TestApiServer_initHandlers_BalancesEnabledStaysGated(t *testing.T) {
-	cfg := testCfg("strict")
-	cfg.AppConfig.BalancesEnabled = true
+// TestApiServer_initHandlers_WalletBackendRoutesDisabledNotRegistered pins the off
+// state of the toggle: with the flag false each route is absent from the mux
+// entirely, so its path 404s exactly as an unknown path would. Asserting on the
+// status (rather than that mux.Handler returns nil) is what a caller actually
+// observes, and it distinguishes non-registration from a registered-but-short-
+// circuiting route, which would answer 500/503 here instead. Each of these patterns
+// is registered under a single method, so an unregistered one yields 404 rather than
+// 405 — ServeMux only reports 405 when the same pattern exists under another method.
+func TestApiServer_initHandlers_WalletBackendRoutesDisabledNotRegistered(t *testing.T) {
+	cfg := testCfg("permissive")
+	cfg.AppConfig.WalletBackendRoutesEnabled = false
 
 	mux, err := newTestAPIServer(t, cfg).initHandlers()
 	require.NoError(t, err)
 
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/accounts/balances", nil))
-	assert.Equal(t, http.StatusUnauthorized, rec.Code,
-		"an enabled balances route must be registered and still auth-gated")
+	for _, rt := range walletBackendRoutes {
+		t.Run(rt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequest(rt.method, rt.path, nil))
+			assert.Equal(t, http.StatusNotFound, rec.Code,
+				"a disabled %s route must 404 without reaching a handler", rt.name)
+		})
+	}
+}
+
+// TestApiServer_initHandlers_WalletBackendRoutesEnabledStayGated guards the on state
+// against the toggle silently becoming an auth bypass: enabling these routes must
+// register them AND keep them wrapped in Auth. In strict mode Auth rejects an
+// anonymous request with 401 before the handler runs, so no wallet-backend stub is
+// needed — the nil service left by newTestAPIServer is never reached. A 404 here
+// would mean the flag failed to register the route; a 200 or 500 would mean it
+// registered bare, skipping auth.
+func TestApiServer_initHandlers_WalletBackendRoutesEnabledStayGated(t *testing.T) {
+	cfg := testCfg("strict")
+	cfg.AppConfig.WalletBackendRoutesEnabled = true
+
+	mux, err := newTestAPIServer(t, cfg).initHandlers()
+	require.NoError(t, err)
+
+	for _, rt := range walletBackendRoutes {
+		t.Run(rt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, httptest.NewRequest(rt.method, rt.path, nil))
+			assert.Equal(t, http.StatusUnauthorized, rec.Code,
+				"an enabled %s route must be registered and still auth-gated", rt.name)
+		})
+	}
+}
+
+// TestApiServer_initHandlers_WalletBackendRoutesGatedTogether pins the "one flag,
+// both routes" decision. The two share a dependency and a failure mode, so a change
+// that gated only one — leaving the other publicly 500ing in prd, which is the exact
+// bug this flag exists to close — would otherwise pass every test above.
+func TestApiServer_initHandlers_WalletBackendRoutesGatedTogether(t *testing.T) {
+	cfg := testCfg("permissive")
+	cfg.AppConfig.WalletBackendRoutesEnabled = false
+
+	s := newTestAPIServer(t, cfg)
+	rts, err := s.routes()
+	require.NoError(t, err)
+
+	disabled := map[string]bool{}
+	for _, rt := range rts {
+		if !rt.enabled {
+			disabled[rt.method+" "+rt.pattern] = true
+		}
+	}
+
+	assert.Equal(t, map[string]bool{
+		"POST /api/v1/accounts/balances":              true,
+		"GET /api/v1/accounts/{address}/transactions": true,
+	}, disabled, "exactly the wallet-backend-fronted routes must be disabled by the flag")
 }
 
 func TestApiServer_initHandlers_WhoamiRouteRespectsAuthMode(t *testing.T) {
@@ -415,7 +463,7 @@ func TestApiServer_initHandlers_AllUserFacingRoutesGatedInStrict(t *testing.T) {
 		// message names that case explicitly rather than leaving a confusing
 		// "must run the auth middleware" failure on a route that was never registered.
 		assert.Equal(t, http.StatusUnauthorized, rec.Code,
-			"%s %s must run the auth middleware (401 for anonymous in strict); a 404 here means the route is not registered at all — check its enabled flag in routes() and BalancesEnabled in testCfg",
+			"%s %s must run the auth middleware (401 for anonymous in strict); a 404 here means the route is not registered at all — check its enabled flag in routes() and WalletBackendRoutesEnabled in testCfg",
 			rt.method, rt.pattern)
 	}
 	require.Positive(t, gated, "expected routes() to contain at least one gated route")

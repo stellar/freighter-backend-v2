@@ -42,13 +42,22 @@ type AppConfig struct {
 	MaxRequestBodySize             int64
 	MaxBalanceAddresses            int
 	MaxLedgerKeyAddresses          int
-	// BalancesEnabled controls whether POST /api/v1/accounts/balances is registered
-	// (--balances-enabled / env BALANCES_ENABLED, default true). When false the route
-	// is never added to the mux, so the path 404s exactly as an unknown path would: no
-	// handler runs and no wallet-backend call is attempted. Production sets it false
-	// while that endpoint's wallet-backend upstream is unconfigured there; flipping it
-	// back on is an env-var change and a restart, not a release.
-	BalancesEnabled bool
+	// WalletBackendRoutesEnabled controls whether the wallet-backend-fronted routes
+	// are registered (--wallet-backend-routes-enabled / env
+	// WALLET_BACKEND_ROUTES_ENABLED, default true):
+	//
+	//	POST /api/v1/accounts/balances
+	//	GET  /api/v1/accounts/{address}/transactions
+	//
+	// When false neither is added to the mux, so both paths 404 exactly as an unknown
+	// path would: no handler runs and no wallet-backend call is attempted. Production
+	// sets it false while wallet-backend is unconfigured there — without a client both
+	// routes 500 on every request. Flipping it back on is an env-var change and a
+	// restart, not a release.
+	//
+	// One flag covers both because they share one dependency and one failure mode;
+	// enabling exactly one is never the correct state.
+	WalletBackendRoutesEnabled bool
 	// WalletBackendBalanceConcurrency caps the number of concurrent wallet-backend
 	// fetches per single /api/v1/accounts/balances request. The handler fans out to
 	// the per-address accountByAddress query, and this knob bounds the goroutine

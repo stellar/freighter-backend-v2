@@ -130,31 +130,32 @@ func TestServeCmd_AllowsEmptyDatabaseURLWhenDBDisabled(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 }
 
-func TestServeCmd_BalancesEnabledDefaultsTrue(t *testing.T) {
+func TestServeCmd_WalletBackendRoutesEnabledDefaultsTrue(t *testing.T) {
 	t.Parallel()
 
 	cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
-	balancesEnabled, err := cmd.Flags().GetBool("balances-enabled")
+	routesEnabled, err := cmd.Flags().GetBool("wallet-backend-routes-enabled")
 	require.NoError(t, err)
-	assert.True(t, balancesEnabled, "balances-enabled should default to true")
+	assert.True(t, routesEnabled, "wallet-backend-routes-enabled should default to true")
 }
 
-// TestServeCmd_BalancesEnabledFalseFromEnv covers the path production actually
-// uses: prd disables the account-balances route by setting BALANCES_ENABLED in the
-// deployment, not by passing a CLI flag. The api-package tests set
-// AppConfig.BalancesEnabled directly, so they would keep passing even if the flag
-// were renamed or the env binding broke — and that failure is fail-OPEN: the
-// endpoint would stay registered in prd while the manifest says it is off. This
+// TestServeCmd_WalletBackendRoutesEnabledFalseFromEnv covers the path production actually
+// uses: prd disables the wallet-backend-fronted routes by setting
+// WALLET_BACKEND_ROUTES_ENABLED in the deployment, not by passing a CLI flag. The
+// api-package tests set AppConfig.WalletBackendRoutesEnabled directly, so they would
+// keep passing even if the flag were renamed or the env binding broke — and that
+// failure is fail-OPEN: both endpoints would stay registered in prd while the
+// manifest says they are off. This
 // asserts the whole chain (env var -> viper AutomaticEnv with the '-'->'_'
 // replacer -> bindFlags -> the bound config field). The literal
-// "BALANCES_ENABLED" pins the env-var spelling kube depends on: renaming the flag
+// "WALLET_BACKEND_ROUTES_ENABLED" pins the env-var spelling kube depends on: renaming the flag
 // to a different word breaks this test, while a cosmetic '-'/'_' swap does not,
 // because the replacer maps both spellings onto the same variable.
-func TestServeCmd_BalancesEnabledFalseFromEnv(t *testing.T) {
+func TestServeCmd_WalletBackendRoutesEnabledFalseFromEnv(t *testing.T) {
 	// No t.Parallel(): t.Setenv is incompatible with parallel tests. DATABASE_URL is
 	// cleared and the DB disabled so boot validation can't fail for unrelated reasons.
 	t.Setenv("DATABASE_URL", "")
-	t.Setenv("BALANCES_ENABLED", "false")
+	t.Setenv("WALLET_BACKEND_ROUTES_ENABLED", "false")
 
 	serveCmd := &ServeCmd{Cfg: &config.Config{}}
 	cmd := serveCmd.Command()
@@ -164,17 +165,18 @@ func TestServeCmd_BalancesEnabledFalseFromEnv(t *testing.T) {
 	cmd.SetArgs([]string{"--db-enabled=false"})
 
 	require.NoError(t, cmd.Execute())
-	assert.False(t, serveCmd.Cfg.AppConfig.BalancesEnabled,
-		"BALANCES_ENABLED=false must reach AppConfig.BalancesEnabled; a true here means prd would still serve the route")
+	assert.False(t, serveCmd.Cfg.AppConfig.WalletBackendRoutesEnabled,
+		"WALLET_BACKEND_ROUTES_ENABLED=false must reach AppConfig.WalletBackendRoutesEnabled; a true here means prd would still serve both routes")
 }
 
-// TestServeCmd_BalancesEnabledEnvTrueKeepsRouteOn is the other half: re-enabling in
-// prd is done by flipping that same variable to "true" (or removing it), so the
-// binding has to work in both directions rather than only ever latching off.
-func TestServeCmd_BalancesEnabledEnvTrueKeepsRouteOn(t *testing.T) {
+// TestServeCmd_WalletBackendRoutesEnabledEnvTrueKeepsRoutesOn is the other half:
+// re-enabling in prd is done by flipping that same variable to "true" (or removing
+// it), so the binding has to work in both directions rather than only ever latching
+// off.
+func TestServeCmd_WalletBackendRoutesEnabledEnvTrueKeepsRoutesOn(t *testing.T) {
 	// No t.Parallel(): see above.
 	t.Setenv("DATABASE_URL", "")
-	t.Setenv("BALANCES_ENABLED", "true")
+	t.Setenv("WALLET_BACKEND_ROUTES_ENABLED", "true")
 
 	serveCmd := &ServeCmd{Cfg: &config.Config{}}
 	cmd := serveCmd.Command()
@@ -184,7 +186,7 @@ func TestServeCmd_BalancesEnabledEnvTrueKeepsRouteOn(t *testing.T) {
 	cmd.SetArgs([]string{"--db-enabled=false"})
 
 	require.NoError(t, cmd.Execute())
-	assert.True(t, serveCmd.Cfg.AppConfig.BalancesEnabled)
+	assert.True(t, serveCmd.Cfg.AppConfig.WalletBackendRoutesEnabled)
 }
 
 func TestServeCmd_RejectsMaxLedgerKeyAddressesAboveUpstreamCeiling(t *testing.T) {
