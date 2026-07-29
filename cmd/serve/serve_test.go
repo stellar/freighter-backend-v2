@@ -130,6 +130,63 @@ func TestServeCmd_AllowsEmptyDatabaseURLWhenDBDisabled(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 }
 
+func TestServeCmd_BalancesEnabledDefaultsTrue(t *testing.T) {
+	t.Parallel()
+
+	cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
+	balancesEnabled, err := cmd.Flags().GetBool("balances-enabled")
+	require.NoError(t, err)
+	assert.True(t, balancesEnabled, "balances-enabled should default to true")
+}
+
+// TestServeCmd_BalancesEnabledFalseFromEnv covers the path production actually
+// uses: prd disables the account-balances route by setting BALANCES_ENABLED in the
+// deployment, not by passing a CLI flag. The api-package tests set
+// AppConfig.BalancesEnabled directly, so they would keep passing even if the flag
+// were renamed or the env binding broke — and that failure is fail-OPEN: the
+// endpoint would stay registered in prd while the manifest says it is off. This
+// asserts the whole chain (env var -> viper AutomaticEnv with the '-'->'_'
+// replacer -> bindFlags -> the bound config field). The literal
+// "BALANCES_ENABLED" pins the env-var spelling kube depends on: renaming the flag
+// to a different word breaks this test, while a cosmetic '-'/'_' swap does not,
+// because the replacer maps both spellings onto the same variable.
+func TestServeCmd_BalancesEnabledFalseFromEnv(t *testing.T) {
+	// No t.Parallel(): t.Setenv is incompatible with parallel tests. DATABASE_URL is
+	// cleared and the DB disabled so boot validation can't fail for unrelated reasons.
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("BALANCES_ENABLED", "false")
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--db-enabled=false"})
+
+	require.NoError(t, cmd.Execute())
+	assert.False(t, serveCmd.Cfg.AppConfig.BalancesEnabled,
+		"BALANCES_ENABLED=false must reach AppConfig.BalancesEnabled; a true here means prd would still serve the route")
+}
+
+// TestServeCmd_BalancesEnabledEnvTrueKeepsRouteOn is the other half: re-enabling in
+// prd is done by flipping that same variable to "true" (or removing it), so the
+// binding has to work in both directions rather than only ever latching off.
+func TestServeCmd_BalancesEnabledEnvTrueKeepsRouteOn(t *testing.T) {
+	// No t.Parallel(): see above.
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("BALANCES_ENABLED", "true")
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--db-enabled=false"})
+
+	require.NoError(t, cmd.Execute())
+	assert.True(t, serveCmd.Cfg.AppConfig.BalancesEnabled)
+}
+
 func TestServeCmd_RejectsMaxLedgerKeyAddressesAboveUpstreamCeiling(t *testing.T) {
 	t.Parallel()
 
