@@ -224,11 +224,10 @@ func (s *ApiServer) routes() ([]route, error) {
 
 	positionsService := services.NewPositionsService(
 		s.walletBackendService,
-		s.redis,
-		time.Duration(s.cfg.BlendConfig.PositionsCacheTTLSeconds)*time.Second,
+		s.cfg.AppConfig.WalletBackendBalanceConcurrency,
 		s.appMetrics.Service,
 	)
-	accountPositionsHandler := handlers.NewAccountPositionsHandler(positionsService)
+	accountPositionsHandler := handlers.NewAccountPositionsHandler(positionsService, s.cfg.AppConfig.MaxBalanceAddresses)
 
 	blendCatalogService, err := services.NewBlendCatalogService(
 		s.walletBackendService,
@@ -263,7 +262,7 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodPost, "/api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances), true},
 		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true},
 		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true},
-		{http.MethodGet, "/api/v1/accounts/{address}/positions", handlers.CustomHandler(accountPositionsHandler.GetAccountPositions), true},
+		{http.MethodPost, "/api/v1/accounts/positions", handlers.CustomHandler(accountPositionsHandler.GetAccountsPositions), true},
 		{http.MethodGet, "/api/v1/protocols/blend/pools", handlers.CustomHandler(blendCatalogHandler.GetPools), true},
 		{http.MethodGet, "/api/v1/protocols/blend/earn-options", handlers.CustomHandler(blendCatalogHandler.GetEarnOptions), true},
 		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true},

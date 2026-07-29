@@ -188,7 +188,7 @@ func TestServeCmd_RejectsNegativePriceFetchTimeout(t *testing.T) {
 	assert.Contains(t, err.Error(), "--price-fetch-timeout-seconds=-1 must be >= 0")
 }
 
-func TestServeCmd_ValidatesBlendCacheTTLs(t *testing.T) {
+func TestServeCmd_ValidatesBlendCatalogCacheTTL(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
@@ -197,11 +197,6 @@ func TestServeCmd_ValidatesBlendCacheTTLs(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "rejects negative positions cache TTL",
-			args:    []string{"--blend-positions-cache-ttl-seconds", "-1"},
-			wantErr: "--blend-positions-cache-ttl-seconds=-1 must be >= 0",
-		},
-		{
 			name:    "rejects negative catalog cache TTL",
 			args:    []string{"--blend-catalog-cache-ttl-seconds", "-30"},
 			wantErr: "--blend-catalog-cache-ttl-seconds=-30 must be >= 0",
@@ -209,9 +204,8 @@ func TestServeCmd_ValidatesBlendCacheTTLs(t *testing.T) {
 		{
 			// Zero is the documented boundary: accepted by validation
 			// (consumers substitute their own defaults for non-positive TTLs).
-			name: "accepts zero for both TTLs",
+			name: "accepts zero TTL",
 			args: []string{
-				"--blend-positions-cache-ttl-seconds", "0",
 				"--blend-catalog-cache-ttl-seconds", "0",
 				"--database-url", "postgres://localhost/test",
 			},

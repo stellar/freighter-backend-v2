@@ -148,7 +148,7 @@ func TestAccountAggregate(t *testing.T) {
 		total, apy := accountAggregate([]wbtypes.BlendPoolPosition{
 			pool(f64(8000), f64(9000), f64(0.05)),
 			pool(f64(900), f64(1000), f64(0.01)),
-		})
+		}, nil)
 		require.NotNil(t, total)
 		assert.InDelta(t, 8900, *total, 1e-9) // the total sums net values...
 		require.NotNil(t, apy)
@@ -159,7 +159,7 @@ func TestAccountAggregate(t *testing.T) {
 		total, apy := accountAggregate([]wbtypes.BlendPoolPosition{
 			pool(f64(9000), f64(9000), f64(0.05)),
 			pool(nil, nil, nil),
-		})
+		}, nil)
 		assert.Nil(t, total)
 		assert.Nil(t, apy)
 	})
@@ -168,7 +168,7 @@ func TestAccountAggregate(t *testing.T) {
 		total, apy := accountAggregate([]wbtypes.BlendPoolPosition{
 			pool(f64(9000), f64(9000), f64(0.05)),
 			pool(f64(1000), f64(1000), nil),
-		})
+		}, nil)
 		require.NotNil(t, total)
 		assert.InDelta(t, 10000, *total, 1e-9)
 		assert.Nil(t, apy)
@@ -178,14 +178,14 @@ func TestAccountAggregate(t *testing.T) {
 		total, apy := accountAggregate([]wbtypes.BlendPoolPosition{
 			pool(f64(9000), f64(9000), f64(0.05)),
 			pool(f64(1000), nil, f64(0.01)),
-		})
+		}, nil)
 		require.NotNil(t, total)
 		assert.InDelta(t, 10000, *total, 1e-9)
 		assert.Nil(t, apy)
 	})
 
 	t.Run("no positions is a genuine zero, apy null", func(t *testing.T) {
-		total, apy := accountAggregate(nil)
+		total, apy := accountAggregate(nil, nil)
 		require.NotNil(t, total)
 		assert.Equal(t, 0.0, *total)
 		assert.Nil(t, apy)
@@ -194,14 +194,75 @@ func TestAccountAggregate(t *testing.T) {
 	t.Run("zero supplied base yields null apy", func(t *testing.T) {
 		total, apy := accountAggregate([]wbtypes.BlendPoolPosition{
 			pool(f64(0), f64(0), f64(0.05)),
-		})
+		}, nil)
 		require.NotNil(t, total)
 		assert.Equal(t, 0.0, *total)
 		assert.Nil(t, apy)
 	})
+
+	t.Run("backstop value joins the total but not the rate", func(t *testing.T) {
+		total, apy := accountAggregate(
+			[]wbtypes.BlendPoolPosition{pool(f64(9000), f64(9000), f64(0.05))},
+			[]wbtypes.BlendBackstopPosition{{UsdValue: f64(500)}},
+		)
+		require.NotNil(t, total)
+		assert.InDelta(t, 9500, *total, 1e-9)
+		require.NotNil(t, apy)
+		assert.InDelta(t, 0.05, *apy, 1e-9) // rate unchanged by backstop
+	})
+
+	t.Run("unpriced backstop nulls the total (strict)", func(t *testing.T) {
+		total, apy := accountAggregate(
+			[]wbtypes.BlendPoolPosition{pool(f64(9000), f64(9000), f64(0.05))},
+			[]wbtypes.BlendBackstopPosition{{UsdValue: nil}},
+		)
+		assert.Nil(t, total)
+		assert.Nil(t, apy)
+	})
+
+	t.Run("backstop-only account totals without a rate", func(t *testing.T) {
+		total, apy := accountAggregate(nil,
+			[]wbtypes.BlendBackstopPosition{{UsdValue: f64(500)}},
+		)
+		require.NotNil(t, total)
+		assert.InDelta(t, 500, *total, 1e-9)
+		assert.Nil(t, apy)
+	})
 }
 
-func TestGetAccountPositionsMapsAndPassesThrough(t *testing.T) {
+func TestMapBackstop(t *testing.T) {
+	name := "TestnetV2"
+	rows := mapBackstop([]wbtypes.BlendBackstopPosition{{
+		PoolAddress:         "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF",
+		PoolName:            &name,
+		Shares:              "1000000",
+		LpTokens:            "1100000",
+		UsdValue:            f64(52.5),
+		EmissionsEarnedBlnd: "42",
+		EmissionsEarnedUsd:  f64(0.001),
+		Q4W: []wbtypes.BlendQ4W{{
+			Amount:     "5000",
+			Expiration: 1760000000,
+			LpTokens:   "5500",
+			UsdValue:   f64(0.26),
+		}},
+	}})
+
+	require.Len(t, rows, 1)
+	row := rows[0]
+	assert.Equal(t, "1000000", row.Shares)
+	assert.Equal(t, "1100000", row.LPTokens)
+	require.NotNil(t, row.USDValue)
+	assert.InDelta(t, 52.5, *row.USDValue, 1e-9)
+	assert.Equal(t, "42", row.ClaimableBLND)
+	require.Len(t, row.Q4W, 1)
+	assert.EqualValues(t, 1760000000, row.Q4W[0].Expiration)
+
+	// Empty input still yields a non-nil slice for the JSON contract.
+	assert.NotNil(t, mapBackstop(nil))
+}
+
+func TestGetAccountsPositionsMapsAndPassesThrough(t *testing.T) {
 	name := "TestnetV2"
 	mockWB := &utils.MockWalletBackendService{
 		GetBlendPositionsResult: &wbtypes.BlendAccountPositions{
@@ -216,10 +277,13 @@ func TestGetAccountPositionsMapsAndPassesThrough(t *testing.T) {
 			}},
 		},
 	}
-	svc := NewPositionsService(mockWB, nil, 0, nil)
+	svc := NewPositionsService(mockWB, 0, nil)
 
-	got, err := svc.GetAccountPositions(context.Background(), "GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552", types.TESTNET)
+	results, err := svc.GetAccountsPositions(context.Background(), []string{"GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552"}, types.TESTNET)
 	require.NoError(t, err)
+	require.Len(t, results, 1)
+	got := results[0]
+	assert.Equal(t, "GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552", got.Address)
 
 	require.Len(t, got.Positions, 1)
 	row := got.Positions[0]
@@ -240,11 +304,17 @@ func TestGetAccountPositionsMapsAndPassesThrough(t *testing.T) {
 	assert.InDelta(t, 2.5245032003462415, *got.NetAPY, 1e-9)
 }
 
-func TestGetAccountPositionsEmptyAccount(t *testing.T) {
-	svc := NewPositionsService(&utils.MockWalletBackendService{}, nil, 0, nil)
+func TestGetAccountsPositionsEmptyAccountAndDedupe(t *testing.T) {
+	svc := NewPositionsService(&utils.MockWalletBackendService{}, 0, nil)
 
-	got, err := svc.GetAccountPositions(context.Background(), "GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552", types.TESTNET)
+	// Duplicates collapse, first-seen order preserved — like balances.
+	results, err := svc.GetAccountsPositions(context.Background(), []string{
+		"GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552",
+		"GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552",
+	}, types.TESTNET)
 	require.NoError(t, err)
+	require.Len(t, results, 1)
+	got := results[0]
 	assert.NotNil(t, got.Positions)
 	assert.Empty(t, got.Positions)
 	require.NotNil(t, got.TotalValueUSD)
@@ -252,10 +322,11 @@ func TestGetAccountPositionsEmptyAccount(t *testing.T) {
 	assert.Nil(t, got.NetAPY)
 }
 
-func TestGetAccountPositionsUpstreamError(t *testing.T) {
+func TestGetAccountsPositionsUpstreamError(t *testing.T) {
 	upErr := errors.New("wallet-backend on fire")
-	svc := NewPositionsService(&utils.MockWalletBackendService{GetBlendPositionsError: upErr}, nil, 0, nil)
+	svc := NewPositionsService(&utils.MockWalletBackendService{GetBlendPositionsError: upErr}, 0, nil)
 
-	_, err := svc.GetAccountPositions(context.Background(), "GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552", types.TESTNET)
+	// A systemic failure for any address fails the whole request.
+	_, err := svc.GetAccountsPositions(context.Background(), []string{"GDW6QB3BFPQ3I4LH752JD2HYADFM2T4RVRCEUNCCH7MICWZR67NL5552"}, types.TESTNET)
 	assert.ErrorIs(t, err, upErr)
 }

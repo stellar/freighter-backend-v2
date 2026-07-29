@@ -1,89 +1,82 @@
 // ABOUTME: Positions service: maps wallet-backend Blend positions into the
-// ABOUTME: frontend-shaped account positions response, with per-address caching.
+// ABOUTME: frontend-shaped account positions response.
 package services
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"math/big"
-	"strings"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
 
-	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
-	"github.com/stellar/freighter-backend-v2/internal/store"
 	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 const (
 	positionsServiceName = "positions"
 
-	defaultPositionsCacheTTL = 30 * time.Second
-
-	// positionsCacheKeyPrefix versions the cached response shape; bump on
-	// breaking changes so stale entries die at the key level.
-	positionsCacheKeyPrefix = "blend:positions:v1"
+	defaultPositionsConcurrency = 10
 )
 
 type positionsService struct {
-	walletBackend types.WalletBackendService
-	redis         *store.RedisStore
-	cacheTTL      time.Duration
-	svcMetrics    *metrics.Service
+	walletBackend  types.WalletBackendService
+	maxConcurrency int
+	svcMetrics     *metrics.Service
 }
 
-// NewPositionsService wires the positions view. redis may be nil; every
-// request then bypasses the cache and hits wallet-backend.
-func NewPositionsService(walletBackend types.WalletBackendService, redis *store.RedisStore, cacheTTL time.Duration, m *metrics.Service) types.PositionsService {
-	if cacheTTL <= 0 {
-		cacheTTL = defaultPositionsCacheTTL
+// NewPositionsService wires the positions view. maxConcurrency caps the
+// per-request fan-out goroutines, like the balances fan-out.
+func NewPositionsService(walletBackend types.WalletBackendService, maxConcurrency int, m *metrics.Service) types.PositionsService {
+	if maxConcurrency <= 0 {
+		maxConcurrency = defaultPositionsConcurrency
 	}
 	return &positionsService{
-		walletBackend: walletBackend,
-		redis:         redis,
-		cacheTTL:      cacheTTL,
-		svcMetrics:    m,
+		walletBackend:  walletBackend,
+		maxConcurrency: maxConcurrency,
+		svcMetrics:     m,
 	}
 }
 
 func (p *positionsService) Name() string { return positionsServiceName }
 
-// GetAccountPositions returns the account's positions, cached per
-// (network, address) for cacheTTL. User-visible staleness is the TTL plus
-// wallet-backend's own ingestion lag.
-func (p *positionsService) GetAccountPositions(ctx context.Context, address, network string) (_ *types.AccountPositions, err error) {
+// GetAccountsPositions returns positions for each unique requested address,
+// fetched from wallet-backend on every request (like balances): no caching,
+// so a fresh deposit is visible as soon as the indexer ingests it. Unknown
+// accounts are normal per-address outcomes (empty positions, already
+// normalized by the wallet-backend service); any other failure is systemic
+// and fails the whole request.
+func (p *positionsService) GetAccountsPositions(ctx context.Context, addresses []string, network string) (_ []*types.AccountPositions, err error) {
 	start := time.Now()
 	defer func() {
-		metrics.Record(p.svcMetrics, positionsServiceName, "GetAccountPositions", network, time.Since(start).Seconds(), err)
+		metrics.Record(p.svcMetrics, positionsServiceName, "GetAccountsPositions", network, time.Since(start).Seconds(), err)
 	}()
 
-	cacheKey := fmt.Sprintf("%s:%s:%s", positionsCacheKeyPrefix, strings.ToLower(network), address)
-	if p.redis != nil {
-		hits, cacheErr := p.redis.MGetJSON(ctx, []string{cacheKey}, func() any { return &types.AccountPositions{} })
-		if cacheErr != nil {
-			// Cache trouble must not fail the request; fall through to upstream.
-			logger.ErrorWithContext(ctx, "positions cache read failed", "error", cacheErr)
-		} else if hit, ok := hits[cacheKey].(*types.AccountPositions); ok {
-			return hit, nil
-		}
-	}
+	unique := utils.DedupePreserveOrder(addresses)
+	results := make([]*types.AccountPositions, len(unique))
 
-	upstream, err := p.walletBackend.GetBlendPositions(ctx, address, network)
-	if err != nil {
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(p.maxConcurrency)
+	for i, addr := range unique {
+		g.Go(func() error {
+			upstream, fetchErr := p.walletBackend.GetBlendPositions(gctx, addr, network)
+			if fetchErr != nil {
+				return fetchErr
+			}
+			entry := mapAccountPositions(upstream)
+			entry.Address = addr
+			results[i] = entry
+			return nil
+		})
+	}
+	if err = g.Wait(); err != nil {
 		return nil, err
 	}
-
-	result := mapAccountPositions(upstream)
-
-	if p.redis != nil {
-		if cacheErr := p.redis.SetJSON(ctx, cacheKey, result, p.cacheTTL); cacheErr != nil {
-			logger.ErrorWithContext(ctx, "positions cache write failed", "error", cacheErr)
-		}
-	}
-	return result, nil
+	return results, nil
 }
 
 // mapAccountPositions shapes the upstream Blend positions into the response.
@@ -102,12 +95,42 @@ func mapAccountPositions(upstream *wbtypes.BlendAccountPositions) *types.Account
 		})
 	}
 
-	total, netAPY := accountAggregate(upstream.Pools)
+	total, netAPY := accountAggregate(upstream.Pools, upstream.Backstop)
 	return &types.AccountPositions{
 		TotalValueUSD: total,
 		NetAPY:        netAPY,
 		Positions:     positions,
+		Backstop:      mapBackstop(upstream.Backstop),
 	}
+}
+
+// mapBackstop shapes the account's backstop deposits. Render-only in v1:
+// initiating backstop deposits is out of scope, but existing positions are
+// the user's money and must be visible.
+func mapBackstop(backstop []wbtypes.BlendBackstopPosition) []types.BlendBackstopRow {
+	rows := make([]types.BlendBackstopRow, 0, len(backstop))
+	for _, b := range backstop {
+		q4w := make([]types.BlendQ4WRow, 0, len(b.Q4W))
+		for _, q := range b.Q4W {
+			q4w = append(q4w, types.BlendQ4WRow{
+				Amount:     q.Amount,
+				LPTokens:   q.LpTokens,
+				USDValue:   q.UsdValue,
+				Expiration: q.Expiration,
+			})
+		}
+		rows = append(rows, types.BlendBackstopRow{
+			PoolID:        b.PoolAddress,
+			PoolName:      b.PoolName,
+			Shares:        b.Shares,
+			LPTokens:      b.LpTokens,
+			USDValue:      b.UsdValue,
+			ClaimableBLND: b.EmissionsEarnedBlnd,
+			ClaimableUSD:  b.EmissionsEarnedUsd,
+			Q4W:           q4w,
+		})
+	}
+	return rows
 }
 
 // mapBlendDetail turns reserve positions into display rows. Reserves with no
@@ -161,20 +184,23 @@ func mapBlendDetail(reserves []wbtypes.BlendReservePosition) *types.BlendPositio
 	return detail
 }
 
-// accountAggregate computes the header figures from the per-pool summaries.
+// accountAggregate computes the header figures from the per-pool summaries
+// and backstop deposits.
 //
-// TotalValueUSD: Σ pool usdValue with strict null propagation (any
-// unavailable pool value nulls the total — an undercounted "total" is worse
-// than an honest null), mirroring upstream's convention for pool totals.
-// 0 for an account with no pools.
+// TotalValueUSD: Σ pool usdValue + Σ backstop usdValue, with strict null
+// propagation (any unavailable value nulls the total — an undercounted
+// "total" is worse than an honest null), mirroring upstream's convention
+// for pool totals. 0 for an account with no positions.
 //
 // NetAPY: mean of pool netApy weighted by pool suppliedUsd — the base the
 // upstream rate is defined over (blend-sdk-js: net dollars / total
-// supplied), so rate × base reproduces the per-pool dollar earnings. Null
-// when any pool's netApy or suppliedUsd is unavailable or the supplied base
-// is zero.
-func accountAggregate(pools []wbtypes.BlendPoolPosition) (total *float64, netAPY *float64) {
-	if len(pools) == 0 {
+// supplied), so rate × base reproduces the per-pool dollar earnings.
+// Backstop deposits carry no interest APY (they earn BLND emissions,
+// reported per row), so they contribute to the total but not the rate.
+// Null when any pool's netApy or suppliedUsd is unavailable or the supplied
+// base is zero.
+func accountAggregate(pools []wbtypes.BlendPoolPosition, backstop []wbtypes.BlendBackstopPosition) (total *float64, netAPY *float64) {
+	if len(pools) == 0 && len(backstop) == 0 {
 		zero := 0.0
 		return &zero, nil
 	}
@@ -194,6 +220,12 @@ func accountAggregate(pools []wbtypes.BlendPoolPosition) (total *float64, netAPY
 		}
 		apyNumerator += *pool.NetApy * *pool.SuppliedUsd
 		suppliedSum += *pool.SuppliedUsd
+	}
+	for _, b := range backstop {
+		if b.UsdValue == nil {
+			return nil, nil
+		}
+		sum += *b.UsdValue
 	}
 
 	total = &sum

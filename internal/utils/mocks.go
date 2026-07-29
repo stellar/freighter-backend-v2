@@ -188,24 +188,24 @@ func (m *MockWalletBackendService) GetBlendPools(ctx context.Context, network st
 
 // MockPositionsService stubs types.PositionsService for handler tests.
 type MockPositionsService struct {
-	GetAccountPositionsResult *types.AccountPositions
-	GetAccountPositionsError  error
-	GetAccountPositionsFunc   func(ctx context.Context, address, network string) (*types.AccountPositions, error)
+	GetAccountsPositionsResult []*types.AccountPositions
+	GetAccountsPositionsError  error
+	GetAccountsPositionsFunc   func(ctx context.Context, addresses []string, network string) ([]*types.AccountPositions, error)
 }
 
 func (m *MockPositionsService) Name() string { return "mock-positions" }
 
-func (m *MockPositionsService) GetAccountPositions(ctx context.Context, address, network string) (*types.AccountPositions, error) {
-	if m.GetAccountPositionsFunc != nil {
-		return m.GetAccountPositionsFunc(ctx, address, network)
+func (m *MockPositionsService) GetAccountsPositions(ctx context.Context, addresses []string, network string) ([]*types.AccountPositions, error) {
+	if m.GetAccountsPositionsFunc != nil {
+		return m.GetAccountsPositionsFunc(ctx, addresses, network)
 	}
-	if m.GetAccountPositionsError != nil {
-		return nil, m.GetAccountPositionsError
+	if m.GetAccountsPositionsError != nil {
+		return nil, m.GetAccountsPositionsError
 	}
-	if m.GetAccountPositionsResult != nil {
-		return m.GetAccountPositionsResult, nil
+	if m.GetAccountsPositionsResult != nil {
+		return m.GetAccountsPositionsResult, nil
 	}
-	return &types.AccountPositions{Positions: []types.PoolPosition{}}, nil
+	return []*types.AccountPositions{}, nil
 }
 
 // MockBlendCatalogService stubs types.BlendCatalogService for handler tests.
