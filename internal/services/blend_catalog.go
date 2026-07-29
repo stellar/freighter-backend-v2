@@ -1,6 +1,6 @@
 // ABOUTME: Blend market-catalog service: pool and earn-option views, with
 // ABOUTME: per-network caching and earn-pool curation. Earn options are derived
-// ABOUTME: from the pools catalog (wallet-backend serves no earn query).
+// ABOUTME: from the pools catalog.
 package services
 
 import (
@@ -176,8 +176,7 @@ func mapCatalogPools(pools []wbtypes.BlendPool) []types.BlendCatalogPool {
 // pool's config is not yet ingested and is excluded), reserves that are
 // enabled, and — when an allowlist is configured — pools Freighter curates.
 // Assets are ordered by asset id; each asset's pools by supplied USD
-// descending (unpriced last, id tie-break), mirroring the ordering the
-// upstream earn query used before it was removed.
+// descending (unpriced last, id tie-break).
 func deriveEarnOptions(pools []types.BlendCatalogPool, allowed map[string]bool) []types.BlendEarnAssetOption {
 	byAsset := make(map[string]*types.BlendEarnAssetOption)
 	for _, pool := range pools {

@@ -75,7 +75,7 @@ type BlendEarnAssetOption struct {
 	Symbol   *string `json:"symbol"`
 	Name     *string `json:"name"`
 	Decimals *int32  `json:"decimals"`
-	// Pools is ordered by upstream (supplied USD descending). The
+	// Pools is ordered by supplied USD descending (unpriced last). The
 	// emissions-inclusive earn headline is SupplyAPY + EmissionsSupplyAPR.
 	Pools []BlendEarnPool `json:"pools"`
 }
