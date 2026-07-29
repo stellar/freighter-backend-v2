@@ -36,6 +36,13 @@ func testCfg(authMode string) *config.Config {
 		AccountHistoryDefaultLimit: 20,
 		AccountHistoryMaxLimit:     100,
 		AuthMode:                   authMode,
+		// Mirrors the --balances-enabled default (true). Without this the
+		// zero-value false would leave the balances route unregistered, and
+		// AllUserFacingRoutesGatedInStrict — which probes every gated route in
+		// routes() for a 401 — would see a 404 and fail in a way that looks like
+		// an auth regression. Tests that want the off state set it false
+		// explicitly (see BalancesDisabledNotRegistered).
+		BalancesEnabled: true,
 	}}
 }
 
@@ -177,6 +184,46 @@ func TestApiServer_initHandlers_RegistersAccountHistoryRoutes(t *testing.T) {
 	handler, pattern := mux.Handler(&http.Request{Method: "GET", URL: mustParseURL(path)})
 	assert.NotNil(t, handler, "no handler registered for %s", path)
 	assert.NotEmpty(t, pattern, "no pattern matched for %s", path)
+}
+
+// TestApiServer_initHandlers_BalancesDisabledNotRegistered pins the off state of
+// the --balances-enabled toggle: with the flag false the route is absent from the
+// mux entirely, so the path 404s exactly as an unknown path would. Asserting on the
+// status (rather than that mux.Handler returns nil) is what a caller actually
+// observes, and it distinguishes non-registration from a registered-but-short-
+// circuiting route, which would answer 500/503 here instead. balances is POST-only,
+// so an unregistered pattern yields 404 rather than 405 — ServeMux only reports 405
+// when the same pattern exists under another method.
+func TestApiServer_initHandlers_BalancesDisabledNotRegistered(t *testing.T) {
+	cfg := testCfg("permissive")
+	cfg.AppConfig.BalancesEnabled = false
+
+	mux, err := newTestAPIServer(t, cfg).initHandlers()
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/accounts/balances", nil))
+	assert.Equal(t, http.StatusNotFound, rec.Code,
+		"a disabled balances route must 404 without reaching a handler")
+}
+
+// TestApiServer_initHandlers_BalancesEnabledStaysGated guards the on state against
+// the toggle silently becoming an auth bypass: enabling the route must register it
+// AND keep it wrapped in Auth. In strict mode Auth rejects an anonymous request with
+// 401 before the handler runs, so no wallet-backend stub is needed — the nil service
+// left by newTestAPIServer is never reached. A 404 here would mean the flag failed to
+// register the route; a 200 or 500 would mean it registered bare, skipping auth.
+func TestApiServer_initHandlers_BalancesEnabledStaysGated(t *testing.T) {
+	cfg := testCfg("strict")
+	cfg.AppConfig.BalancesEnabled = true
+
+	mux, err := newTestAPIServer(t, cfg).initHandlers()
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/accounts/balances", nil))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code,
+		"an enabled balances route must be registered and still auth-gated")
 }
 
 func TestApiServer_initHandlers_WhoamiRouteRespectsAuthMode(t *testing.T) {
@@ -362,8 +409,14 @@ func TestApiServer_initHandlers_AllUserFacingRoutesGatedInStrict(t *testing.T) {
 		path := wildcardSegment.ReplaceAllString(rt.pattern, "probe")
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(rt.method, path, nil))
+		// Deliberately NOT skipping enabled=false routes: skipping would silently
+		// drop a route from this guard's coverage the moment someone disabled it in
+		// testCfg. A disabled route shows up here as a 404 instead of a 401, so the
+		// message names that case explicitly rather than leaving a confusing
+		// "must run the auth middleware" failure on a route that was never registered.
 		assert.Equal(t, http.StatusUnauthorized, rec.Code,
-			"%s %s must run the auth middleware (401 for anonymous in strict)", rt.method, rt.pattern)
+			"%s %s must run the auth middleware (401 for anonymous in strict); a 404 here means the route is not registered at all — check its enabled flag in routes() and BalancesEnabled in testCfg",
+			rt.method, rt.pattern)
 	}
 	require.Positive(t, gated, "expected routes() to contain at least one gated route")
 }

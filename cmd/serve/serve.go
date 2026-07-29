@@ -93,6 +93,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.MeridianPayStellarHouseAddress, "meridian-pay-stellar-house-address", "", "The Meridian Pay Stellar House collection address")
 	cmd.Flags().Int64Var(&s.Cfg.AppConfig.MaxRequestBodySize, "max-request-body-size", 1<<20, "Maximum request body size in bytes (default: 1MB)")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxBalanceAddresses, "max-balance-addresses", 100, "Maximum number of addresses allowed in account balances request")
+	cmd.Flags().BoolVar(&s.Cfg.AppConfig.BalancesEnabled, "balances-enabled", true, "Register POST /api/v1/accounts/balances. Set false (env BALANCES_ENABLED) to leave the route unregistered so the path 404s — used where its wallet-backend upstream is not configured.")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxLedgerKeyAddresses, "max-ledger-key-addresses", 100, "Maximum number of public keys allowed in a ledger-key/accounts request")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.WalletBackendBalanceConcurrency, "wallet-backend-balance-concurrency", 10, "Per-request maximum number of concurrent wallet-backend balance fetches (the /accounts/balances handler fans out to one accountByAddress call per address)")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.AccountHistoryDefaultLimit, "account-history-default-limit", 20, "Default page size for GET /accounts/{address}/transactions")
