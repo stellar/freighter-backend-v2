@@ -818,7 +818,7 @@ func TestGetAccountTransactions(t *testing.T) {
 		require.True(t, ok, "fifth state change is a BalanceAuthorizationChange, got %T", got.Data[0].StateChanges[4])
 		require.NotNil(t, ba.TokenID)
 		assert.Equal(t, "USDC-GISSUER", *ba.TokenID)
-		assert.Nil(t, ba.Flags, "SAC contract-holder authorization has null flags")
+		assert.Empty(t, ba.Flags, "SAC contract-holder authorization carries no trustline flags")
 
 		assert.True(t, got.Pagination.HasNext)
 		require.NotNil(t, got.Pagination.NextCursor)

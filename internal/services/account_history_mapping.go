@@ -75,7 +75,7 @@ func mapStateChange(n wbtypes.StateChangeNode) types.StateChange {
 		return &types.ThresholdChange{StateChangeBase: base, Threshold: string(sc.Threshold), OldThreshold: sc.OldThreshold, NewThreshold: sc.NewThreshold}
 	case *wbtypes.AccountFlagsChange:
 		base.Variant = "AccountFlagsChange"
-		return &types.AccountFlagsChange{StateChangeBase: base, Flags: mapAccountFlags(sc.Flags)}
+		return &types.AccountFlagsChange{StateChangeBase: base, Flags: enumStrings(sc.Flags)}
 	case *wbtypes.HomeDomainSetChange:
 		base.Variant = "HomeDomainSetChange"
 		return &types.HomeDomainSetChange{StateChangeBase: base, HomeDomain: sc.HomeDomain}
@@ -108,33 +108,24 @@ func mapStateChange(n wbtypes.StateChangeNode) types.StateChange {
 		return &types.TrustlineRemovedChange{StateChangeBase: base, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID}
 	case *wbtypes.BalanceAuthorizationChange:
 		base.Variant = "BalanceAuthorizationChange"
-		return &types.BalanceAuthorizationChange{StateChangeBase: base, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID, Flags: mapTrustlineFlags(sc.Flags)}
+		return &types.BalanceAuthorizationChange{StateChangeBase: base, TokenID: sc.TokenID, LiquidityPoolID: sc.LiquidityPoolID, Flags: enumStrings(sc.Flags)}
 	default:
 		return &base
 	}
 }
 
-// mapAccountFlags converts SDK account flags to their string representations.
-// Always returns a non-nil slice: the upstream field is a non-null list, so the
-// REST field encodes [] rather than null when empty.
-func mapAccountFlags(flags []wbtypes.AccountFlag) []string {
-	out := make([]string, len(flags))
-	for i, f := range flags {
-		out[i] = string(f)
-	}
-	return out
-}
-
-// mapTrustlineFlags converts SDK trustline flags to their string
-// representations. Returns nil for a nil/empty input (SAC contract-holder
-// authorization carries no flags), which the REST field omits.
-func mapTrustlineFlags(flags []wbtypes.TrustlineFlag) []string {
-	if len(flags) == 0 {
-		return nil
-	}
-	out := make([]string, len(flags))
-	for i, f := range flags {
-		out[i] = string(f)
+// enumStrings converts a slice of SDK string enums to their string
+// representations. Always returns a non-nil slice; whether an empty result is
+// emitted as [] or omitted from the JSON is decided by the target field's tag,
+// not by this function. AccountFlagsChange.Flags is `json:"flags"` (upstream
+// [AccountFlag!]!) so it encodes []; BalanceAuthorizationChange.Flags is
+// `json:"flags,omitempty"` (upstream [TrustlineFlag!], null for SAC
+// contract-holder authorization) so the key is dropped — encoding/json omits any
+// zero-length slice, nil or not.
+func enumStrings[T ~string](values []T) []string {
+	out := make([]string, len(values))
+	for i, v := range values {
+		out[i] = string(v)
 	}
 	return out
 }

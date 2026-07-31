@@ -130,8 +130,11 @@ func TestMapStateChange_AllVariants(t *testing.T) {
 			&types.BalanceAuthorizationChange{StateChangeBase: variantBase("BalanceAuthorizationChange"), TokenID: &s, LiquidityPoolID: &s, Flags: []string{"AUTHORIZED"}},
 		},
 		{
-			"balance_authorization_nil_flags", &wbtypes.BalanceAuthorizationChange{BaseStateChangeFields: base, TokenID: &s},
-			&types.BalanceAuthorizationChange{StateChangeBase: variantBase("BalanceAuthorizationChange"), TokenID: &s},
+			// SAC contract-holder authorization: upstream sends flags:null, which
+			// maps to an empty (non-nil) slice. The json tag's omitempty is what
+			// keeps the key off the wire — see TestBalanceAuthorizationChange_*.
+			"balance_authorization_sac_no_flags", &wbtypes.BalanceAuthorizationChange{BaseStateChangeFields: base, TokenID: &s},
+			&types.BalanceAuthorizationChange{StateChangeBase: variantBase("BalanceAuthorizationChange"), TokenID: &s, Flags: []string{}},
 		},
 	}
 	for _, tc := range cases {
