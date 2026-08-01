@@ -37,13 +37,32 @@ Shipped Freighter clients today send **no** JWT; newer client versions send a JW
 To avoid breaking old clients, auth has two modes, selected by one global config value
 (`AUTH_MODE` / `--auth-mode`, default `permissive`):
 
-| Mode | No `Authorization` header | Header present, valid | Invalid: timing only | Invalid: any other reason |
+| Mode | No `Authorization` header | Header present, valid | Invalid: `expired` | Invalid: any other reason |
 | --- | --- | --- | --- | --- |
 | **permissive** (default) | pass (anonymous, no `userID`) | pass (+`userID`) | pass (anonymous, no `userID`) | **401** |
 | **strict** (`auth.Required`) | **401** | pass (+`userID`) | **401** | **401** |
 
-"Timing only" means `expired` or `bad_timing` — the token is well-formed and correctly signed, and
-its only fault is a timestamp from a device clock that disagrees with ours.
+The permitted column is exactly `reason="expired"` — no other reason, timing-related or not.
+
+That narrowness is load-bearing rather than incidental. `expired` originates from
+`jwtgo.ParseWithClaims`, and jwt/v5 returns on signature failure *before* it validates claims, so an
+`expired` classification implies the signature verified: a genuine holder of `sub`'s private key
+whose clock lags. Every other reason — including **`bad_timing`, which is also a clock symptom** —
+comes out of `Claims.Validate`, which runs *before* signature verification (`auth/parser.go`). A
+forged token dated into the future is classified `bad_timing` and never reaches the signature check
+at all, so permitting on that reason would carry no proof of who signed it. `bad_timing` is also not
+purely a clock signal: it covers missing `exp`/`iat`, `exp` preceding `iat`, and over-long
+lifetimes.
+
+Permitting `bad_timing` would not be a privilege escalation — no `userID` is attached either way, so
+the request is equivalent to one with no `Authorization` header — but it would falsify the "a bad
+signature always stays loud" contract above and let forged tokens inflate the `invalid_permitted`
+counter that gates the permissive→strict flip.
+
+**Known gap:** a clock running *fast* by more than the leeway is `bad_timing`, so it still 401s.
+Accepted deliberately — in the first 24h of real JWT traffic `bad_timing` was 0 against 335
+`expired`. Closing it safely would need a signature-verified, skew-specific reason, i.e. reordering
+`parseJWT` to verify before validating claims, which the data does not justify.
 
 This table originally rejected *every* present-but-invalid token in both modes, on the reasoning
 that "only updated clients send tokens, so a bad token is a real bug or attack." That reasoning
@@ -196,8 +215,9 @@ logging middleware.
 
 - Metric: `freighter_auth_requests_total{result, reason}` counter.
   - `result ∈ {authenticated, anonymous, rejected, invalid_permitted}` — adoption % during rollout.
-    `invalid_permitted` is a timing-only failure served anonymously under permissive (see the mode
-    table above). It is separate from both `rejected` (these requests succeed) and `anonymous` (a
+    `invalid_permitted` is an **`expired`** token served anonymously under permissive (see the mode
+    table above) — and only that reason, so every request counted is signature-verified.
+    It is separate from both `rejected` (these requests succeed) and `anonymous` (a
     client sending a broken token is a different population from one sending none). **Anything
     watching the invalid-token rate — alerts, strict-flip readiness — must sum it with `rejected`,
     or permitted skew will read as having disappeared rather than as still happening.**

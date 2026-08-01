@@ -75,23 +75,44 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				reason := auth.Reason(err)
 				iss := auth.IssuerFromRequestUnverified(r)
 
-				// In permissive mode a timing-only failure is served anonymously
-				// instead of rejected. The routes behind this middleware already serve
-				// anonymous traffic in permissive, so 401ing a client whose only fault
-				// is a wrong device clock refuses a request that would have succeeded
-				// had the client sent no token at all — which defeats the point of
+				// In permissive mode an expired token is served anonymously instead of
+				// rejected. The routes behind this middleware already serve anonymous
+				// traffic in permissive, so 401ing a client whose only fault is a
+				// lagging device clock refuses a request that would have succeeded had
+				// the client sent no token at all — which defeats the point of
 				// permissive mode and locks the user out of every gated route.
 				//
-				// Timing reasons ONLY. A bad signature, bad binding, or malformed token
-				// is a real bug or attack rather than a wrong clock, and stays loud.
+				// ReasonExpired ONLY, and that narrowness is load-bearing. It is the
+				// one failure reason that proves the signature verified: it originates
+				// from jwtgo.ParseWithClaims (auth/parser.go), and jwt/v5 returns on
+				// signature failure BEFORE validating claims, so an expired
+				// classification implies a genuine holder of sub's private key.
+				//
+				// ReasonBadTiming is deliberately excluded even though it is also a
+				// clock symptom. Claims.Validate runs BEFORE signature verification, so
+				// bad_timing carries no proof the token was signed by anyone in
+				// particular — a forged token dated into the future is classified
+				// bad_timing and never reaches the signature check. It also covers
+				// non-clock faults (missing exp/iat, exp before iat, overlong
+				// lifetime). Permitting it would grant nothing (no userID is attached
+				// either way), but it would falsify the "a bad signature always stays
+				// loud" contract and let forged tokens inflate the invalid_permitted
+				// counter that gates the permissive→strict flip.
+				//
+				// The cost is that a clock running FAST by more than the leeway still
+				// 401s. Prod bears this out as the right trade: over the first 24h of
+				// real JWT traffic, bad_timing was 0 and expired was 335 (#147).
+				// Covering fast clocks safely would need a signature-verified,
+				// skew-specific reason — i.e. reordering parseJWT to verify before
+				// validating claims — which is not justified by the data.
+				//
 				// Strict stays fail-closed for everything: it has no anonymous path to
 				// fall back to, so skewed clients must be fixed client-side before the
 				// permissive→strict flip.
 				//
 				// Grants nothing: no userID is attached, so this request is treated
 				// exactly like one carrying no Authorization header at all.
-				permitted := mode == auth.Permissive &&
-					(reason == auth.ReasonExpired || reason == auth.ReasonBadTiming)
+				permitted := mode == auth.Permissive && reason == auth.ReasonExpired
 
 				result := "rejected"
 				if permitted {

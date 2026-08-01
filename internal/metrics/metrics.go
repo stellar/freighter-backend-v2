@@ -92,9 +92,17 @@ func SanitizeClient(iss string) string {
 	}
 }
 
-// ResultInvalidPermitted is the RequestsTotal `result` for a token that failed
-// verification on timing alone and was served anonymously rather than rejected
-// (permissive mode only — see middleware.Auth).
+// ResultInvalidPermitted is the RequestsTotal `result` for an EXPIRED token that
+// was served anonymously rather than rejected (permissive mode only — see
+// middleware.Auth).
+//
+// Scope is exactly reason="expired", which is the only verification failure that
+// implies the signature was checked and passed (jwt/v5 returns on signature
+// failure before it validates claims). So every request counted here came from a
+// genuine holder of the subject's private key whose clock was running behind —
+// not from a forged or malformed token. reason="bad_timing" is NOT counted here
+// despite also being a clock symptom, because it is classified before signature
+// verification.
 //
 // It is deliberately NOT "rejected": these requests succeed, and folding them in
 // would make the rejection rate unreadable. It is deliberately NOT "anonymous"

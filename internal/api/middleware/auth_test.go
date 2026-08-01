@@ -61,13 +61,16 @@ func TestAuth_TruthTable(t *testing.T) {
 	}{
 		{"permissive/no-header", auth.Permissive, "", http.StatusOK, false, ""},
 		{"permissive/valid", auth.Permissive, validToken(), http.StatusOK, true, sub},
-		// Timing-only failures are served anonymously in permissive: the routes it
-		// guards already serve anonymous traffic, so 401ing a client that would have
-		// succeeded sending no token at all locks out users whose device clock is
-		// wrong. No userID is attached — this is a failed authentication, not a
-		// successful one.
+		// An expired token is served anonymously in permissive: the routes it guards
+		// already serve anonymous traffic, so 401ing a client that would have
+		// succeeded sending no token at all locks out users whose clock lags. No
+		// userID is attached — this is a failed authentication, not a successful one.
 		{"permissive/expired", auth.Permissive, expiredToken(), http.StatusOK, false, ""},
-		{"permissive/future-dated", auth.Permissive, futureToken(), http.StatusOK, false, ""},
+		// A future-dated token is classified bad_timing, which Claims.Validate
+		// produces BEFORE signature verification — so it proves nothing about who
+		// signed it and stays a 401 even in permissive. This is the fast-clock gap:
+		// deliberate, and measured at 0 occurrences in prod (see auth.go).
+		{"permissive/future-dated", auth.Permissive, futureToken(), http.StatusUnauthorized, false, ""},
 		// Non-timing failures stay 401 in permissive: a bad signature is a real bug
 		// or attack, not a wrong clock, and must remain loud.
 		{"permissive/wrong-key", auth.Permissive, wrongKeyToken(), http.StatusUnauthorized, false, ""},
@@ -113,6 +116,43 @@ func TestAuth_TruthTable(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A token that is BOTH forged and badly timed must still be rejected in
+// permissive mode. Claims.Validate runs before signature verification in
+// parseJWT, so a wrong-key token whose iat is far in the future is classified
+// ReasonBadTiming and never reaches the signature check at all. If the
+// permissive fall-through keyed on bad_timing, an attacker-signed token would be
+// waved through on a reason that carries no proof the signature was ever
+// checked. Permitting grants no userID, so this is not a privilege escalation —
+// but it would make the "a bad signature always stays loud" contract false and
+// pollute the invalid_permitted counter that gates the strict flip.
+func TestAuth_PermissiveRejectsForgedTokenWithBadTiming(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	sub := hex.EncodeToString(pub)
+	_, attackerPriv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+
+	// Signed by a key that is NOT sub's, and dated an hour ahead.
+	token := mintToken(t, attackerPriv, sub, "GET "+authTestPath, auth.MaxTokenLifetime, time.Now().Add(time.Hour))
+
+	reg := prometheus.NewRegistry()
+	m := metrics.NewAuth(reg)
+	reached := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached = true; w.WriteHeader(http.StatusOK) })
+	handler := Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, m)(next)
+
+	r := httptest.NewRequest(http.MethodGet, authTestPath, nil)
+	r.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, r)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code, "forged + badly-timed token must 401 in permissive")
+	assert.False(t, reached, "handler must not be reached")
+	assert.Equal(t, float64(0),
+		testutil.ToFloat64(m.RequestsTotal.WithLabelValues(metrics.ResultInvalidPermitted, "bad_timing", "freighter-extension")),
+		"a forged token must never be counted as permitted skew")
 }
 
 // When the request body exceeds the limit installed upstream by BodySizeLimit,
