@@ -82,6 +82,26 @@ func (c *Claims) Validate(methodAndPath string, body []byte, maxLifetime, leeway
 	}
 	// Reject tokens dated implausibly far in the future. exp can legitimately be
 	// up to one full lifetime ahead, plus skew leeway.
+	//
+	// Defense in depth: this branch is UNREACHABLE given the checks above, and has
+	// been since before ClockAheadError existed. They force
+	//
+	//	exp = iat + lifetime <= (now + leeway) + maxLifetime
+	//
+	// which is exactly the bound tested here, so the strict > can never hold.
+	// (Verified by brute force over the iat/lifetime space, including an
+	// exhaustive 1-second grid — zero reachable cases.) It is kept because it
+	// stops being unreachable the moment either preceding check is reordered,
+	// loosened, or removed, and an exp far in the future is precisely what the
+	// lifetime cap exists to prevent.
+	//
+	// One consequence of that unreachability: AheadBy here would under-report by
+	// (maxLifetime - lifetime) compared with the iat branch above, which reports
+	// the clock offset directly. Both are "overshoot past the no-leeway bound", but
+	// they only agree when lifetime == maxLifetime. Left as-is rather than
+	// "corrected", since changing a value no caller can observe adds risk without
+	// benefit — but if a reordering ever makes this reachable, fix the formula in
+	// the same change.
 	if c.ExpiresAt.After(now.Add(maxLifetime + leeway)) {
 		return &ClockAheadError{AheadBy: c.ExpiresAt.Sub(now.Add(maxLifetime)), Err: errors.New("exp is too far in the future")}
 	}

@@ -37,10 +37,13 @@ func truncateForLog(s string) string { return truncate(s, maxLoggedIssuerLen) }
 // in its `sub` claim. Behavior depends on mode:
 //
 //   - Permissive: a request with no bearer token passes through anonymously, as
-//     does one whose token failed on timing alone (expired / bad_timing) — those
-//     are wrong-clock clients, not attackers, and the gated routes already serve
-//     anonymous traffic. Any other invalid token is rejected with 401.
-//   - Required: any request without a valid token is rejected with 401, timing
+//     does one whose token failed on CLOCK grounds — expired (clock lagging) or
+//     clock_ahead (clock fast). Those are wrong-clock clients, not attackers, and
+//     the gated routes already serve anonymous traffic. Any other invalid token
+//     is rejected with 401, including bad_timing: that reason covers malformed
+//     timing claims (missing exp/iat, exp before iat, over-long lifetime) rather
+//     than a wrong clock. See the fall-through below for the full rationale.
+//   - Required: any request without a valid token is rejected with 401, clock
 //     failures included.
 //
 // On success the authenticated user ID is attached to the request context
