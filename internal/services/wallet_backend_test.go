@@ -34,8 +34,15 @@ func TestClassifyWBError(t *testing.T) {
 		expectedCode  int
 	}{
 		{
-			name:          "GraphQL error wraps as graphql_error with no code",
-			err:           fmt.Errorf("GraphQL error: something went wrong"),
+			name:          "typed GraphQLErrors wraps as graphql_error with no code",
+			err:           wbclient.GraphQLErrors{{Message: "something went wrong"}},
+			expectWrapped: true,
+			expectedKind:  "graphql_error",
+			expectedCode:  0,
+		},
+		{
+			name:          "wrapped GraphQLErrors is matched via errors.As",
+			err:           fmt.Errorf("calling client: %w", wbclient.GraphQLErrors{{Message: "boom"}}),
 			expectWrapped: true,
 			expectedKind:  "graphql_error",
 			expectedCode:  0,
@@ -209,7 +216,7 @@ func nativeBalanceGraphQLResponse(amount string) string {
 }
 
 // graphqlErrorResponse returns a 200 response carrying a GraphQL error.
-// wbclient surfaces these as `GraphQL error: ...` Go errors.
+// wbclient surfaces these as the typed wbclient.GraphQLErrors slice.
 func graphqlErrorResponse(message string) string {
 	return fmt.Sprintf(`{"errors":[{"message":%q}]}`, message)
 }
@@ -732,14 +739,28 @@ func newTxFakeServer(t *testing.T, respond txResponder) *httptest.Server {
 func TestGetAccountTransactions(t *testing.T) {
 	const addr = "GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"
 
-	// nestedEdgeJSON is one edge of the AccountTransactionConnection. operations
-	// and stateChanges MUST be non-null — the SDK's UnmarshalJSON rejects nulls.
+	// happyBody is one edge of the AccountTransactionConnection. operations and
+	// stateChanges MUST be non-null — the SDK's UnmarshalJSON rejects nulls. The
+	// state-change nodes use the polymorphic wire shape the SDK fragments emit:
+	// the interface discriminator is `category` (not `type`), each __typename is
+	// a *Change variant, and shared fields are aliased per type (balanceTokenId,
+	// trustlineUpdatedTokenId, balanceAuthFlags). The five nodes cover a
+	// BalanceChange, a fee row (also a BalanceChange, with no toMuxedId), a
+	// SignerAddedChange (newWeight), a TrustlineUpdatedChange
+	// (oldLimit/newLimit), and a BalanceAuthorizationChange with null flags (SAC
+	// contract-holder authorization).
 	const happyBody = `{
 		"data": {"accountByAddress": {"transactions": {
 			"edges": [
 				{"cursor": "cur-1", "node": {"hash": "h1", "feeCharged": 100, "resultCode": "tx_success", "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "isFeeBump": false, "ingestedAt": "2026-01-01T00:00:01Z"},
-				 "operations": [{"id": 7, "operationType": "PAYMENT", "operationXdr": "AAA", "resultCode": "op_success", "successful": true, "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z"}],
-				 "stateChanges": [{"__typename": "StandardBalanceChange", "type": "BALANCE", "reason": "DEBIT", "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z", "standardBalanceTokenId": "native", "amount": "10"}]}
+				 "operations": [{"id": 7, "type": "PAYMENT", "operationXdr": "AAA", "resultCode": "op_success", "successful": true, "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z"}],
+				 "stateChanges": [
+					{"__typename": "BalanceChange", "category": "BALANCE", "reason": "DEBIT", "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z", "balanceTokenId": "native", "amount": "10", "toMuxedId": null},
+					{"__typename": "BalanceChange", "category": "BALANCE", "reason": "DEBIT", "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z", "balanceTokenId": "native", "amount": "1"},
+					{"__typename": "SignerAddedChange", "category": "SIGNER", "reason": "ADD", "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z", "signerAddress": "GSIGNER", "newWeight": 2},
+					{"__typename": "TrustlineUpdatedChange", "category": "TRUSTLINE", "reason": "UPDATE", "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z", "trustlineUpdatedTokenId": "USDC-GISSUER", "liquidityPoolId": null, "oldLimit": "100", "newLimit": "200"},
+					{"__typename": "BalanceAuthorizationChange", "category": "BALANCE_AUTHORIZATION", "reason": "UPDATE", "ledgerNumber": 42, "ledgerCreatedAt": "2026-01-01T00:00:00Z", "ingestedAt": "2026-01-01T00:00:01Z", "balanceAuthTokenId": "USDC-GISSUER", "liquidityPoolId": null, "balanceAuthFlags": null}
+				 ]}
 			],
 			"pageInfo": {"startCursor": "cur-1", "endCursor": "cur-1", "hasNextPage": true, "hasPreviousPage": true}
 		}}}
@@ -766,8 +787,39 @@ func TestGetAccountTransactions(t *testing.T) {
 		require.Len(t, got.Data[0].Operations, 1)
 		assert.Equal(t, int64(7), got.Data[0].Operations[0].ID)
 		assert.Equal(t, "PAYMENT", got.Data[0].Operations[0].OperationType)
-		require.Len(t, got.Data[0].StateChanges, 1)
-		require.IsType(t, &types.StandardBalanceChange{}, got.Data[0].StateChanges[0])
+		require.Len(t, got.Data[0].StateChanges, 5)
+
+		bc, ok := got.Data[0].StateChanges[0].(*types.BalanceChange)
+		require.True(t, ok, "first state change is a BalanceChange, got %T", got.Data[0].StateChanges[0])
+		assert.Equal(t, "BALANCE", bc.Type)
+		assert.Equal(t, "native", bc.TokenID)
+		assert.Equal(t, "10", bc.Amount)
+
+		fc, ok := got.Data[0].StateChanges[1].(*types.BalanceChange)
+		require.True(t, ok, "second state change is a BalanceChange fee row, got %T", got.Data[0].StateChanges[1])
+		assert.Equal(t, "native", fc.TokenID)
+		assert.Equal(t, "1", fc.Amount)
+		assert.Nil(t, fc.ToMuxedID, "a fee row carries no muxed destination")
+
+		sa, ok := got.Data[0].StateChanges[2].(*types.SignerAddedChange)
+		require.True(t, ok, "third state change is a SignerAddedChange, got %T", got.Data[0].StateChanges[2])
+		assert.Equal(t, "GSIGNER", sa.SignerAddress)
+		assert.Equal(t, int32(2), sa.NewWeight)
+
+		tu, ok := got.Data[0].StateChanges[3].(*types.TrustlineUpdatedChange)
+		require.True(t, ok, "fourth state change is a TrustlineUpdatedChange, got %T", got.Data[0].StateChanges[3])
+		require.NotNil(t, tu.TokenID)
+		assert.Equal(t, "USDC-GISSUER", *tu.TokenID)
+		assert.Nil(t, tu.LiquidityPoolID)
+		assert.Equal(t, "100", tu.OldLimit)
+		assert.Equal(t, "200", tu.NewLimit)
+
+		ba, ok := got.Data[0].StateChanges[4].(*types.BalanceAuthorizationChange)
+		require.True(t, ok, "fifth state change is a BalanceAuthorizationChange, got %T", got.Data[0].StateChanges[4])
+		require.NotNil(t, ba.TokenID)
+		assert.Equal(t, "USDC-GISSUER", *ba.TokenID)
+		assert.Empty(t, ba.Flags, "SAC contract-holder authorization carries no trustline flags")
+
 		assert.True(t, got.Pagination.HasNext)
 		require.NotNil(t, got.Pagination.NextCursor)
 		assert.Equal(t, "cur-1", *got.Pagination.NextCursor)
@@ -855,7 +907,7 @@ func TestGetAccountTransactions(t *testing.T) {
 		assert.Equal(t, 503, upErr.Code)
 	})
 
-	t.Run("null transactions connection returns empty page", func(t *testing.T) {
+	t.Run("null transactions connection is an upstream error", func(t *testing.T) {
 		t.Parallel()
 		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
 			return 200, `{"data":{"accountByAddress":{"transactions":null}}}`
@@ -863,10 +915,9 @@ func TestGetAccountTransactions(t *testing.T) {
 		defer server.Close()
 		svc := newTestWalletBackendService(t, server.URL)
 		got, err := svc.GetAccountTransactions(context.Background(), addr, types.PUBLIC, types.AccountHistoryParams{Limit: 20, Direction: types.PaginationDirectionNext})
-		require.NoError(t, err)
-		require.NotNil(t, got)
-		assert.Equal(t, []*types.AccountTransaction{}, got.Data)
-		assert.False(t, got.Pagination.HasNext)
+		require.Error(t, err, "the SDK rejects a null connection: the schema declares it non-null")
+		assert.False(t, errors.Is(err, wbclient.ErrAccountNotFound), "a malformed connection is not an account-not-found condition")
+		assert.Nil(t, got)
 	})
 
 	t.Run("ErrAccountNotFound does not increment ErrorsTotal", func(t *testing.T) {

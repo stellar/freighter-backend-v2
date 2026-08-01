@@ -32,12 +32,18 @@ type Operation struct {
 }
 
 // StateChange is a sealed interface implemented by every state-change variant.
-// The concrete type is determined by the StateChangeBase.Type discriminator
-// (StateChangeCategory is 1:1 with the variants), so clients switch on "type".
+// The concrete shape is named by the StateChangeBase.Variant discriminator, so
+// clients switch on "variant" alone instead of the (type, reason) pair.
 type StateChange interface{ isStateChange() }
 
-// StateChangeBase holds the fields common to every state-change variant.
+// StateChangeBase holds the fields common to every state-change variant. Type
+// carries the state-change category (BALANCE, SIGNER, TRUSTLINE, ...).
 type StateChangeBase struct {
+	// Variant names the concrete state-change shape (the wallet-backend GraphQL
+	// type, e.g. "BalanceChange", "AccountCreatedChange"). It is a convenience
+	// discriminator: each (type, reason) pair maps to exactly one variant, so
+	// clients switch on this single field rather than on the pair.
+	Variant         string    `json:"variant"`
 	Type            string    `json:"type"`
 	Reason          string    `json:"reason"`
 	LedgerNumber    uint32    `json:"ledger_number"`
@@ -47,69 +53,152 @@ type StateChangeBase struct {
 
 func (StateChangeBase) isStateChange() {}
 
-// StandardBalanceChange — category BALANCE.
-type StandardBalanceChange struct {
+// BalanceChange — a movement of value on the account's token balance. Also
+// carries transaction fees, which arrive as (BALANCE, DEBIT) rows.
+type BalanceChange struct {
 	StateChangeBase
-	StandardBalanceTokenID string `json:"standard_balance_token_id"`
-	Amount                 string `json:"amount"`
+	TokenID   string  `json:"token_id"`
+	Amount    string  `json:"amount"`
+	ToMuxedID *string `json:"to_muxed_id,omitempty"`
 }
 
-// AccountChange — category ACCOUNT.
-type AccountChange struct {
+// AccountCreatedChange — a classic account creation or a smart-contract
+// deployment. The state change's account is the created G-address or the
+// deployed C-address; CreatorAddress is the funding account or the deploying
+// address respectively.
+type AccountCreatedChange struct {
 	StateChangeBase
-	FunderAddress *string `json:"funder_address,omitempty"`
+	CreatorAddress string `json:"creator_address"`
 }
 
-// SignerChange — category SIGNER.
-type SignerChange struct {
+// AccountMergedChange — an account merge.
+type AccountMergedChange struct {
 	StateChangeBase
-	SignerAddress *string `json:"signer_address,omitempty"`
-	SignerWeights *string `json:"signer_weights,omitempty"`
+	DestinationAddress string `json:"destination_address"`
 }
 
-// SignerThresholdsChange — category SIGNATURE_THRESHOLD.
-type SignerThresholdsChange struct {
+// SignerAddedChange — a signer added to the account.
+type SignerAddedChange struct {
 	StateChangeBase
-	Thresholds string `json:"thresholds"`
+	SignerAddress string `json:"signer_address"`
+	NewWeight     int32  `json:"new_weight"`
 }
 
-// MetadataChange — category METADATA.
-type MetadataChange struct {
+// SignerUpdatedChange — an existing signer's weight change.
+type SignerUpdatedChange struct {
 	StateChangeBase
-	MetadataKeyValue string `json:"metadata_key_value"`
+	SignerAddress string `json:"signer_address"`
+	OldWeight     int32  `json:"old_weight"`
+	NewWeight     int32  `json:"new_weight"`
 }
 
-// FlagsChange — category FLAGS.
-type FlagsChange struct {
+// SignerRemovedChange — a signer removed from the account.
+type SignerRemovedChange struct {
+	StateChangeBase
+	SignerAddress string `json:"signer_address"`
+	OldWeight     int32  `json:"old_weight"`
+}
+
+// ThresholdChange — a signature-threshold change; Threshold identifies which of
+// the account's three thresholds (LOW, MEDIUM, HIGH) changed.
+type ThresholdChange struct {
+	StateChangeBase
+	Threshold    string `json:"threshold"`
+	OldThreshold int32  `json:"old_threshold"`
+	NewThreshold int32  `json:"new_threshold"`
+}
+
+// AccountFlagsChange — account authorization flags set or cleared.
+type AccountFlagsChange struct {
 	StateChangeBase
 	Flags []string `json:"flags"`
 }
 
-// TrustlineChange — category TRUSTLINE.
-type TrustlineChange struct {
+// HomeDomainSetChange — a home domain set on an account that had none.
+type HomeDomainSetChange struct {
 	StateChangeBase
-	TrustlineTokenID         *string `json:"trustline_token_id,omitempty"`
-	Limit                    *string `json:"limit,omitempty"`
-	TrustlineLiquidityPoolID *string `json:"trustline_liquidity_pool_id,omitempty"`
+	HomeDomain string `json:"home_domain"`
 }
 
-// ReservesChange — category RESERVES.
-type ReservesChange struct {
+// HomeDomainUpdatedChange — an existing home domain replaced by a different one.
+type HomeDomainUpdatedChange struct {
 	StateChangeBase
-	SponsoredAddress   *string `json:"sponsored_address,omitempty"`
-	SponsorAddress     *string `json:"sponsor_address,omitempty"`
-	SponsoredData      *string `json:"sponsored_data,omitempty"`
-	SponsoredTrustline *string `json:"sponsored_trustline,omitempty"`
-	ClaimableBalanceID *string `json:"claimable_balance_id,omitempty"`
-	LiquidityPoolID    *string `json:"liquidity_pool_id,omitempty"`
+	OldHomeDomain string `json:"old_home_domain"`
+	NewHomeDomain string `json:"new_home_domain"`
 }
 
-// BalanceAuthorizationChange — category BALANCE_AUTHORIZATION.
+// HomeDomainClearedChange — a home domain removed from the account.
+type HomeDomainClearedChange struct {
+	StateChangeBase
+	OldHomeDomain string `json:"old_home_domain"`
+}
+
+// DataEntryAddedChange — a data entry created on the account.
+type DataEntryAddedChange struct {
+	StateChangeBase
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// DataEntryUpdatedChange — an existing data entry whose value changed.
+type DataEntryUpdatedChange struct {
+	StateChangeBase
+	Name     string `json:"name"`
+	OldValue string `json:"old_value"`
+	NewValue string `json:"new_value"`
+}
+
+// DataEntryRemovedChange — a data entry removed from the account.
+type DataEntryRemovedChange struct {
+	StateChangeBase
+	Name     string `json:"name"`
+	OldValue string `json:"old_value"`
+}
+
+// AllowanceChange — a SEP-41 allowance approval.
+type AllowanceChange struct {
+	StateChangeBase
+	TokenID          string `json:"token_id"`
+	Spender          string `json:"spender"`
+	Amount           string `json:"amount"`
+	ExpirationLedger uint32 `json:"expiration_ledger"`
+}
+
+// TrustlineAddedChange — a trustline created. Exactly one of TokenID /
+// LiquidityPoolID is set.
+type TrustlineAddedChange struct {
+	StateChangeBase
+	TokenID         *string `json:"token_id,omitempty"`
+	LiquidityPoolID *string `json:"liquidity_pool_id,omitempty"`
+	Limit           string  `json:"limit"`
+}
+
+// TrustlineUpdatedChange — a trustline limit update. Exactly one of TokenID /
+// LiquidityPoolID is set.
+type TrustlineUpdatedChange struct {
+	StateChangeBase
+	TokenID         *string `json:"token_id,omitempty"`
+	LiquidityPoolID *string `json:"liquidity_pool_id,omitempty"`
+	OldLimit        string  `json:"old_limit"`
+	NewLimit        string  `json:"new_limit"`
+}
+
+// TrustlineRemovedChange — a trustline removed. Exactly one of TokenID /
+// LiquidityPoolID is set.
+type TrustlineRemovedChange struct {
+	StateChangeBase
+	TokenID         *string `json:"token_id,omitempty"`
+	LiquidityPoolID *string `json:"liquidity_pool_id,omitempty"`
+}
+
+// BalanceAuthorizationChange — authorization to hold or transact an asset
+// granted or revoked. Exactly one of TokenID / LiquidityPoolID is set; Flags is
+// omitted for SAC contract-holder authorization, which has no trustline flags.
 type BalanceAuthorizationChange struct {
 	StateChangeBase
-	BalanceAuthTokenID         *string  `json:"balance_auth_token_id,omitempty"`
-	BalanceAuthLiquidityPoolID *string  `json:"balance_auth_liquidity_pool_id,omitempty"`
-	Flags                      []string `json:"flags"`
+	TokenID         *string  `json:"token_id,omitempty"`
+	LiquidityPoolID *string  `json:"liquidity_pool_id,omitempty"`
+	Flags           []string `json:"flags,omitempty"`
 }
 
 // AccountTransaction is one transaction plus the calling account's operations

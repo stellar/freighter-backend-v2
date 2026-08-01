@@ -108,20 +108,24 @@ type Claims struct {
 }
 ```
 
-Constants: `MaxTokenLifetime = 15s`, `ClockSkewLeeway = 5s`. The verifier imposes no body-size
+Constants: `MaxTokenLifetime = 15s`. `ClockSkewLeeway` is the **default** clock-skew tolerance
+(`2m`), configurable per deployment via `--auth-clock-skew-leeway` / env `AUTH_CLOCK_SKEW_LEEWAY`
+and threaded into the verifier (`NewVerifier(leeway)`); widening it only widens which `iat`/`exp`
+values pass the timing gates before signature verification, never the signature check itself. The verifier imposes no body-size
 limit of its own — request bodies are bounded upstream by the `BodySizeLimit` middleware
 (`http.MaxBytesReader`), so it reads them in full rather than risk truncating the bytes it hashes.
 
-`ParseJWT(tokenString, methodAndPath, body)`:
+`parseJWT(tokenString, methodAndPath, body, leeway)` (the verifier passes its configured
+`leeway`; the exported `ParseJWT(tokenString, methodAndPath, body)` wraps it with the default):
 1. `ParseUnverified` to read `claims.Subject`.
-2. `claims.Validate(methodAndPath, body, MaxTokenLifetime)`:
+2. `claims.Validate(methodAndPath, body, MaxTokenLifetime, leeway)`:
    - `exp` and `iat` set; `exp - iat ≤ MaxTokenLifetime`;
-   - `iat` not in the future beyond `ClockSkewLeeway`, and `exp` not beyond
-     `now + MaxTokenLifetime + ClockSkewLeeway`;
+   - `iat` not in the future beyond `leeway`, and `exp` not beyond
+     `now + MaxTokenLifetime + leeway`;
    - `methodAndPath` matches `"<METHOD> <RequestURI>"` (binds the query string);
    - `bodyHash == HashBody(body)`.
 3. Decode `Subject` → `ed25519.PublicKey` (hex decoding to exactly 32 bytes).
-4. `jwtgo.ParseWithClaims(..., keyfunc→pubKey, WithValidMethods([]string{"EdDSA"}), WithLeeway(ClockSkewLeeway))`.
+4. `jwtgo.ParseWithClaims(..., keyfunc→pubKey, WithValidMethods([]string{"EdDSA"}), WithLeeway(leeway))`.
    `WithValidMethods` blocks `alg=none`/HS256 confusion attacks.
 
 `VerifyHTTPRequest(req) (userID string, err error)`:

@@ -39,7 +39,8 @@ func TestAuth_TruthTable(t *testing.T) {
 
 	validToken := func() string { return mintToken(t, priv, sub, methodAndPath, auth.MaxTokenLifetime, now) }
 	expiredToken := func() string {
-		return mintToken(t, priv, sub, methodAndPath, auth.MaxTokenLifetime, now.Add(-1*time.Minute))
+		// Issued an hour ago: expired well beyond any configured clock-skew leeway.
+		return mintToken(t, priv, sub, methodAndPath, auth.MaxTokenLifetime, now.Add(-1*time.Hour))
 	}
 	// Signed by a different key than the one declared in sub.
 	wrongKeyToken := func() string { return mintToken(t, otherPriv, sub, methodAndPath, auth.MaxTokenLifetime, now) }
@@ -75,7 +76,7 @@ func TestAuth_TruthTable(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			})
 
-			handler := Auth(auth.NewVerifier(), tc.mode, nil)(next)
+			handler := Auth(auth.NewVerifier(auth.ClockSkewLeeway), tc.mode, nil)(next)
 
 			r := httptest.NewRequest(http.MethodGet, authTestPath, nil)
 			if tc.bearer != "" {
@@ -113,7 +114,7 @@ func TestAuth_OversizedBodyReturns413(t *testing.T) {
 
 	reached := false
 	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })
-	handler := Auth(auth.NewVerifier(), auth.Required, nil)(next)
+	handler := Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Required, nil)(next)
 	handler.ServeHTTP(rr, r)
 
 	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
@@ -149,7 +150,7 @@ func TestAuth_ClientLabel(t *testing.T) {
 			reg := prometheus.NewRegistry()
 			m := metrics.NewAuth(reg)
 			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-			handler := Auth(auth.NewVerifier(), auth.Permissive, m)(next)
+			handler := Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, m)(next)
 
 			r := httptest.NewRequest(http.MethodGet, authTestPath, nil)
 			if tc.bearer != "" {

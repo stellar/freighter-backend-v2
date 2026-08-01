@@ -130,6 +130,65 @@ func TestServeCmd_AllowsEmptyDatabaseURLWhenDBDisabled(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 }
 
+func TestServeCmd_WalletBackendRoutesEnabledDefaultsTrue(t *testing.T) {
+	t.Parallel()
+
+	cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
+	routesEnabled, err := cmd.Flags().GetBool("wallet-backend-routes-enabled")
+	require.NoError(t, err)
+	assert.True(t, routesEnabled, "wallet-backend-routes-enabled should default to true")
+}
+
+// TestServeCmd_WalletBackendRoutesEnabledFalseFromEnv covers the path production actually
+// uses: prd disables the wallet-backend-fronted routes by setting
+// WALLET_BACKEND_ROUTES_ENABLED in the deployment, not by passing a CLI flag. The
+// api-package tests set AppConfig.WalletBackendRoutesEnabled directly, so they would
+// keep passing even if the flag were renamed or the env binding broke — and that
+// failure is fail-OPEN: both endpoints would stay registered in prd while the
+// manifest says they are off. This
+// asserts the whole chain (env var -> viper AutomaticEnv with the '-'->'_'
+// replacer -> bindFlags -> the bound config field). The literal
+// "WALLET_BACKEND_ROUTES_ENABLED" pins the env-var spelling kube depends on: renaming the flag
+// to a different word breaks this test, while a cosmetic '-'/'_' swap does not,
+// because the replacer maps both spellings onto the same variable.
+func TestServeCmd_WalletBackendRoutesEnabledFalseFromEnv(t *testing.T) {
+	// No t.Parallel(): t.Setenv is incompatible with parallel tests. DATABASE_URL is
+	// cleared and the DB disabled so boot validation can't fail for unrelated reasons.
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("WALLET_BACKEND_ROUTES_ENABLED", "false")
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--db-enabled=false"})
+
+	require.NoError(t, cmd.Execute())
+	assert.False(t, serveCmd.Cfg.AppConfig.WalletBackendRoutesEnabled,
+		"WALLET_BACKEND_ROUTES_ENABLED=false must reach AppConfig.WalletBackendRoutesEnabled; a true here means prd would still serve both routes")
+}
+
+// TestServeCmd_WalletBackendRoutesEnabledEnvTrueKeepsRoutesOn is the other half:
+// re-enabling in prd is done by flipping that same variable to "true" (or removing
+// it), so the binding has to work in both directions rather than only ever latching
+// off.
+func TestServeCmd_WalletBackendRoutesEnabledEnvTrueKeepsRoutesOn(t *testing.T) {
+	// No t.Parallel(): see above.
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("WALLET_BACKEND_ROUTES_ENABLED", "true")
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--db-enabled=false"})
+
+	require.NoError(t, cmd.Execute())
+	assert.True(t, serveCmd.Cfg.AppConfig.WalletBackendRoutesEnabled)
+}
+
 func TestServeCmd_RejectsMaxLedgerKeyAddressesAboveUpstreamCeiling(t *testing.T) {
 	t.Parallel()
 
@@ -280,4 +339,51 @@ func TestServeCmd_AcceptsStrictAuthMode(t *testing.T) {
 	cmd.SetArgs([]string{"--auth-mode", "strict", "--database-url", "postgres://localhost/test"})
 
 	require.NoError(t, cmd.Execute())
+}
+
+func TestServeCmd_RejectsNegativeAuthClockSkewLeeway(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--auth-clock-skew-leeway", "-1s"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--auth-clock-skew-leeway=-1s must be >= 0 and <= 10m")
+}
+
+func TestServeCmd_RejectsAuthClockSkewLeewayAbove10m(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--auth-clock-skew-leeway", "11m"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be >= 0 and <= 10m")
+}
+
+func TestServeCmd_AcceptsAuthClockSkewLeewayBoundaries(t *testing.T) {
+	t.Parallel()
+
+	// 0 and the 10m ceiling are both inclusive-valid.
+	for _, leeway := range []string{"0s", "10m"} {
+		serveCmd := &ServeCmd{Cfg: &config.Config{}}
+		cmd := serveCmd.Command()
+		cmd.RunE = func(*cobra.Command, []string) error { return nil }
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		// --database-url required to reach and pass the full validation chain.
+		cmd.SetArgs([]string{"--auth-clock-skew-leeway", leeway, "--database-url", "postgres://localhost/test"})
+
+		require.NoErrorf(t, cmd.Execute(), "leeway %s should be accepted", leeway)
+	}
 }

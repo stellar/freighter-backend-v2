@@ -29,7 +29,12 @@ type AppConfig struct {
 	// AuthMode selects JWT enforcement for gated routes: "permissive" (allow
 	// requests with no token through, reject invalid tokens) or "strict"
 	// (require a valid token). Parsed via auth.ParseMode; validated at startup.
-	AuthMode                       string
+	AuthMode string
+	// AuthClockSkewLeeway is the clock-skew tolerance applied to JWT iat/exp
+	// validation (--auth-clock-skew-leeway). Wider values tolerate more device
+	// clock drift but proportionally widen the token replay window. It does not
+	// affect signature verification. Defaults to auth.ClockSkewLeeway.
+	AuthClockSkewLeeway            time.Duration
 	SentryKey                      string
 	ProtocolsConfigPath            string
 	MeridianPayTreasureHuntAddress string
@@ -38,6 +43,22 @@ type AppConfig struct {
 	MaxRequestBodySize             int64
 	MaxBalanceAddresses            int
 	MaxLedgerKeyAddresses          int
+	// WalletBackendRoutesEnabled controls whether the wallet-backend-fronted routes
+	// are registered (--wallet-backend-routes-enabled / env
+	// WALLET_BACKEND_ROUTES_ENABLED, default true):
+	//
+	//	POST /api/v1/accounts/balances
+	//	GET  /api/v1/accounts/{address}/transactions
+	//
+	// When false neither is added to the mux, so both paths 404 exactly as an unknown
+	// path would: no handler runs and no wallet-backend call is attempted. Production
+	// sets it false while wallet-backend is unconfigured there — without a client both
+	// routes 500 on every request. Flipping it back on is an env-var change and a
+	// restart, not a release.
+	//
+	// One flag covers both because they share one dependency and one failure mode;
+	// enabling exactly one is never the correct state.
+	WalletBackendRoutesEnabled bool
 	// WalletBackendBalanceConcurrency caps the number of concurrent wallet-backend
 	// fetches per single /api/v1/accounts/balances request. The handler fans out to
 	// the per-address accountByAddress query, and this knob bounds the goroutine
