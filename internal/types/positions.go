@@ -1,0 +1,164 @@
+// ABOUTME: Response types for GET /api/v1/accounts/{address}/positions — the
+// ABOUTME: frontend-shaped view of an account's DeFi positions (Blend only today).
+package types
+
+import "context"
+
+// AccountPositions is the response body for the account positions endpoint.
+// One payload powers both the Position Home screen (header + per-pool rows)
+// and the Position Details screen (per-asset rows inside each pool): an
+// account holds positions in at most a handful of pools, so full detail is
+// always returned.
+//
+// Number conventions follow the wallet-backend upstream: USD/APY values are
+// nullable JSON numbers where null means "unavailable" (no fresh oracle
+// price), never zero; a genuinely zero value is 0. On-chain token amounts
+// are full-precision integer strings in the asset's smallest unit (scale by
+// Decimals for display).
+type AccountPositions struct {
+	// Address is the account this entry describes; one entry per requested
+	// address, in first-seen request order (duplicates collapsed).
+	Address string `json:"address"`
+	// TotalValueUSD is the account's net position value across pools
+	// (Σ pool NetUSD). Strict null propagation: if any pool's value is
+	// unavailable the total is null rather than a silent undercount —
+	// matching upstream's own convention for pool totals. 0 when the
+	// account has no positions.
+	TotalValueUSD *float64 `json:"total_value_usd"`
+	// NetAPY is the supplied-USD-weighted mean of the pools' net APYs
+	// (matching the base the per-pool rate is defined over); null when any
+	// input is unavailable or there is no supplied value to weight.
+	NetAPY *float64 `json:"net_apy"`
+	// Positions has one row per (protocol, pool). Always non-nil; empty when
+	// the account has no DeFi positions (including accounts unknown to the
+	// indexer — indistinguishable by design).
+	Positions []PoolPosition `json:"positions"`
+	// Backstop lists the account's Blend backstop deposits, one row per
+	// backed pool. Render-only in v1 (initiating backstop deposits is out of
+	// scope). Always non-nil.
+	Backstop []BlendBackstopRow `json:"backstop"`
+}
+
+// PoolPosition is one pool row. The common fields render a Position Home row
+// for any protocol; protocol-specific detail lives under a key named after
+// the protocol (only "blend" today), so adding a protocol later is additive.
+type PoolPosition struct {
+	Protocol string `json:"protocol"`
+	// ID is the pool's contract address.
+	ID string `json:"id"`
+	// Name is the pool's display name; null when the upstream metadata
+	// registry has no entry (clients fall back to a truncated ID).
+	Name *string `json:"name"`
+	// NetUSD is supplied minus borrowed for this pool.
+	NetUSD      *float64 `json:"net_usd"`
+	SuppliedUSD *float64 `json:"supplied_usd"`
+	BorrowedUSD *float64 `json:"borrowed_usd"`
+	// NetAPY is the account's net rate in this pool as computed upstream:
+	// supply earnings minus borrow interest over TOTAL SUPPLIED USD (the
+	// blend-sdk-js convention the Blend UI shows).
+	NetAPY *float64             `json:"net_apy"`
+	Blend  *BlendPositionDetail `json:"blend,omitempty"`
+}
+
+// BlendPositionDetail is the Blend-specific detail for one pool. Reserve
+// rows with no current balance on either side are filtered out (upstream
+// emits fully-exited rows to carry realized-earnings history; the display
+// list only shows live positions).
+type BlendPositionDetail struct {
+	// Supply has one row per asset the account deposits (plain supply and
+	// supply-as-collateral combined; the split is preserved per row).
+	Supply []BlendSupplyRow `json:"supply"`
+	// Borrow has one row per asset the account owes.
+	Borrow []BlendBorrowRow `json:"borrow"`
+}
+
+// BlendSupplyRow is one asset the account supplies in a pool.
+type BlendSupplyRow struct {
+	// AssetID is the asset's contract address.
+	AssetID string `json:"asset_id"`
+	// Symbol/Name/Decimals are nullable registry metadata.
+	Symbol   *string `json:"symbol"`
+	Name     *string `json:"name"`
+	Decimals *int32  `json:"decimals"`
+	// SuppliedTokens is the plain-supply portion, CollateralTokens the
+	// portion posted as collateral; TotalTokens is their sum. All raw units.
+	SuppliedTokens   string `json:"supplied_tokens"`
+	CollateralTokens string `json:"collateral_tokens"`
+	TotalTokens      string `json:"total_tokens"`
+	// USDValue is the current USD value of TotalTokens.
+	USDValue *float64 `json:"usd_value"`
+	// APY is the current supply interest rate; EmissionsAPR is the BLND
+	// emission rate on the reserve's supply side (a pool-wide stream rate:
+	// 0 = no active stream, null = stream active but unpriceable).
+	APY          *float64 `json:"apy"`
+	EmissionsAPR *float64 `json:"emissions_apr"`
+	// InterestEarned is lifetime interest in raw token units (pure
+	// interest: token-denominated upstream, so asset price movement never
+	// contaminates it). InterestEarnedUSD converts it at today's price;
+	// null when the price or decimals are unavailable.
+	InterestEarned    string   `json:"interest_earned"`
+	InterestEarnedUSD *float64 `json:"interest_earned_usd"`
+	// ClaimableBLND is uncollected BLND emissions in raw units;
+	// ClaimableUSD is its upstream-computed USD value.
+	ClaimableBLND string   `json:"claimable_blnd"`
+	ClaimableUSD  *float64 `json:"claimable_usd"`
+	// PriceUSD is the pool oracle's per-unit price for this asset.
+	PriceUSD *float64 `json:"price_usd"`
+}
+
+// BlendBorrowRow is one asset the account borrows in a pool.
+type BlendBorrowRow struct {
+	AssetID  string  `json:"asset_id"`
+	Symbol   *string `json:"symbol"`
+	Name     *string `json:"name"`
+	Decimals *int32  `json:"decimals"`
+	// BorrowedTokens is the debt in raw token units.
+	BorrowedTokens string `json:"borrowed_tokens"`
+	// USDValue is the current USD value of the debt.
+	USDValue *float64 `json:"usd_value"`
+	// APY is the current borrow interest rate; EmissionsAPR is the BLND
+	// emission rate on the reserve's borrow side.
+	APY          *float64 `json:"apy"`
+	EmissionsAPR *float64 `json:"emissions_apr"`
+	PriceUSD     *float64 `json:"price_usd"`
+}
+
+// BlendBackstopRow is the account's backstop deposit in one pool: first-loss
+// capital earning BLND emissions. Shares is the ACTIVE (non-queued) share
+// balance; LPTokens/USDValue value the whole deposit including
+// queued-for-withdrawal shares (queued shares keep earning pool interest and
+// remain slashable until withdrawn).
+type BlendBackstopRow struct {
+	// PoolID is the pool this backstop deposit backs.
+	PoolID   string  `json:"pool_id"`
+	PoolName *string `json:"pool_name"`
+	// Shares (active) and LPTokens (whole deposit) are raw integer strings.
+	Shares   string   `json:"shares"`
+	LPTokens string   `json:"lp_tokens"`
+	USDValue *float64 `json:"usd_value"`
+	// ClaimableBLND is uncollected BLND emissions (raw units); ClaimableUSD
+	// its upstream-computed value.
+	ClaimableBLND string   `json:"claimable_blnd"`
+	ClaimableUSD  *float64 `json:"claimable_usd"`
+	// Q4W lists queued withdrawals. Always non-nil.
+	Q4W []BlendQ4WRow `json:"q4w"`
+}
+
+// BlendQ4WRow is one queued backstop withdrawal, unlocking at Expiration
+// (unix seconds). Amount is in backstop shares.
+type BlendQ4WRow struct {
+	Amount     string   `json:"amount"`
+	LPTokens   string   `json:"lp_tokens"`
+	USDValue   *float64 `json:"usd_value"`
+	Expiration int64    `json:"expiration"`
+}
+
+// PositionsService assembles the account positions view.
+type PositionsService interface {
+	Service
+	// GetAccountsPositions fans out one wallet-backend positions fetch per
+	// unique address, mirroring the balances endpoint's semantics: unknown
+	// accounts are normal per-address outcomes (empty positions); any
+	// systemic upstream failure fails the whole request.
+	GetAccountsPositions(ctx context.Context, addresses []string, network string) ([]*AccountPositions, error)
+}

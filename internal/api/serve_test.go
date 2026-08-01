@@ -198,6 +198,7 @@ var walletBackendRoutes = []struct {
 }{
 	{"balances", http.MethodPost, "/api/v1/accounts/balances"},
 	{"account-history", http.MethodGet, "/api/v1/accounts/GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF/transactions"},
+	{"positions", http.MethodPost, "/api/v1/accounts/positions"},
 }
 
 // TestApiServer_initHandlers_WalletBackendRoutesDisabledNotRegistered pins the off
@@ -250,9 +251,9 @@ func TestApiServer_initHandlers_WalletBackendRoutesEnabledStayGated(t *testing.T
 }
 
 // TestApiServer_initHandlers_WalletBackendRoutesGatedTogether pins the "one flag,
-// both routes" decision. The two share a dependency and a failure mode, so a change
-// that gated only one — leaving the other publicly 500ing in prd, which is the exact
-// bug this flag exists to close — would otherwise pass every test above.
+// every route" decision. All three share a dependency and a failure mode, so a
+// change that gated only some — leaving the rest publicly 500ing in prd, which is
+// the exact bug this flag exists to close — would otherwise pass every test above.
 func TestApiServer_initHandlers_WalletBackendRoutesGatedTogether(t *testing.T) {
 	cfg := testCfg("permissive")
 	cfg.AppConfig.WalletBackendRoutesEnabled = false
@@ -271,6 +272,7 @@ func TestApiServer_initHandlers_WalletBackendRoutesGatedTogether(t *testing.T) {
 	assert.Equal(t, map[string]bool{
 		"POST /api/v1/accounts/balances":              true,
 		"GET /api/v1/accounts/{address}/transactions": true,
+		"POST /api/v1/accounts/positions":             true,
 	}, disabled, "exactly the wallet-backend-fronted routes must be disabled by the flag")
 }
 

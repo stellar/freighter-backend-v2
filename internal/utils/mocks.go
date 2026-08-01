@@ -186,6 +186,28 @@ func (m *MockWalletBackendService) GetBlendPools(ctx context.Context, network st
 	return []wbtypes.BlendPool{}, nil
 }
 
+// MockPositionsService stubs types.PositionsService for handler tests.
+type MockPositionsService struct {
+	GetAccountsPositionsResult []*types.AccountPositions
+	GetAccountsPositionsError  error
+	GetAccountsPositionsFunc   func(ctx context.Context, addresses []string, network string) ([]*types.AccountPositions, error)
+}
+
+func (m *MockPositionsService) Name() string { return "mock-positions" }
+
+func (m *MockPositionsService) GetAccountsPositions(ctx context.Context, addresses []string, network string) ([]*types.AccountPositions, error) {
+	if m.GetAccountsPositionsFunc != nil {
+		return m.GetAccountsPositionsFunc(ctx, addresses, network)
+	}
+	if m.GetAccountsPositionsError != nil {
+		return nil, m.GetAccountsPositionsError
+	}
+	if m.GetAccountsPositionsResult != nil {
+		return m.GetAccountsPositionsResult, nil
+	}
+	return []*types.AccountPositions{}, nil
+}
+
 type MockPricesService struct {
 	GetPricesFunc     func(ctx context.Context, tokens []string, network string) (map[string]*types.PriceEntry, error)
 	GetPricesOverride map[string]*types.PriceEntry

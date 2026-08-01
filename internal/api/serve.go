@@ -228,6 +228,13 @@ func (s *ApiServer) routes() ([]route, error) {
 	}
 	whoamiHandler := handlers.NewWhoamiHandler()
 
+	positionsService := services.NewPositionsService(
+		s.walletBackendService,
+		s.cfg.AppConfig.WalletBackendBalanceConcurrency,
+		s.appMetrics.Service,
+	)
+	accountPositionsHandler := handlers.NewAccountPositionsHandler(positionsService, s.cfg.AppConfig.MaxBalanceAddresses)
+
 	return []route{
 		// Health/liveness/readiness probes: gated=false, registered BARE — never
 		// wrapped by Auth. K8s and the docker-compose wget healthcheck cannot present
@@ -247,19 +254,21 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodPost, "/api/v1/ledger-key/accounts", handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts), true, true},
 		{http.MethodGet, "/api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags), true, true},
 		// The wallet-backend-fronted routes, config-gated together by
-		// --wallet-backend-routes-enabled. These are the ONLY two routes that touch
-		// walletBackendService, and both fail identically when it is unconfigured:
-		// configureNetworkClient returns nil and the handler errors before any network
-		// call, so every request 500s. wallet-backend is configured only in dev, so
-		// they are disabled in production until that upstream is wired up.
-		// enabled=false leaves both paths 404ing.
+		// --wallet-backend-routes-enabled. These are the routes that touch
+		// walletBackendService (balances, history, and positions), and all fail
+		// identically when it is unconfigured: configureNetworkClient returns nil
+		// and the handler errors before any network call, so every request 500s.
+		// wallet-backend is configured only in dev, so they are disabled in
+		// production until that upstream is wired up. enabled=false leaves every
+		// path 404ing.
 		//
 		// They share one flag deliberately: they share one dependency and one failure
-		// mode, so there is no state where enabling exactly one is correct. If a route
+		// mode, so there is no state where enabling a subset is correct. If a route
 		// is ever added here that can work without wallet-backend, give it its own
 		// gate rather than widening this one.
 		{http.MethodPost, "/api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
 		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
+		{http.MethodPost, "/api/v1/accounts/positions", handlers.CustomHandler(accountPositionsHandler.GetAccountsPositions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
 
 		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true, true},
 		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, true},
