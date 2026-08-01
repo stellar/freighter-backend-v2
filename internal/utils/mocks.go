@@ -3,6 +3,8 @@ package utils
 import (
 	"context"
 
+	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
+
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/go-stellar-sdk/clients/rpcclient"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
@@ -120,6 +122,14 @@ type MockWalletBackendService struct {
 	GetAccountTransactionsError error
 	// GetAccountTransactionsFunc overrides Result/Error when set.
 	GetAccountTransactionsFunc func(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[*types.AccountTransaction], error)
+
+	// Blend method stubs follow the same Result/Error/Func precedence.
+	GetBlendPositionsResult *wbtypes.BlendAccountPositions
+	GetBlendPositionsError  error
+	GetBlendPositionsFunc   func(ctx context.Context, address, network string) (*wbtypes.BlendAccountPositions, error)
+
+	GetBlendPoolsResult []wbtypes.BlendPool
+	GetBlendPoolsError  error
 }
 
 func (m *MockWalletBackendService) Name() string {
@@ -151,6 +161,29 @@ func (m *MockWalletBackendService) GetAccountTransactions(ctx context.Context, a
 		return nil, m.GetAccountTransactionsError
 	}
 	return m.GetAccountTransactionsResult, nil
+}
+
+func (m *MockWalletBackendService) GetBlendPositions(ctx context.Context, address, network string) (*wbtypes.BlendAccountPositions, error) {
+	if m.GetBlendPositionsFunc != nil {
+		return m.GetBlendPositionsFunc(ctx, address, network)
+	}
+	if m.GetBlendPositionsError != nil {
+		return nil, m.GetBlendPositionsError
+	}
+	if m.GetBlendPositionsResult != nil {
+		return m.GetBlendPositionsResult, nil
+	}
+	return &wbtypes.BlendAccountPositions{Pools: []wbtypes.BlendPoolPosition{}}, nil
+}
+
+func (m *MockWalletBackendService) GetBlendPools(ctx context.Context, network string) ([]wbtypes.BlendPool, error) {
+	if m.GetBlendPoolsError != nil {
+		return nil, m.GetBlendPoolsError
+	}
+	if m.GetBlendPoolsResult != nil {
+		return m.GetBlendPoolsResult, nil
+	}
+	return []wbtypes.BlendPool{}, nil
 }
 
 type MockPricesService struct {
