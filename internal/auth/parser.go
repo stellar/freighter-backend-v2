@@ -19,6 +19,15 @@ import (
 // <sub>" — which is exactly the user identity. All validation failures wrap
 // ErrUnauthorized; an expired token additionally surfaces as *ExpiredTokenError.
 func ParseJWT(tokenString, methodAndPath string, body []byte) (*Claims, error) {
+	return parseJWT(tokenString, methodAndPath, body, ClockSkewLeeway)
+}
+
+// parseJWT is ParseJWT with an explicit clock-skew leeway, threaded in from the
+// verifier so it can be configured per deployment (--auth-clock-skew-leeway).
+// Widening the leeway only widens which iat/exp values pass the timing gates
+// before signature verification; it never bypasses the signature check below, so
+// a forged-signature token is still rejected regardless of leeway.
+func parseJWT(tokenString, methodAndPath string, body []byte, leeway time.Duration) (*Claims, error) {
 	claims := &Claims{}
 
 	// Read the claims without verifying the signature so we can learn the
@@ -28,7 +37,7 @@ func ParseJWT(tokenString, methodAndPath string, body []byte) (*Claims, error) {
 	}
 
 	// Validate already returns a *VerificationError with a specific reason.
-	if err := claims.Validate(methodAndPath, body, MaxTokenLifetime); err != nil {
+	if err := claims.Validate(methodAndPath, body, MaxTokenLifetime, leeway); err != nil {
 		return nil, err
 	}
 
@@ -42,7 +51,7 @@ func ParseJWT(tokenString, methodAndPath string, body []byte) (*Claims, error) {
 		// Pin the algorithm to EdDSA to prevent alg-confusion (e.g. alg=none or
 		// an HS256 token forged with the public key as the HMAC secret).
 		jwtgo.WithValidMethods([]string{"EdDSA"}),
-		jwtgo.WithLeeway(ClockSkewLeeway),
+		jwtgo.WithLeeway(leeway),
 	)
 	if err != nil {
 		if errors.Is(err, jwtgo.ErrTokenExpired) {
