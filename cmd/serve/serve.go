@@ -51,6 +51,9 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if _, err := auth.ParseMode(s.Cfg.AppConfig.AuthMode); err != nil {
 				return fmt.Errorf("--auth-mode: %w", err)
 			}
+			if d := s.Cfg.AppConfig.AuthClockSkewLeeway; d < 0 || d > 10*time.Minute {
+				return fmt.Errorf("--auth-clock-skew-leeway=%s must be >= 0 and <= 10m", d)
+			}
 			// The database is validated only when enabled. With --db-enabled=false
 			// the service runs without a database (DB-backed features report
 			// unavailable), so an empty DATABASE_URL must not fail boot.
@@ -85,6 +88,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MetricsPort, "metrics-port", 9090, "The port of the internal metrics server (Prometheus /metrics)")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.Mode, "mode", "development", "The mode of the server")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.AuthMode, "auth-mode", "permissive", "JWT auth enforcement for gated routes: \"permissive\" (allow no-token requests, reject invalid tokens) or \"strict\" (require a valid token)")
+	cmd.Flags().DurationVar(&s.Cfg.AppConfig.AuthClockSkewLeeway, "auth-clock-skew-leeway", auth.ClockSkewLeeway, "Clock-skew tolerance for JWT iat/exp validation (e.g. 5s, 2m). Wider values tolerate more device clock drift but proportionally widen the token replay window; signature verification is unaffected.")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.SentryKey, "sentry-key", "", "The Sentry key")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.ProtocolsConfigPath, "protocols-config-path", "/app/config/protocols.json", "The path to the protocols config file while lists all supported protocols in Freighter")
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.MeridianPayTreasureHuntAddress, "meridian-pay-treasure-hunt-address", "", "The Meridian Pay Treasure Hunt collection address")
@@ -92,6 +96,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.AppConfig.MeridianPayStellarHouseAddress, "meridian-pay-stellar-house-address", "", "The Meridian Pay Stellar House collection address")
 	cmd.Flags().Int64Var(&s.Cfg.AppConfig.MaxRequestBodySize, "max-request-body-size", 1<<20, "Maximum request body size in bytes (default: 1MB)")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxBalanceAddresses, "max-balance-addresses", 100, "Maximum number of addresses allowed in account balances request")
+	cmd.Flags().BoolVar(&s.Cfg.AppConfig.WalletBackendRoutesEnabled, "wallet-backend-routes-enabled", true, "Register the wallet-backend-fronted routes (POST /api/v1/accounts/balances and GET /api/v1/accounts/{address}/transactions). Set false (env WALLET_BACKEND_ROUTES_ENABLED) to leave both unregistered so their paths 404 — used where wallet-backend is not configured, since without it both routes 500 on every request.")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.MaxLedgerKeyAddresses, "max-ledger-key-addresses", 100, "Maximum number of public keys allowed in a ledger-key/accounts request")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.WalletBackendBalanceConcurrency, "wallet-backend-balance-concurrency", 10, "Per-request maximum number of concurrent wallet-backend balance fetches (the /accounts/balances handler fans out to one accountByAddress call per address)")
 	cmd.Flags().IntVar(&s.Cfg.AppConfig.AccountHistoryDefaultLimit, "account-history-default-limit", 20, "Default page size for GET /accounts/{address}/transactions")
