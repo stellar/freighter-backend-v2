@@ -33,13 +33,45 @@ func (e *ExpiredTokenError) Unwrap() error { return e.Err }
 // Is lets errors.Is(err, ErrUnauthorized) match an ExpiredTokenError.
 func (e *ExpiredTokenError) Is(target error) bool { return target == ErrUnauthorized }
 
+// ClockAheadError marks a token whose claims are well-formed but dated further
+// into the future than the clock-skew leeway allows — the mirror of
+// ExpiredTokenError. It wraps ErrUnauthorized so callers that don't care about
+// the distinction still treat it as a 401.
+//
+// Unlike ExpiredTokenError this is raised during Claims.Validate, i.e. BEFORE
+// signature verification, so it carries no proof of who signed the token.
+type ClockAheadError struct {
+	AheadBy time.Duration
+	Err     error
+}
+
+func (e *ClockAheadError) Error() string {
+	return fmt.Sprintf("token clock ahead by %s: %v", e.AheadBy, e.Err)
+}
+
+func (e *ClockAheadError) Unwrap() error { return e.Err }
+
+// Is lets errors.Is(err, ErrUnauthorized) match a ClockAheadError.
+func (e *ClockAheadError) Is(target error) bool { return target == ErrUnauthorized }
+
 // Verification-failure reason labels. Bounded, low-cardinality, and safe for
 // metrics/logging — they are fixed categories that never carry token, body, or
 // request-value data.
 const (
-	ReasonExpired       = "expired"         // exp in the past (beyond leeway)
-	ReasonBadSignature  = "bad_signature"   // signature/alg verification failed
-	ReasonBadTiming     = "bad_timing"      // missing/inconsistent exp/iat, lifetime too long, exp too far future
+	ReasonExpired      = "expired"       // exp in the past (beyond leeway) — a LAGGING client clock
+	ReasonBadSignature = "bad_signature" // signature/alg verification failed
+	// ReasonClockAhead is a client clock running FAST: iat, or exp, is further in
+	// the future than the leeway allows. It is the mirror of ReasonExpired, split
+	// out of ReasonBadTiming so a wrong clock is distinguishable from a malformed
+	// token — both are "timing" failures, but only this one is a clock symptom,
+	// and conflating them makes the permitted-skew rate unreadable.
+	//
+	// Unlike ReasonExpired this is assigned BEFORE signature verification (see
+	// parser.go), so it does not imply the token was signed by sub. That is safe
+	// where it is used — permitting attaches no userID — but it means this reason
+	// alone is not evidence of a real user.
+	ReasonClockAhead    = "clock_ahead"
+	ReasonBadTiming     = "bad_timing"      // missing/inconsistent exp/iat, or lifetime too long
 	ReasonBadMethodPath = "bad_method_path" // methodAndPath claim does not match the request
 	ReasonBadBodyHash   = "bad_body_hash"   // bodyHash claim does not match the request body
 	ReasonBadSubject    = "bad_subject"     // subject is not a valid hex Ed25519 public key
@@ -69,6 +101,10 @@ func Reason(err error) string {
 	var expired *ExpiredTokenError
 	if errors.As(err, &expired) {
 		return ReasonExpired
+	}
+	var ahead *ClockAheadError
+	if errors.As(err, &ahead) {
+		return ReasonClockAhead
 	}
 	var ve *VerificationError
 	if errors.As(err, &ve) {

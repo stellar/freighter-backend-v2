@@ -237,7 +237,9 @@ func TestParseJWT_FutureIssuedAt(t *testing.T) {
 	_, err := ParseJWT(token, testMethodAndPath, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrUnauthorized)
-	assert.Equal(t, ReasonBadTiming, Reason(err))
+	// A fast clock is ReasonClockAhead, not the generic ReasonBadTiming: the
+	// claims are well-formed, they just describe a future moment.
+	assert.Equal(t, ReasonClockAhead, Reason(err))
 }
 
 // --- VerifyHTTPRequest ---
@@ -430,10 +432,10 @@ func TestVerifyHTTPRequest_UsesConfiguredLeeway(t *testing.T) {
 		return newRequest(t, http.MethodGet, "/api/v1/auth/whoami", nil, token)
 	}
 
-	// Default verifier: token is outside the window -> rejected as bad_timing.
+	// Default verifier: token is outside the window -> rejected as clock_ahead.
 	_, err := NewVerifier(ClockSkewLeeway).VerifyHTTPRequest(newReq())
 	require.Error(t, err)
-	assert.Equal(t, ReasonBadTiming, Reason(err))
+	assert.Equal(t, ReasonClockAhead, Reason(err))
 
 	// Verifier built with a leeway wide enough to cover it -> accepted.
 	id, err := NewVerifier(beyond + time.Minute).VerifyHTTPRequest(newReq())
@@ -442,7 +444,7 @@ func TestVerifyHTTPRequest_UsesConfiguredLeeway(t *testing.T) {
 }
 
 // A wider leeway accepts tokens the default leeway rejects on timing — both a
-// fast clock (future iat -> bad_timing) and a lagging clock (past exp -> expired).
+// fast clock (future iat -> clock_ahead) and a lagging clock (past exp -> expired).
 func TestParseJWT_WideLeewayAcceptsClockSkew(t *testing.T) {
 	_, priv, sub := newKeypair(t)
 	// Skew each token just past the default leeway, then verify with a leeway
@@ -451,11 +453,11 @@ func TestParseJWT_WideLeewayAcceptsClockSkew(t *testing.T) {
 	beyond := ClockSkewLeeway + time.Minute
 	wide := ClockSkewLeeway + 3*time.Minute
 
-	// Fast clock: iat past the default future bound -> bad_timing by default...
+	// Fast clock: iat past the default future bound -> clock_ahead by default...
 	fast := mint(t, priv, skewedClaims(sub, testMethodAndPath, nil, beyond))
 	_, err := ParseJWT(fast, testMethodAndPath, nil)
 	require.Error(t, err)
-	assert.Equal(t, ReasonBadTiming, Reason(err))
+	assert.Equal(t, ReasonClockAhead, Reason(err))
 	// ...accepted with a wider leeway.
 	claims, err := parseJWT(fast, testMethodAndPath, nil, wide)
 	require.NoError(t, err)
@@ -512,5 +514,5 @@ func TestParseJWT_DefaultWrapperUsesDefaultLeeway(t *testing.T) {
 	bad := mint(t, priv, skewedClaims(sub, testMethodAndPath, nil, ClockSkewLeeway+2*time.Second))
 	_, err = ParseJWT(bad, testMethodAndPath, nil)
 	require.Error(t, err)
-	assert.Equal(t, ReasonBadTiming, Reason(err))
+	assert.Equal(t, ReasonClockAhead, Reason(err))
 }

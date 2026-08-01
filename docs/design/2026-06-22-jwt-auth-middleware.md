@@ -37,32 +37,29 @@ Shipped Freighter clients today send **no** JWT; newer client versions send a JW
 To avoid breaking old clients, auth has two modes, selected by one global config value
 (`AUTH_MODE` / `--auth-mode`, default `permissive`):
 
-| Mode | No `Authorization` header | Header present, valid | Invalid: `expired` | Invalid: any other reason |
+| Mode | No `Authorization` header | Valid | Invalid: wrong clock | Invalid: any other reason |
 | --- | --- | --- | --- | --- |
 | **permissive** (default) | pass (anonymous, no `userID`) | pass (+`userID`) | pass (anonymous, no `userID`) | **401** |
 | **strict** (`auth.Required`) | **401** | pass (+`userID`) | **401** | **401** |
 
-The permitted column is exactly `reason="expired"` — no other reason, timing-related or not.
+"Wrong clock" is exactly two reasons, the two directions a clock can be wrong:
 
-That narrowness is load-bearing rather than incidental. `expired` originates from
-`jwtgo.ParseWithClaims`, and jwt/v5 returns on signature failure *before* it validates claims, so an
-`expired` classification implies the signature verified: a genuine holder of `sub`'s private key
-whose clock lags. Every other reason — including **`bad_timing`, which is also a clock symptom** —
-comes out of `Claims.Validate`, which runs *before* signature verification (`auth/parser.go`). A
-forged token dated into the future is classified `bad_timing` and never reaches the signature check
-at all, so permitting on that reason would carry no proof of who signed it. `bad_timing` is also not
-purely a clock signal: it covers missing `exp`/`iat`, `exp` preceding `iat`, and over-long
-lifetimes.
+| reason | meaning | signature verified? |
+| --- | --- | --- |
+| `expired` | clock lagging — `exp` already past | **yes** — raised by `jwtgo.ParseWithClaims`, and jwt/v5 returns on signature failure *before* validating claims |
+| `clock_ahead` | clock fast — `iat`/`exp` too far ahead | **no** — raised in `Claims.Validate`, which runs first |
 
-Permitting `bad_timing` would not be a privilege escalation — no `userID` is attached either way, so
-the request is equivalent to one with no `Authorization` header — but it would falsify the "a bad
-signature always stays loud" contract above and let forged tokens inflate the `invalid_permitted`
-counter that gates the permissive→strict flip.
+`clock_ahead` was split out of `bad_timing` for this. What remains in `bad_timing` — missing
+`exp`/`iat`, `exp` preceding `iat`, over-long lifetimes — is a malformed or abusive token rather
+than a wrong clock, and is still rejected. Serving those would make the permitted-skew rate
+meaningless in the exact counter that gates the strict flip.
 
-**Known gap:** a clock running *fast* by more than the leeway is `bad_timing`, so it still 401s.
-Accepted deliberately — in the first 24h of real JWT traffic `bad_timing` was 0 against 335
-`expired`. Closing it safely would need a signature-verified, skew-specific reason, i.e. reordering
-`parseJWT` to verify before validating claims, which the data does not justify.
+Because `clock_ahead` precedes signature verification, a **forged** token dated into the future is
+served too. That is safe rather than merely tolerated: permitting attaches no `userID`, so the
+request is byte-for-byte equivalent to one carrying no `Authorization` header — which these routes
+already serve. An attacker gains nothing they could not have by sending no token at all. The cost is
+measurement, not access: read `invalid_permitted{reason="clock_ahead"}` as an upper bound on
+fast-clock clients, not an exact count.
 
 This table originally rejected *every* present-but-invalid token in both modes, on the reasoning
 that "only updated clients send tokens, so a bad token is a real bug or attack." That reasoning
@@ -76,8 +73,12 @@ client sent no token at all, which defeats the purpose of permissive mode.
 
 Note that rejecting was never what produced the adoption signal — `RecordAuth` fires before the
 render decision, so the metric and log are identical either way. Enforcement was coupled to
-measurement for no reason. Permitted timing failures are recorded under a distinct `result` label
-(`invalid_permitted`) precisely so that signal stays readable.
+measurement for no reason.
+
+Both clock directions are permitted even though prod showed only lagging clocks. That sample was
+five devices, which is far too small to conclude fast clocks do not occur, and a misconfigured clock
+is a priori about as likely to be ahead as behind. Handling one direction and not the other would be
+fitting the rule to the sample rather than to the problem.
 
 **Strict stays fail-closed for everything, timing included.** It has no anonymous path to fall back
 to, so this is a rollout-window mitigation only: skewed clients must be fixed client-side (deriving
@@ -215,13 +216,13 @@ logging middleware.
 
 - Metric: `freighter_auth_requests_total{result, reason}` counter.
   - `result ∈ {authenticated, anonymous, rejected, invalid_permitted}` — adoption % during rollout.
-    `invalid_permitted` is an **`expired`** token served anonymously under permissive (see the mode
-    table above) — and only that reason, so every request counted is signature-verified.
+    `invalid_permitted` is a wrong-clock token (`expired` or `clock_ahead`) served anonymously under
+    permissive — see the mode table above for which of the two implies a verified signature.
     It is separate from both `rejected` (these requests succeed) and `anonymous` (a
     client sending a broken token is a different population from one sending none). **Anything
     watching the invalid-token rate — alerts, strict-flip readiness — must sum it with `rejected`,
     or permitted skew will read as having disappeared rather than as still happening.**
-  - `reason ∈ {ok, no_token, expired, bad_signature, bad_timing, bad_method_path, bad_body_hash,
+  - `reason ∈ {ok, no_token, expired, clock_ahead, bad_signature, bad_timing, bad_method_path, bad_body_hash,
     bad_subject, malformed, invalid, too_large, internal}` — a bounded set of fixed *categories*
     (never a request value like the path or body hash), so rejection spikes can be triaged by cause
     without high label cardinality.

@@ -68,13 +68,22 @@ func (c *Claims) Validate(methodAndPath string, body []byte, maxLifetime, leeway
 	// validates exp/nbf but does not reject a future iat, so without this a signer
 	// could date a token ahead of now (e.g. iat=exp=now+lifetime+leeway) and have
 	// it accepted, stretching the acceptance window past the intended ±skew.
+	// These two are ReasonClockAhead, not ReasonBadTiming: the claims are
+	// well-formed and self-consistent, they just describe a moment further ahead
+	// than we allow — i.e. a client clock running fast, the mirror of an expired
+	// token's lagging clock. The checks above stay ReasonBadTiming because they
+	// indicate a malformed or abusive token rather than a wrong clock, and callers
+	// (see middleware.Auth) treat the two very differently.
+	//
+	// AheadBy carries the overshoot so the magnitude is diagnosable from logs, the
+	// same way ExpiredTokenError.ExpiredBy is for lagging clocks.
 	if c.IssuedAt.After(now.Add(leeway)) {
-		return &VerificationError{Reason: ReasonBadTiming, Err: errors.New("iat is in the future beyond the allowed skew")}
+		return &ClockAheadError{AheadBy: c.IssuedAt.Sub(now), Err: errors.New("iat is in the future beyond the allowed skew")}
 	}
 	// Reject tokens dated implausibly far in the future. exp can legitimately be
 	// up to one full lifetime ahead, plus skew leeway.
 	if c.ExpiresAt.After(now.Add(maxLifetime + leeway)) {
-		return &VerificationError{Reason: ReasonBadTiming, Err: errors.New("exp is too far in the future")}
+		return &ClockAheadError{AheadBy: c.ExpiresAt.Sub(now.Add(maxLifetime)), Err: errors.New("exp is too far in the future")}
 	}
 
 	if c.MethodAndPath != strings.TrimSpace(methodAndPath) {

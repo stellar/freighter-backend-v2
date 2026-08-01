@@ -89,26 +89,88 @@ func TestAuth_PermissiveServesEveryObservedProdClockLag(t *testing.T) {
 	}
 }
 
-// Sanity floor: a lag far beyond anything observed is still served, so the fix
-// is not quietly bounded by some larger threshold the way a leeway would be.
-// This is the property that distinguishes it from widening --auth-clock-skew-leeway.
-func TestAuth_PermissiveServesArbitrarilyLargeClockLag(t *testing.T) {
+// Sanity floor, in BOTH directions: an offset far beyond anything observed is
+// still served, so the fix is not quietly bounded by some larger threshold the
+// way a leeway would be. This is the property that distinguishes it from
+// widening --auth-clock-skew-leeway — there is no number left to re-tune,
+// because freshness is no longer what decides whether these requests are
+// answered.
+//
+// The negative (fast-clock) cases matter more than they look. Prod happened to
+// show only lagging clocks, but that was 5 devices — nowhere near enough to
+// conclude fast clocks do not exist, and a clock set wrong is a priori about as
+// likely to be ahead as behind. These rows are what stop the fix from being
+// silently fitted to a sample of five.
+func TestAuth_PermissiveServesArbitrarilyLargeClockOffsetEitherDirection(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
 	sub := hex.EncodeToString(pub)
 
-	for _, lag := range []time.Duration{24 * time.Hour, 30 * 24 * time.Hour, 365 * 24 * time.Hour} {
-		token := mintToken(t, priv, sub, "GET "+authTestPath, auth.MaxTokenLifetime, time.Now().Add(-lag))
-		reached := false
-		next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached = true; w.WriteHeader(http.StatusOK) })
-		handler := Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, nil)(next)
+	offsets := []time.Duration{
+		-365 * 24 * time.Hour, -30 * 24 * time.Hour, -24 * time.Hour, // lagging  -> expired
+		24 * time.Hour, 30 * 24 * time.Hour, 365 * 24 * time.Hour, // fast     -> clock_ahead
+	}
+
+	for _, offset := range offsets {
+		direction, wantReason := "lagging", "expired"
+		if offset > 0 {
+			direction, wantReason = "fast", auth.ReasonClockAhead
+		}
+
+		reg := prometheus.NewRegistry()
+		m := metrics.NewAuth(reg)
+		token := mintToken(t, priv, sub, "GET "+authTestPath, auth.MaxTokenLifetime, time.Now().Add(offset))
+
+		reached, hasUser := false, false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reached = true
+			_, hasUser = auth.UserIDFromContext(r.Context())
+			w.WriteHeader(http.StatusOK)
+		})
+		handler := Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, m)(next)
 
 		r := httptest.NewRequest(http.MethodGet, authTestPath, nil)
 		r.Header.Set("Authorization", "Bearer "+token)
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, r)
 
-		assert.Equal(t, http.StatusOK, rr.Code, "lag %s must be served", lag)
-		assert.True(t, reached, "handler must be reached for lag %s", lag)
+		assert.Equal(t, http.StatusOK, rr.Code, "%s clock by %s must be served", direction, offset)
+		assert.True(t, reached, "handler must be reached for %s %s", direction, offset)
+		assert.False(t, hasUser, "no userID for %s %s", direction, offset)
+		assert.Equal(t, float64(1),
+			testutil.ToFloat64(m.RequestsTotal.WithLabelValues(
+				metrics.ResultInvalidPermitted, wantReason, "freighter-extension")),
+			"%s clock by %s must count as invalid_permitted/%s", direction, offset, wantReason)
 	}
+}
+
+// The complement: a token whose timing claims are malformed rather than merely
+// wrong is still rejected in permissive. These are the cases left in
+// ReasonBadTiming after the clock reasons were split out — no real client emits
+// them, and serving them would make the permitted-skew rate mean nothing.
+func TestAuth_PermissiveStillRejectsMalformedTiming(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	sub := hex.EncodeToString(pub)
+
+	// exp - iat far beyond MaxTokenLifetime: well-formed claims, but an attempt to
+	// mint a long-lived token rather than a clock that is merely wrong.
+	token := mintToken(t, priv, sub, "GET "+authTestPath, 2*time.Hour, time.Now())
+
+	reg := prometheus.NewRegistry()
+	m := metrics.NewAuth(reg)
+	reached := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached = true; w.WriteHeader(http.StatusOK) })
+	handler := Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, m)(next)
+
+	r := httptest.NewRequest(http.MethodGet, authTestPath, nil)
+	r.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, r)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code, "an over-long lifetime must still 401 in permissive")
+	assert.False(t, reached, "handler must not be reached")
+	assert.Equal(t, float64(1),
+		testutil.ToFloat64(m.RequestsTotal.WithLabelValues("rejected", "bad_timing", "freighter-extension")),
+		"must be counted as a rejection, not permitted skew")
 }

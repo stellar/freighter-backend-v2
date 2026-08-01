@@ -92,17 +92,22 @@ func SanitizeClient(iss string) string {
 	}
 }
 
-// ResultInvalidPermitted is the RequestsTotal `result` for an EXPIRED token that
-// was served anonymously rather than rejected (permissive mode only — see
-// middleware.Auth).
+// ResultInvalidPermitted is the RequestsTotal `result` for a token rejected on
+// CLOCK grounds that was served anonymously rather than 401ed (permissive mode
+// only — see middleware.Auth).
 //
-// Scope is exactly reason="expired", which is the only verification failure that
-// implies the signature was checked and passed (jwt/v5 returns on signature
-// failure before it validates claims). So every request counted here came from a
-// genuine holder of the subject's private key whose clock was running behind —
-// not from a forged or malformed token. reason="bad_timing" is NOT counted here
-// despite also being a clock symptom, because it is classified before signature
-// verification.
+// Scope is exactly two reasons, the two directions a client clock can be wrong:
+//   - "expired"     — clock lagging. Implies the signature verified, since jwt/v5
+//     returns on signature failure before validating claims. A real user.
+//   - "clock_ahead" — clock fast. Assigned during Claims.Validate, i.e. BEFORE
+//     signature verification, so it does NOT imply a real user; a forged token
+//     dated into the future lands here too. Read it as an upper bound on
+//     fast-clock clients, not an exact count.
+//
+// "bad_timing" is NOT counted here. It is what remains of the old catch-all
+// timing bucket once the clock cases were split out: missing exp/iat, exp
+// preceding iat, over-long lifetimes — malformed tokens rather than wrong
+// clocks, and still 401ed.
 //
 // It is deliberately NOT "rejected": these requests succeed, and folding them in
 // would make the rejection rate unreadable. It is deliberately NOT "anonymous"
@@ -117,7 +122,7 @@ type Auth struct {
 	// RequestsTotal counts auth-checked requests, labeled by outcome, reason,
 	// and client.
 	//   result: "authenticated" | "anonymous" | "rejected" | "invalid_permitted"
-	//   reason: "ok" | "no_token" | "expired" | "bad_signature" | "bad_timing" |
+	//   reason: "ok" | "no_token" | "expired" | "clock_ahead" | "bad_signature" | "bad_timing" |
 	//           "bad_method_path" | "bad_body_hash" | "bad_subject" | "malformed" |
 	//           "invalid" | "too_large" | "internal"
 	//   client: "freighter-extension" | "freighter-mobile" | "none" | "other"
