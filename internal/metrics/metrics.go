@@ -92,12 +92,23 @@ func SanitizeClient(iss string) string {
 	}
 }
 
+// ResultInvalidPermitted is the RequestsTotal `result` for a token that failed
+// verification on timing alone and was served anonymously rather than rejected
+// (permissive mode only — see middleware.Auth).
+//
+// It is deliberately NOT "rejected": these requests succeed, and folding them in
+// would make the rejection rate unreadable. It is deliberately NOT "anonymous"
+// either: a client that sent a broken token is not the same population as one
+// that sent none, and telling them apart is what gates the permissive→strict
+// flip. Anything watching the invalid-token rate must sum this with "rejected".
+const ResultInvalidPermitted = "invalid_permitted"
+
 // Auth holds JWT authentication metrics. During the client rollout these track
 // adoption (authenticated vs anonymous), rejection reasons, and client type.
 type Auth struct {
 	// RequestsTotal counts auth-checked requests, labeled by outcome, reason,
 	// and client.
-	//   result: "authenticated" | "anonymous" | "rejected"
+	//   result: "authenticated" | "anonymous" | "rejected" | "invalid_permitted"
 	//   reason: "ok" | "no_token" | "expired" | "bad_signature" | "bad_timing" |
 	//           "bad_method_path" | "bad_body_hash" | "bad_subject" | "malformed" |
 	//           "invalid" | "too_large" | "internal"

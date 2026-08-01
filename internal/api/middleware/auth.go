@@ -36,9 +36,12 @@ func truncateForLog(s string) string { return truncate(s, maxLoggedIssuerLen) }
 // Auth returns middleware that verifies the request's JWT against the public key
 // in its `sub` claim. Behavior depends on mode:
 //
-//   - Permissive: a request with no bearer token passes through anonymously; a
-//     present-but-invalid token is rejected with 401.
-//   - Required: any request without a valid token is rejected with 401.
+//   - Permissive: a request with no bearer token passes through anonymously, as
+//     does one whose token failed on timing alone (expired / bad_timing) — those
+//     are wrong-clock clients, not attackers, and the gated routes already serve
+//     anonymous traffic. Any other invalid token is rejected with 401.
+//   - Required: any request without a valid token is rejected with 401, timing
+//     failures included.
 //
 // On success the authenticated user ID is attached to the request context
 // (retrieve it with auth.UserIDFromContext). authMetrics may be nil.
@@ -64,22 +67,52 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				metrics.RecordAuth(authMetrics, "anonymous", "no_token", metrics.ClientNone)
 
 			case errors.Is(err, auth.ErrUnauthorized):
-				// A token was presented but did not verify — always rejected. The
-				// reason drives both the metric label and a structured log line for
-				// per-request diagnosis. err.Error() never contains the token or body
-				// bytes, but a bad_method_path error echoes the client-controlled
-				// methodAndPath claim, so the detail is length-bounded before logging.
+				// A token was presented but did not verify. The reason drives both the
+				// metric label and a structured log line for per-request diagnosis.
+				// err.Error() never contains the token or body bytes, but a
+				// bad_method_path error echoes the client-controlled methodAndPath
+				// claim, so the detail is length-bounded before logging.
 				reason := auth.Reason(err)
 				iss := auth.IssuerFromRequestUnverified(r)
-				metrics.RecordAuth(authMetrics, "rejected", reason, metrics.SanitizeClient(iss))
+
+				// In permissive mode a timing-only failure is served anonymously
+				// instead of rejected. The routes behind this middleware already serve
+				// anonymous traffic in permissive, so 401ing a client whose only fault
+				// is a wrong device clock refuses a request that would have succeeded
+				// had the client sent no token at all — which defeats the point of
+				// permissive mode and locks the user out of every gated route.
+				//
+				// Timing reasons ONLY. A bad signature, bad binding, or malformed token
+				// is a real bug or attack rather than a wrong clock, and stays loud.
+				// Strict stays fail-closed for everything: it has no anonymous path to
+				// fall back to, so skewed clients must be fixed client-side before the
+				// permissive→strict flip.
+				//
+				// Grants nothing: no userID is attached, so this request is treated
+				// exactly like one carrying no Authorization header at all.
+				permitted := mode == auth.Permissive &&
+					(reason == auth.ReasonExpired || reason == auth.ReasonBadTiming)
+
+				result := "rejected"
+				if permitted {
+					result = metrics.ResultInvalidPermitted
+				}
+				metrics.RecordAuth(authMetrics, result, reason, metrics.SanitizeClient(iss))
+
 				loggedIss := truncateForLog(iss)
 				logger.FieldsFromContext(r.Context()).Set("iss", loggedIss)
-				logger.InfoWithContext(r.Context(), "rejected request with invalid auth token",
+				logger.InfoWithContext(r.Context(), "invalid auth token",
 					"reason", reason,
+					"permitted", permitted,
 					"iss", loggedIss,
 					"detail", truncate(err.Error(), maxLoggedDetailLen),
 					"method", r.Method,
 					"path", r.URL.Path)
+
+				if permitted {
+					// Fall through to next.ServeHTTP below — anonymous, no userID.
+					break
+				}
 				httperror.Unauthorized("unauthorized", nil).Render(w)
 				return
 

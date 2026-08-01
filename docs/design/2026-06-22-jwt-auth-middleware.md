@@ -37,14 +37,34 @@ Shipped Freighter clients today send **no** JWT; newer client versions send a JW
 To avoid breaking old clients, auth has two modes, selected by one global config value
 (`AUTH_MODE` / `--auth-mode`, default `permissive`):
 
-| Mode | No `Authorization` header | Header present, valid | Header present, invalid |
-| --- | --- | --- | --- |
-| **permissive** (default) | pass (anonymous, no `userID`) | pass (+`userID`) | **401** |
-| **strict** (`auth.Required`) | **401** | pass (+`userID`) | **401** |
+| Mode | No `Authorization` header | Header present, valid | Invalid: timing only | Invalid: any other reason |
+| --- | --- | --- | --- | --- |
+| **permissive** (default) | pass (anonymous, no `userID`) | pass (+`userID`) | pass (anonymous, no `userID`) | **401** |
+| **strict** (`auth.Required`) | **401** | pass (+`userID`) | **401** | **401** |
 
-A present-but-invalid token is **always** rejected (401) in both modes — only updated clients send
-tokens, so a bad token is a real bug or attack, and rejecting it gives clean adoption signal during
-rollout.
+"Timing only" means `expired` or `bad_timing` — the token is well-formed and correctly signed, and
+its only fault is a timestamp from a device clock that disagrees with ours.
+
+This table originally rejected *every* present-but-invalid token in both modes, on the reasoning
+that "only updated clients send tokens, so a bad token is a real bug or attack." That reasoning
+enumerated two populations and missed a third: **a correct, up-to-date client running on a machine
+whose clock is wrong.** In the first 24h of real JWT traffic that third population was 100% of all
+rejections (335, from ~5 devices with fixed offsets of 3m04s, 11m05s, 15m14s, 3h01m20s, and exactly
+8h00m00s) — see [#147](https://github.com/stellar/freighter-backend-v2/issues/147). Those users were
+locked out of every gated route while sending cryptographically valid tokens, on endpoints that
+serve anonymous traffic freely. Rejecting them refused a request that would have succeeded had the
+client sent no token at all, which defeats the purpose of permissive mode.
+
+Note that rejecting was never what produced the adoption signal — `RecordAuth` fires before the
+render decision, so the metric and log are identical either way. Enforcement was coupled to
+measurement for no reason. Permitted timing failures are recorded under a distinct `result` label
+(`invalid_permitted`) precisely so that signal stays readable.
+
+**Strict stays fail-closed for everything, timing included.** It has no anonymous path to fall back
+to, so this is a rollout-window mitigation only: skewed clients must be fixed client-side (deriving
+a clock offset from the `Date` response header) before the permissive→strict flip, and that flip
+should be gated on the timing reasons reaching ~0 across both `iss` values — not on the fix merely
+having shipped, since client rollout lags by days.
 
 All user-facing routes share one mode and flip together (client adoption is per-app-version, not
 per-endpoint), so the mode is a single global config value. The permissive→strict cutover is one
@@ -175,7 +195,12 @@ logging middleware.
 ## Observability
 
 - Metric: `freighter_auth_requests_total{result, reason}` counter.
-  - `result ∈ {authenticated, anonymous, rejected}` — adoption % during rollout.
+  - `result ∈ {authenticated, anonymous, rejected, invalid_permitted}` — adoption % during rollout.
+    `invalid_permitted` is a timing-only failure served anonymously under permissive (see the mode
+    table above). It is separate from both `rejected` (these requests succeed) and `anonymous` (a
+    client sending a broken token is a different population from one sending none). **Anything
+    watching the invalid-token rate — alerts, strict-flip readiness — must sum it with `rejected`,
+    or permitted skew will read as having disappeared rather than as still happening.**
   - `reason ∈ {ok, no_token, expired, bad_signature, bad_timing, bad_method_path, bad_body_hash,
     bad_subject, malformed, invalid, too_large, internal}` — a bounded set of fixed *categories*
     (never a request value like the path or body hash), so rejection spikes can be triaged by cause
@@ -191,7 +216,9 @@ logging middleware.
   wrong key, `alg=none`/HS256 rejected, expired, leeway boundary); `VerifyHTTPRequest` (missing
   header → `ErrNoToken`, bad Bearer prefix, body-hash binding, query-string binding, body reset).
 - **middleware tests:** the full truth table — for each mode × {no header, valid, expired,
-  tampered, wrong-key}, assert status (200/401) and presence/absence of `userID` in context.
+  future-dated, tampered, wrong-key}, assert status (200/401) and presence/absence of `userID` in
+  context. The `permissive/wrong-key` and `required/expired` rows are the load-bearing ones: they
+  prove the timing fall-through is narrow (a bad signature still 401s) and that strict is unchanged.
 - **route wiring tests** (`internal/api`): user-facing routes reject anonymous in strict, reject
   invalid tokens in permissive, and expose `userID` on a valid token; health probes stay anonymous
   in every mode; an authenticated request keeps its real route label in `freighter_http_requests_total`.

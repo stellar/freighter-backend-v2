@@ -44,6 +44,12 @@ func TestAuth_TruthTable(t *testing.T) {
 	}
 	// Signed by a different key than the one declared in sub.
 	wrongKeyToken := func() string { return mintToken(t, otherPriv, sub, methodAndPath, auth.MaxTokenLifetime, now) }
+	// Dated an hour into the future: fails the iat/exp future bounds in
+	// Claims.Validate, i.e. ReasonBadTiming rather than ReasonExpired. This is the
+	// fast-clock counterpart of expiredToken.
+	futureToken := func() string {
+		return mintToken(t, priv, sub, methodAndPath, auth.MaxTokenLifetime, now.Add(1*time.Hour))
+	}
 
 	cases := []struct {
 		name         string
@@ -55,11 +61,21 @@ func TestAuth_TruthTable(t *testing.T) {
 	}{
 		{"permissive/no-header", auth.Permissive, "", http.StatusOK, false, ""},
 		{"permissive/valid", auth.Permissive, validToken(), http.StatusOK, true, sub},
-		{"permissive/expired", auth.Permissive, expiredToken(), http.StatusUnauthorized, false, ""},
+		// Timing-only failures are served anonymously in permissive: the routes it
+		// guards already serve anonymous traffic, so 401ing a client that would have
+		// succeeded sending no token at all locks out users whose device clock is
+		// wrong. No userID is attached — this is a failed authentication, not a
+		// successful one.
+		{"permissive/expired", auth.Permissive, expiredToken(), http.StatusOK, false, ""},
+		{"permissive/future-dated", auth.Permissive, futureToken(), http.StatusOK, false, ""},
+		// Non-timing failures stay 401 in permissive: a bad signature is a real bug
+		// or attack, not a wrong clock, and must remain loud.
 		{"permissive/wrong-key", auth.Permissive, wrongKeyToken(), http.StatusUnauthorized, false, ""},
 		{"required/no-header", auth.Required, "", http.StatusUnauthorized, false, ""},
 		{"required/valid", auth.Required, validToken(), http.StatusOK, true, sub},
+		// Strict stays fail-closed for every invalid token, timing included.
 		{"required/expired", auth.Required, expiredToken(), http.StatusUnauthorized, false, ""},
+		{"required/future-dated", auth.Required, futureToken(), http.StatusUnauthorized, false, ""},
 		{"required/wrong-key", auth.Required, wrongKeyToken(), http.StatusUnauthorized, false, ""},
 	}
 
@@ -131,7 +147,8 @@ func TestAuth_ClientLabel(t *testing.T) {
 	mAndP := "GET " + authTestPath
 	now := time.Now()
 	valid := mintToken(t, priv, sub, mAndP, auth.MaxTokenLifetime, now)
-	wrongKey := mintToken(t, otherPriv, sub, mAndP, auth.MaxTokenLifetime, now) // parses, bad signature
+	wrongKey := mintToken(t, otherPriv, sub, mAndP, auth.MaxTokenLifetime, now)           // parses, bad signature
+	expired := mintToken(t, priv, sub, mAndP, auth.MaxTokenLifetime, now.Add(-time.Hour)) // valid signature, stale clock
 
 	cases := []struct {
 		name       string
@@ -144,6 +161,11 @@ func TestAuth_ClientLabel(t *testing.T) {
 		{"anonymous", "", "anonymous", "no_token", "none"},
 		{"rejected readable iss", wrongKey, "rejected", "bad_signature", "freighter-extension"},
 		{"rejected malformed", "not-a-jwt", "rejected", "malformed", "other"},
+		// Timing failures served anonymously in permissive get their own result
+		// label, so the skew rate stays separately measurable — an alert or a
+		// strict-flip readiness check on result="rejected" alone would otherwise
+		// read these as having disappeared rather than as still happening.
+		{"permitted expired", expired, metrics.ResultInvalidPermitted, "expired", "freighter-extension"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

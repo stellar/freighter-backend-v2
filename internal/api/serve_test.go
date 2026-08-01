@@ -315,12 +315,15 @@ func TestApiServer_initHandlers_UserFacingRoutesRespectAuthMode(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/feature-flags", nil))
 	assert.Equal(t, http.StatusOK, rec.Code, "permissive: anonymous must pass")
 
-	// Permissive: a present-but-invalid bearer token is rejected on that route.
+	// Permissive: a non-timing invalid token is still rejected on that route.
+	// (Timing-only failures — expired/bad_timing — pass through anonymously in
+	// permissive instead; that fall-through is covered in the middleware truth
+	// table. "not-a-real-token" is `malformed`, so it stays a 401 here.)
 	rec = httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/feature-flags", nil)
 	req.Header.Set("Authorization", "Bearer not-a-real-token")
 	mux.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusUnauthorized, rec.Code, "permissive: invalid token must 401")
+	assert.Equal(t, http.StatusUnauthorized, rec.Code, "permissive: malformed token must 401")
 
 	// Strict: an anonymous request to a previously-open route is rejected.
 	mux, err = newTestAPIServer(t, testCfg("strict")).initHandlers()
