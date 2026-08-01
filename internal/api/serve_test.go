@@ -187,7 +187,7 @@ func TestApiServer_initHandlers_RegistersAccountHistoryRoutes(t *testing.T) {
 }
 
 // walletBackendRoutes is every route gated by --wallet-backend-routes-enabled.
-// Both tests below iterate it, so adding a third wallet-backend-fronted route
+// Both tests below iterate it, so adding another wallet-backend-fronted route
 // extends the on/off coverage by one line here rather than being silently missed.
 // The {address} wildcard is pre-substituted: auth and registration both run before
 // path-parameter validation, so any non-empty segment reaches the assertion.
@@ -199,6 +199,8 @@ var walletBackendRoutes = []struct {
 	{"balances", http.MethodPost, "/api/v1/accounts/balances"},
 	{"account-history", http.MethodGet, "/api/v1/accounts/GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF/transactions"},
 	{"positions", http.MethodPost, "/api/v1/accounts/positions"},
+	{"blend-pools", http.MethodGet, "/api/v1/protocols/blend/pools"},
+	{"blend-earn-options", http.MethodGet, "/api/v1/protocols/blend/earn-options"},
 }
 
 // TestApiServer_initHandlers_WalletBackendRoutesDisabledNotRegistered pins the off
@@ -251,7 +253,7 @@ func TestApiServer_initHandlers_WalletBackendRoutesEnabledStayGated(t *testing.T
 }
 
 // TestApiServer_initHandlers_WalletBackendRoutesGatedTogether pins the "one flag,
-// every route" decision. All three share a dependency and a failure mode, so a
+// every route" decision. All five share a dependency and a failure mode, so a
 // change that gated only some — leaving the rest publicly 500ing in prd, which is
 // the exact bug this flag exists to close — would otherwise pass every test above.
 func TestApiServer_initHandlers_WalletBackendRoutesGatedTogether(t *testing.T) {
@@ -273,6 +275,8 @@ func TestApiServer_initHandlers_WalletBackendRoutesGatedTogether(t *testing.T) {
 		"POST /api/v1/accounts/balances":              true,
 		"GET /api/v1/accounts/{address}/transactions": true,
 		"POST /api/v1/accounts/positions":             true,
+		"GET /api/v1/protocols/blend/pools":           true,
+		"GET /api/v1/protocols/blend/earn-options":    true,
 	}, disabled, "exactly the wallet-backend-fronted routes must be disabled by the flag")
 }
 

@@ -235,6 +235,18 @@ func (s *ApiServer) routes() ([]route, error) {
 	)
 	accountPositionsHandler := handlers.NewAccountPositionsHandler(positionsService, s.cfg.AppConfig.MaxBalanceAddresses)
 
+	blendCatalogService, err := services.NewBlendCatalogService(
+		s.walletBackendService,
+		s.redis,
+		time.Duration(s.cfg.BlendConfig.CatalogCacheTTLSeconds)*time.Second,
+		s.cfg.BlendConfig.EarnPoolsConfigPath,
+		s.appMetrics.Service,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("init blend catalog service: %w", err)
+	}
+	blendCatalogHandler := handlers.NewBlendCatalogHandler(blendCatalogService)
+
 	return []route{
 		// Health/liveness/readiness probes: gated=false, registered BARE — never
 		// wrapped by Auth. K8s and the docker-compose wget healthcheck cannot present
@@ -255,12 +267,12 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodGet, "/api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags), true, true},
 		// The wallet-backend-fronted routes, config-gated together by
 		// --wallet-backend-routes-enabled. These are the routes that touch
-		// walletBackendService (balances, history, and positions), and all fail
-		// identically when it is unconfigured: configureNetworkClient returns nil
-		// and the handler errors before any network call, so every request 500s.
-		// wallet-backend is configured only in dev, so they are disabled in
-		// production until that upstream is wired up. enabled=false leaves every
-		// path 404ing.
+		// walletBackendService (balances, history, positions, and the Blend market
+		// catalog), and all fail identically when it is unconfigured:
+		// configureNetworkClient returns nil and the handler errors before any network
+		// call, so every request 500s. wallet-backend is configured only in dev, so
+		// they are disabled in production until that upstream is wired up.
+		// enabled=false leaves every path 404ing.
 		//
 		// They share one flag deliberately: they share one dependency and one failure
 		// mode, so there is no state where enabling a subset is correct. If a route
@@ -269,6 +281,8 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodPost, "/api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
 		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
 		{http.MethodPost, "/api/v1/accounts/positions", handlers.CustomHandler(accountPositionsHandler.GetAccountsPositions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
+		{http.MethodGet, "/api/v1/protocols/blend/pools", handlers.CustomHandler(blendCatalogHandler.GetPools), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
+		{http.MethodGet, "/api/v1/protocols/blend/earn-options", handlers.CustomHandler(blendCatalogHandler.GetEarnOptions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
 
 		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true, true},
 		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, true},
