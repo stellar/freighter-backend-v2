@@ -21,9 +21,16 @@ import (
 
 const authTestPath = "/api/v1/auth/whoami"
 
+// mintToken mints a token for a nil-body (GET) request. Use mintTokenWithBody
+// when the request carries one — the bodyHash claim must match it.
 func mintToken(t *testing.T, priv ed25519.PrivateKey, sub, methodAndPath string, lifetime time.Duration, issuedAt time.Time) string {
 	t.Helper()
-	return authtest.MintToken(t, priv, sub, methodAndPath, lifetime, issuedAt)
+	return authtest.MintToken(t, priv, sub, methodAndPath, lifetime, issuedAt, nil)
+}
+
+func mintTokenWithBody(t *testing.T, priv ed25519.PrivateKey, sub, methodAndPath string, lifetime time.Duration, issuedAt time.Time, body []byte) string {
+	t.Helper()
+	return authtest.MintToken(t, priv, sub, methodAndPath, lifetime, issuedAt, body)
 }
 
 func TestAuth_TruthTable(t *testing.T) {

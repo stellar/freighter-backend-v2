@@ -59,7 +59,10 @@ func parseJWT(tokenString, methodAndPath string, body []byte, leeway time.Durati
 			if claims.ExpiresAt != nil {
 				expiredBy = time.Since(claims.ExpiresAt.Time)
 			}
-			return nil, &ExpiredTokenError{ExpiredBy: expiredBy, Err: err}
+			// claims.Issuer is authentic here: ParseWithClaims verified the
+			// signature before validating claims, so an expiry error implies a
+			// genuine holder of the subject's private key.
+			return nil, &ExpiredTokenError{ExpiredBy: expiredBy, Issuer: claims.Issuer, Err: err}
 		}
 		// Signature/algorithm failure (wrong key, tampered, alg confusion).
 		return nil, &VerificationError{Reason: ReasonBadSignature, Err: err}

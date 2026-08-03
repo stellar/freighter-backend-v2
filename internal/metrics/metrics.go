@@ -98,11 +98,20 @@ func SanitizeClient(iss string) string {
 //
 // Scope is exactly two reasons, the two directions a client clock can be wrong:
 //   - "expired"     — clock lagging. Implies the signature verified, since jwt/v5
-//     returns on signature failure before validating claims. A real user.
+//     returns on signature failure before validating claims. A real user, and the
+//     `client` label is the signature-verified iss (carried out of the failure by
+//     ExpiredTokenError), so per-client attribution on this reason is authentic.
 //   - "clock_ahead" — clock fast. Assigned during Claims.Validate, i.e. BEFORE
 //     signature verification, so it does NOT imply a real user; a forged token
 //     dated into the future lands here too. Read it as an upper bound on
-//     fast-clock clients, not an exact count.
+//     fast-clock clients, not an exact count — and note the `client` label here is
+//     caller-chosen, so do NOT split this reason by client to decide which app
+//     still needs fixing. One request per increment needs no key.
+//
+// Both must stay in any permissive→strict readiness gate. As of the 7 days ending
+// 2026-08-03, prd ran 442 "expired" to 78 "clock_ahead", with clock_ahead the
+// majority on the two most recent days — so gating on "expired" alone would read
+// ready-to-flip while a growing fast-clock population is still broken.
 //
 // "bad_timing" is NOT counted here. It is what remains of the old catch-all
 // timing bucket once the clock cases were split out: missing exp/iat, exp

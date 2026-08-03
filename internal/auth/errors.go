@@ -21,7 +21,18 @@ var ErrUnauthorized = errors.New("not authorized")
 // that don't care about the distinction still treat it as a 401.
 type ExpiredTokenError struct {
 	ExpiredBy time.Duration
-	Err       error
+	// Issuer is the token's `iss` claim, and unlike the value
+	// IssuerFromRequestUnverified recovers it is SIGNATURE-VERIFIED: this error is
+	// only constructed after jwtgo.ParseWithClaims has checked the signature
+	// (jwt/v5 returns ErrTokenSignatureInvalid before it validates claims, so
+	// reaching ErrTokenExpired implies the signature passed). It is carried out of
+	// the failure for the same reason ExpiredBy is — so the caller gets an
+	// authentic observability label instead of re-parsing the token unverified.
+	//
+	// ClockAheadError deliberately has no counterpart: it is raised before any
+	// signature check, so no authentic issuer exists to carry.
+	Issuer string
+	Err    error
 }
 
 func (e *ExpiredTokenError) Error() string {

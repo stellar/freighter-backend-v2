@@ -75,16 +75,41 @@ Note that rejecting was never what produced the adoption signal — `RecordAuth`
 render decision, so the metric and log are identical either way. Enforcement was coupled to
 measurement for no reason.
 
-Both clock directions are permitted even though prod showed only lagging clocks. That sample was
-five devices, which is far too small to conclude fast clocks do not occur, and a misconfigured clock
-is a priori about as likely to be ahead as behind. Handling one direction and not the other would be
-fitting the rule to the sample rather than to the problem.
+Both clock directions are permitted. When that decision was made prod had shown only lagging clocks,
+and the argument was that five devices is far too small to conclude fast clocks do not occur. The
+data has since caught up with the argument: over the 7 days ending 2026-08-03, prd logged **442
+`expired` (84.4%), 78 `clock_ahead` (14.9%), and 4 `malformed` (0.8%)** out of 524 rejections — and
+`clock_ahead` was the *majority* on the two most recent days (08-02: 38 vs 44; 08-03: 20 vs 8). Had
+this shipped permitting only `expired`, ~15% of rejections and rising would still be 401ing.
+
+These are genuine wrong clocks rather than stale tokens replayed from a retry queue, which would look
+identical on the wire: within a single burst the offset stays flat to ±0.5s across spans up to 478s,
+whereas a replayed token's apparent offset grows 1s per elapsed second. Offsets are also stable per
+device across days.
 
 **Strict stays fail-closed for everything, timing included.** It has no anonymous path to fall back
 to, so this is a rollout-window mitigation only: skewed clients must be fixed client-side (deriving
 a clock offset from the `Date` response header) before the permissive→strict flip, and that flip
-should be gated on the timing reasons reaching ~0 across both `iss` values — not on the fix merely
-having shipped, since client rollout lags by days.
+should be gated on **both** timing reasons reaching ~0 across both `iss` values — not on the fix
+merely having shipped, since client rollout lags by days.
+
+The two reasons carry different evidential weight, and the criterion must not be narrowed to the
+stronger one:
+
+- `invalid_permitted{reason="expired"}` is **authentic per-client**. `ExpiredTokenError` carries the
+  signature-verified `iss` out of the failure, and the middleware labels from it rather than
+  re-parsing the token unverified — so this is the number to use when deciding *which client team*
+  still needs to ship the offset fix.
+- `invalid_permitted{reason="clock_ahead"}` is an **upper bound, and unattributable**. No signature
+  check ran, so the `iss` label is caller-chosen and one request per increment needs no key: a
+  future-dated token claiming any `iss` will do. It cannot distinguish five real fast-clock devices
+  from one script.
+
+It is tempting to gate only on `expired` for that reason. Don't: `clock_ahead` is 15% of rejections
+and rising, so an `expired`-only gate would read "ready to flip" while a growing fast-clock population
+is still broken — trading a fail-safe criterion for a fail-dangerous one. Keep both in the gate, and
+treat a nonzero `clock_ahead` as a signal to investigate logs and source IPs rather than something to
+read off a dashboard. On the rejection log, `iss_verified` distinguishes the two cases directly.
 
 All user-facing routes share one mode and flip together (client adoption is per-app-version, not
 per-endpoint), so the mode is a single global config value. The permissive→strict cutover is one

@@ -76,7 +76,35 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				// bad_method_path error echoes the client-controlled methodAndPath
 				// claim, so the detail is length-bounded before logging.
 				reason := auth.Reason(err)
+
+				// Discriminate on the error TYPES, not on the flattened reason
+				// string. Both clock failures have dedicated types, and the string
+				// is a plain field set at ten *VerificationError sites across
+				// internal/auth — so a string predicate makes the fail-open set
+				// "anything whose reason matches", extensible from another file
+				// without touching this one. This exact mechanism already failed
+				// here once: 5b32ac7 permitted ReasonBadTiming and served tokens
+				// with no exp claim at all, caught by review rather than by a test.
+				// Requiring a new error type keeps extension visible in the diff.
+				//
+				// reason is still used below for the metric label and log field.
+				var expiredErr *auth.ExpiredTokenError
+				var clockAheadErr *auth.ClockAheadError
+				isExpired := errors.As(err, &expiredErr)
+				isClockAhead := errors.As(err, &clockAheadErr)
+
+				// Prefer the signature-verified issuer when one exists. The
+				// unverified fallback is client-spoofable, and the permitted
+				// fall-through below puts this label on the SERVING path, where
+				// IssuerFromRequestUnverified's own contract says not to rely on it.
+				// An expired token carries an authentic iss (see ExpiredTokenError);
+				// a clock_ahead one cannot, since no signature was ever checked.
 				iss := auth.IssuerFromRequestUnverified(r)
+				issVerified := false
+				if isExpired && expiredErr.Issuer != "" {
+					iss = expiredErr.Issuer
+					issVerified = true
+				}
 
 				// In permissive mode a wrong client clock — in EITHER direction — is
 				// served anonymously instead of rejected. The routes behind this
@@ -114,8 +142,7 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				// Strict stays fail-closed for everything: it has no anonymous path to
 				// fall back to, so skewed clients must be fixed client-side before the
 				// permissive→strict flip.
-				permitted := mode == auth.Permissive &&
-					(reason == auth.ReasonExpired || reason == auth.ReasonClockAhead)
+				permitted := mode == auth.Permissive && (isExpired || isClockAhead)
 
 				result := "rejected"
 				if permitted {
@@ -125,10 +152,18 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 
 				loggedIss := truncateForLog(iss)
 				logger.FieldsFromContext(r.Context()).Set("iss", loggedIss)
+				// iss_verified makes the trust level of iss self-describing. Without
+				// it, a permitted request logs a spoofable iss alongside a 200, and
+				// the only tell is the ABSENCE of user_id — so any aggregation by iss
+				// over 200s silently mixes verified and unverified issuers. Kept as a
+				// boolean beside iss rather than a renamed key so existing iss
+				// queries keep working and can filter on it.
+				logger.FieldsFromContext(r.Context()).Set("iss_verified", issVerified)
 				logger.InfoWithContext(r.Context(), "invalid auth token",
 					"reason", reason,
 					"permitted", permitted,
 					"iss", loggedIss,
+					"iss_verified", issVerified,
 					"detail", truncate(err.Error(), maxLoggedDetailLen),
 					"method", r.Method,
 					"path", r.URL.Path)

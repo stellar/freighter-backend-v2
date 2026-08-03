@@ -311,6 +311,39 @@ func TestVerifyHTTPRequest_Valid(t *testing.T) {
 	assert.Equal(t, body, got)
 }
 
+// The body must also be reset when verification FAILS, not only on success.
+//
+// This became load-bearing when permissive mode started serving clock-skewed
+// requests: middleware.Auth falls through to the handler after VerifyHTTPRequest
+// returned an error, so a handler can now run on a request whose body the
+// verifier already drained. It holds today only because readAndResetBody
+// (verifier.go:68) runs BEFORE parseJWT (verifier.go:75) and swaps in a fresh
+// reader unconditionally — an ordering that reads like an implementation detail.
+//
+// The refactor this guards against is a specific and tempting one: hoisting a
+// cheap timing pre-check above the body read, to stop draining bodies for a
+// population known to fail ~100% of the time. That would leave the handler
+// reading io.EOF, and only for skewed-clock users — the population already
+// labelled broken, which is exactly what would stop anyone from looking.
+// TestVerifyHTTPRequest_Valid stays green through it, because on success timing
+// passes and the body is read as before.
+func TestVerifyHTTPRequest_ResetsBodyOnValidationFailure(t *testing.T) {
+	_, priv, sub := newKeypair(t)
+	body := []byte(`{"x":1}`)
+	// Lagging clock well past the leeway: fails as expired, and methodAndPath /
+	// bodyHash both still match so nothing else can be the reason.
+	token := mint(t, priv, skewedClaims(sub, "POST /api/v1/thing", body, -(ClockSkewLeeway+time.Minute)))
+
+	r := newRequest(t, http.MethodPost, "/api/v1/thing", body, token)
+	_, err := NewVerifier(ClockSkewLeeway).VerifyHTTPRequest(r)
+	require.Error(t, err)
+	require.Equal(t, ReasonExpired, Reason(err))
+
+	got, err := readAll(r)
+	require.NoError(t, err)
+	assert.Equal(t, body, got)
+}
+
 func TestVerifyHTTPRequest_BindsQueryString(t *testing.T) {
 	_, priv, sub := newKeypair(t)
 	// Token signed for the path including its query string.

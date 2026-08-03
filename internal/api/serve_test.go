@@ -383,7 +383,7 @@ func TestApiServer_initHandlers_HealthRoutesAnonymousInStrict(t *testing.T) {
 // helper, so this package and middleware can't drift on the claims format.
 func mintAPIToken(t *testing.T, priv ed25519.PrivateKey, sub, methodAndPath string) string {
 	t.Helper()
-	return authtest.MintToken(t, priv, sub, methodAndPath, auth.MaxTokenLifetime, time.Now())
+	return authtest.MintToken(t, priv, sub, methodAndPath, auth.MaxTokenLifetime, time.Now(), nil)
 }
 
 func TestApiServer_initHandlers_ValidTokenPopulatesWhoami(t *testing.T) {
