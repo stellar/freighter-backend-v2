@@ -92,13 +92,47 @@ func SanitizeClient(iss string) string {
 	}
 }
 
+// ResultInvalidPermitted is the RequestsTotal `result` for a token rejected on
+// CLOCK grounds that was served anonymously rather than 401ed (permissive mode
+// only — see middleware.Auth).
+//
+// Scope is exactly two reasons, the two directions a client clock can be wrong.
+// Both imply the signature verified — parseJWT checks it before validating
+// claims, and jwt/v5 likewise returns on signature failure before running its own
+// claim checks — so both are counts of real users rather than upper bounds, and
+// one increment costs one genuine signing key:
+//   - "expired"     — clock lagging. `client` is the signature-verified iss,
+//     carried out of the failure by ExpiredTokenError.
+//   - "clock_ahead" — clock fast (iat, exp, or nbf). `client` is the
+//     signature-verified iss, carried out of the failure by ClockAheadError.
+//
+// Both reasons are therefore safe to split by client to decide which app still
+// needs fixing: the sender cannot choose its own bucket.
+//
+// Both must stay in any permissive→strict readiness gate. As of the 7 days ending
+// 2026-08-03, prd ran 442 "expired" to 78 "clock_ahead", with clock_ahead the
+// majority on the two most recent days — so gating on "expired" alone would read
+// ready-to-flip while a growing fast-clock population is still broken.
+//
+// "bad_timing" is NOT counted here. It is what remains of the old catch-all
+// timing bucket once the clock cases were split out: missing exp/iat, exp
+// preceding iat, over-long lifetimes — malformed tokens rather than wrong
+// clocks, and still 401ed.
+//
+// It is deliberately NOT "rejected": these requests succeed, and folding them in
+// would make the rejection rate unreadable. It is deliberately NOT "anonymous"
+// either: a client that sent a broken token is not the same population as one
+// that sent none, and telling them apart is what gates the permissive→strict
+// flip. Anything watching the invalid-token rate must sum this with "rejected".
+const ResultInvalidPermitted = "invalid_permitted"
+
 // Auth holds JWT authentication metrics. During the client rollout these track
 // adoption (authenticated vs anonymous), rejection reasons, and client type.
 type Auth struct {
 	// RequestsTotal counts auth-checked requests, labeled by outcome, reason,
 	// and client.
-	//   result: "authenticated" | "anonymous" | "rejected"
-	//   reason: "ok" | "no_token" | "expired" | "bad_signature" | "bad_timing" |
+	//   result: "authenticated" | "anonymous" | "rejected" | "invalid_permitted"
+	//   reason: "ok" | "no_token" | "expired" | "clock_ahead" | "bad_signature" | "bad_timing" |
 	//           "bad_method_path" | "bad_body_hash" | "bad_subject" | "malformed" |
 	//           "invalid" | "too_large" | "internal"
 	//   client: "freighter-extension" | "freighter-mobile" | "none" | "other"

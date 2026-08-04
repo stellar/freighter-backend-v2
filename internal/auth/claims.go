@@ -68,13 +68,42 @@ func (c *Claims) Validate(methodAndPath string, body []byte, maxLifetime, leeway
 	// validates exp/nbf but does not reject a future iat, so without this a signer
 	// could date a token ahead of now (e.g. iat=exp=now+lifetime+leeway) and have
 	// it accepted, stretching the acceptance window past the intended ±skew.
+	// These two are ReasonClockAhead, not ReasonBadTiming: the claims are
+	// well-formed and self-consistent, they just describe a moment further ahead
+	// than we allow — i.e. a client clock running fast, the mirror of an expired
+	// token's lagging clock. The checks above stay ReasonBadTiming because they
+	// indicate a malformed or abusive token rather than a wrong clock, and callers
+	// (see middleware.Auth) treat the two very differently.
+	//
+	// AheadBy carries the overshoot so the magnitude is diagnosable from logs, the
+	// same way ExpiredTokenError.ExpiredBy is for lagging clocks.
 	if c.IssuedAt.After(now.Add(leeway)) {
-		return &VerificationError{Reason: ReasonBadTiming, Err: errors.New("iat is in the future beyond the allowed skew")}
+		return &ClockAheadError{AheadBy: c.IssuedAt.Sub(now), Issuer: c.Issuer, Err: errors.New("iat is in the future beyond the allowed skew")}
 	}
 	// Reject tokens dated implausibly far in the future. exp can legitimately be
 	// up to one full lifetime ahead, plus skew leeway.
+	//
+	// Defense in depth: this branch is UNREACHABLE given the checks above, and has
+	// been since before ClockAheadError existed. They force
+	//
+	//	exp = iat + lifetime <= (now + leeway) + maxLifetime
+	//
+	// which is exactly the bound tested here, so the strict > can never hold.
+	// (Verified by brute force over the iat/lifetime space, including an
+	// exhaustive 1-second grid — zero reachable cases.) It is kept because it
+	// stops being unreachable the moment either preceding check is reordered,
+	// loosened, or removed, and an exp far in the future is precisely what the
+	// lifetime cap exists to prevent.
+	//
+	// One consequence of that unreachability: AheadBy here would under-report by
+	// (maxLifetime - lifetime) compared with the iat branch above, which reports
+	// the clock offset directly. Both are "overshoot past the no-leeway bound", but
+	// they only agree when lifetime == maxLifetime. Left as-is rather than
+	// "corrected", since changing a value no caller can observe adds risk without
+	// benefit — but if a reordering ever makes this reachable, fix the formula in
+	// the same change.
 	if c.ExpiresAt.After(now.Add(maxLifetime + leeway)) {
-		return &VerificationError{Reason: ReasonBadTiming, Err: errors.New("exp is too far in the future")}
+		return &ClockAheadError{AheadBy: c.ExpiresAt.Sub(now.Add(maxLifetime)), Issuer: c.Issuer, Err: errors.New("exp is too far in the future")}
 	}
 
 	if c.MethodAndPath != strings.TrimSpace(methodAndPath) {

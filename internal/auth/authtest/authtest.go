@@ -14,14 +14,19 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/auth"
 )
 
-// MintToken mints a valid Ed25519 JWT bound to sub and methodAndPath, expiring
-// lifetime after issuedAt. Callers vary lifetime/issuedAt to exercise the expiry
-// and clock-skew paths. The body hash is always the empty-body hash, matching the
-// GET requests these tests issue.
-func MintToken(t testing.TB, priv ed25519.PrivateKey, sub, methodAndPath string, lifetime time.Duration, issuedAt time.Time) string {
+// MintToken mints a valid Ed25519 JWT bound to sub, methodAndPath and body,
+// expiring lifetime after issuedAt. Callers vary lifetime/issuedAt to exercise
+// the expiry and clock-skew paths.
+//
+// body is explicit rather than defaulted to nil: the bodyHash claim must match
+// the request the token is sent with, so a nil default silently confines every
+// caller to nil-body (GET) requests. That is how the permitted fall-through's
+// interaction with a drained request body went untested — pass the same bytes
+// here that the request carries.
+func MintToken(t testing.TB, priv ed25519.PrivateKey, sub, methodAndPath string, lifetime time.Duration, issuedAt time.Time, body []byte) string {
 	t.Helper()
 	c := auth.Claims{
-		BodyHash:      auth.HashBody(nil),
+		BodyHash:      auth.HashBody(body),
 		MethodAndPath: methodAndPath,
 		RegisteredClaims: jwtgo.RegisteredClaims{
 			Subject:   sub,
