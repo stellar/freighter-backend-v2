@@ -78,7 +78,7 @@ func (c *Claims) Validate(methodAndPath string, body []byte, maxLifetime, leeway
 	// AheadBy carries the overshoot so the magnitude is diagnosable from logs, the
 	// same way ExpiredTokenError.ExpiredBy is for lagging clocks.
 	if c.IssuedAt.After(now.Add(leeway)) {
-		return &ClockAheadError{AheadBy: c.IssuedAt.Sub(now), Err: errors.New("iat is in the future beyond the allowed skew")}
+		return &ClockAheadError{AheadBy: c.IssuedAt.Sub(now), Issuer: c.Issuer, Err: errors.New("iat is in the future beyond the allowed skew")}
 	}
 	// Reject tokens dated implausibly far in the future. exp can legitimately be
 	// up to one full lifetime ahead, plus skew leeway.
@@ -103,7 +103,7 @@ func (c *Claims) Validate(methodAndPath string, body []byte, maxLifetime, leeway
 	// benefit — but if a reordering ever makes this reachable, fix the formula in
 	// the same change.
 	if c.ExpiresAt.After(now.Add(maxLifetime + leeway)) {
-		return &ClockAheadError{AheadBy: c.ExpiresAt.Sub(now.Add(maxLifetime)), Err: errors.New("exp is too far in the future")}
+		return &ClockAheadError{AheadBy: c.ExpiresAt.Sub(now.Add(maxLifetime)), Issuer: c.Issuer, Err: errors.New("exp is too far in the future")}
 	}
 
 	if c.MethodAndPath != strings.TrimSpace(methodAndPath) {

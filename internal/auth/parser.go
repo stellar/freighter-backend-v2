@@ -85,7 +85,7 @@ func parseJWT(tokenString, methodAndPath string, body []byte, leeway time.Durati
 			if claims.NotBefore != nil {
 				aheadBy = time.Until(claims.NotBefore.Time)
 			}
-			return nil, &ClockAheadError{AheadBy: aheadBy, Err: err}
+			return nil, &ClockAheadError{AheadBy: aheadBy, Issuer: claims.Issuer, Err: err}
 		}
 		// Signature/algorithm failure (wrong key, tampered, alg confusion).
 		return nil, &VerificationError{Reason: ReasonBadSignature, Err: err}

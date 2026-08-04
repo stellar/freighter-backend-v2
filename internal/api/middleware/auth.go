@@ -97,16 +97,25 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				// unverified fallback is client-spoofable, and the permitted
 				// fall-through below puts this label on the SERVING path, where
 				// IssuerFromRequestUnverified's own contract says not to rely on it.
-				// An expired token carries an authentic iss (see ExpiredTokenError);
-				// a clock_ahead one does not yet, so it still falls back to the
-				// spoofable value. That gap is now closable — since the signature
-				// became the first gate, clock_ahead is signature-backed too — and
-				// worth closing: per the 7d prod sample it is the larger half of the
-				// permitted population on recent days.
+				//
+				// BOTH permitted reasons carry an authentic iss, for the same reason
+				// they are permitted at all: neither is reachable without the private
+				// key for sub, since the signature is verified before any claim is
+				// inspected. So every request that reaches the serving path below is
+				// attributed to a client bucket the sender cannot choose — which is
+				// what makes the per-iss split trustworthy as the signal for which
+				// client team still needs to ship the Date-header offset fix.
+				//
+				// The unverified fallback remains only for the rejection path, where
+				// no verified value exists (bad_signature, malformed, bad_subject).
 				iss := auth.IssuerFromRequestUnverified(r)
 				issVerified := false
-				if isExpired && expiredErr.Issuer != "" {
+				switch {
+				case isExpired && expiredErr.Issuer != "":
 					iss = expiredErr.Issuer
+					issVerified = true
+				case isClockAhead && clockAheadErr.Issuer != "":
+					iss = clockAheadErr.Issuer
 					issVerified = true
 				}
 

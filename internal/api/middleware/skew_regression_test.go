@@ -310,6 +310,62 @@ func TestAuth_PermittedExpiredUsesSignatureVerifiedIssuer(t *testing.T) {
 	assert.Equal(t, "freighter-mobile", expiredErr.Issuer)
 }
 
+// The clock_ahead half of the same property. It could not be had while
+// Claims.Validate ran ahead of the signature — there was no verified issuer to
+// carry — and it is the half that matters most now: over the 7d prod sample
+// clock_ahead is the majority of permitted traffic on the most recent days, so
+// leaving it on the unverified re-parse would leave the larger share of the
+// per-client split spoofable by the sender.
+func TestAuth_PermittedClockAheadUsesSignatureVerifiedIssuer(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	sub := hex.EncodeToString(pub)
+
+	// A token signed with iss="freighter-mobile", dated well past the leeway.
+	future := time.Now().Add(time.Hour)
+	claims := auth.Claims{
+		BodyHash:      auth.HashBody(nil),
+		MethodAndPath: "GET " + authTestPath,
+		RegisteredClaims: jwtgo.RegisteredClaims{
+			Subject:   sub,
+			Issuer:    "freighter-mobile",
+			IssuedAt:  jwtgo.NewNumericDate(future),
+			ExpiresAt: jwtgo.NewNumericDate(future.Add(auth.MaxTokenLifetime)),
+		},
+	}
+	token, err := jwtgo.NewWithClaims(jwtgo.SigningMethodEdDSA, claims).SignedString(priv)
+	require.NoError(t, err)
+
+	reg := prometheus.NewRegistry()
+	m := metrics.NewAuth(reg)
+	handler := Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, m)(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+
+	r := httptest.NewRequest(http.MethodGet, authTestPath, nil)
+	r.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, r)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, float64(1),
+		testutil.ToFloat64(m.RequestsTotal.WithLabelValues(
+			metrics.ResultInvalidPermitted, auth.ReasonClockAhead, "freighter-mobile")),
+		"the permitted clock_ahead request must be attributed to the signature-verified iss")
+
+	// The load-bearing assertion. The metric row above would pass on the
+	// unverified re-parse too, since it reads the same bearer token; this one only
+	// passes if the issuer was carried out of the verified claims.
+	_, verifyErr := auth.NewVerifier(auth.ClockSkewLeeway).VerifyHTTPRequest(
+		func() *http.Request {
+			rr := httptest.NewRequest(http.MethodGet, authTestPath, nil)
+			rr.Header.Set("Authorization", "Bearer "+token)
+			return rr
+		}())
+	var clockAheadErr *auth.ClockAheadError
+	require.ErrorAs(t, verifyErr, &clockAheadErr)
+	assert.Equal(t, "freighter-mobile", clockAheadErr.Issuer)
+}
+
 // Sanity floor, in BOTH directions: an offset far beyond anything observed is
 // still served, so the fix is not quietly bounded by some larger threshold the
 // way a leeway would be. This is the property that distinguishes it from

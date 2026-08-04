@@ -29,11 +29,11 @@ type ExpiredTokenError struct {
 	// the failure for the same reason ExpiredBy is — so the caller gets an
 	// authentic observability label instead of re-parsing the token unverified.
 	//
-	// ClockAheadError has no counterpart yet — but no longer for the original
-	// reason. It used to be raised before any signature check, so no authentic
-	// issuer existed to carry; now that the signature is the first gate it is
-	// raised only after verification, so one does exist. Until it carries it, the
-	// middleware falls back to the spoofable header value for clock_ahead.
+	// ClockAheadError carries the same field for the same reason: both clock
+	// errors are raised only after the signature has been verified, so both can
+	// hand the caller an authentic label. That symmetry is deliberate — the
+	// permissive→strict gate reads both reasons split by client, so an unverified
+	// issuer on either one would leave that split sender-controlled.
 	Issuer string
 	Err    error
 }
@@ -58,7 +58,13 @@ func (e *ExpiredTokenError) Is(target error) bool { return target == ErrUnauthor
 // middleware.Auth to permit in permissive mode.
 type ClockAheadError struct {
 	AheadBy time.Duration
-	Err     error
+	// Issuer is the token's SIGNATURE-VERIFIED `iss` claim, the counterpart of
+	// ExpiredTokenError.Issuer and authentic for the same reason: this error is
+	// only constructed once the signature has been checked. Carried out of the
+	// failure so the caller gets an authentic observability label on the permitted
+	// (serving) path instead of re-parsing the token unverified.
+	Issuer string
+	Err    error
 }
 
 func (e *ClockAheadError) Error() string {
