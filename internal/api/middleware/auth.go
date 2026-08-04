@@ -98,7 +98,11 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				// fall-through below puts this label on the SERVING path, where
 				// IssuerFromRequestUnverified's own contract says not to rely on it.
 				// An expired token carries an authentic iss (see ExpiredTokenError);
-				// a clock_ahead one cannot, since no signature was ever checked.
+				// a clock_ahead one does not yet, so it still falls back to the
+				// spoofable value. That gap is now closable — since the signature
+				// became the first gate, clock_ahead is signature-backed too — and
+				// worth closing: per the 7d prod sample it is the larger half of the
+				// permitted population on recent days.
 				iss := auth.IssuerFromRequestUnverified(r)
 				issVerified := false
 				if isExpired && expiredErr.Issuer != "" {
@@ -126,18 +130,19 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				// metrics from serving genuine skew, in the exact counter that gates
 				// the permissive→strict flip.
 				//
-				// On signature verification: ReasonExpired implies the signature
-				// verified (it comes from jwtgo.ParseWithClaims, and jwt/v5 returns on
-				// signature failure before validating claims). ReasonClockAhead does
-				// NOT — Claims.Validate runs first, so a forged token dated into the
-				// future lands here without ever reaching the signature check. That is
-				// safe rather than merely tolerable: permitting attaches no userID, so
-				// the request is byte-for-byte equivalent to one carrying no
-				// Authorization header, which these routes already serve. An attacker
-				// gains nothing they could not have by sending no token at all. What it
-				// does mean is that invalid_permitted{reason="clock_ahead"} is a noisier
-				// signal than the expired one — read it as an upper bound on fast-clock
-				// clients, not an exact count.
+				// Both permitted reasons are signature-backed. parseJWT verifies the
+				// signature BEFORE validating claims, and jwt/v5 likewise returns on
+				// signature failure before running its own claim checks, so neither
+				// ReasonExpired nor ReasonClockAhead is reachable without the private
+				// key for sub. That is what makes permitting them safe to act on and
+				// makes invalid_permitted an honest count of real clients with wrong
+				// clocks — an unauthenticated caller cannot manufacture either reason,
+				// so it cannot hold the permissive→strict decision open by flooding the
+				// counter it is read from.
+				//
+				// Keep it that way: if a claims check is ever moved back ahead of the
+				// signature gate, whatever reason it produces stops being evidence of a
+				// real user and must not appear in this predicate.
 				//
 				// Strict stays fail-closed for everything: it has no anonymous path to
 				// fall back to, so skewed clients must be fixed client-side before the

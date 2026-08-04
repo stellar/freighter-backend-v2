@@ -242,6 +242,49 @@ func TestParseJWT_FutureIssuedAt(t *testing.T) {
 	assert.Equal(t, ReasonClockAhead, Reason(err))
 }
 
+// ReasonClockAhead is permitted in permissive mode, so it must never be reachable
+// without a verified signature — otherwise anyone can mint the reason at will and
+// drive both the served-200 path and the counter that gates the strict flip.
+func TestParseJWT_FutureIssuedAtWithBadSignatureIsBadSignature(t *testing.T) {
+	_, _, sub := newKeypair(t)
+	_, otherPriv, _ := newKeypair(t)
+
+	// Dated far past the leeway AND signed by a key that is not sub.
+	token := mint(t, otherPriv, skewedClaims(sub, testMethodAndPath, nil, time.Hour))
+
+	_, err := ParseJWT(token, testMethodAndPath, nil)
+	require.Error(t, err)
+	assert.Equal(t, ReasonBadSignature, Reason(err))
+}
+
+// The same invariant for the request-binding checks: a reason drawn from the
+// claims must mean "a real key holder sent this", not "someone typed it".
+func TestParseJWT_BadBodyHashWithBadSignatureIsBadSignature(t *testing.T) {
+	_, _, sub := newKeypair(t)
+	_, otherPriv, _ := newKeypair(t)
+
+	token := mint(t, otherPriv, validClaims(sub, testMethodAndPath, []byte("signed")))
+
+	_, err := ParseJWT(token, testMethodAndPath, []byte("different"))
+	require.Error(t, err)
+	assert.Equal(t, ReasonBadSignature, Reason(err))
+}
+
+// A future-dated nbf is a fast client clock, not a forgery. Reporting it as
+// bad_signature 401s the user even in permissive and files the request under the
+// counter operators read as "someone is forging tokens".
+func TestParseJWT_FutureNotBeforeIsClockAhead(t *testing.T) {
+	_, priv, sub := newKeypair(t)
+
+	c := validClaims(sub, testMethodAndPath, nil)
+	c.NotBefore = jwtgo.NewNumericDate(time.Now().Add(time.Hour))
+	token := mint(t, priv, c)
+
+	_, err := ParseJWT(token, testMethodAndPath, nil)
+	require.Error(t, err)
+	assert.Equal(t, ReasonClockAhead, Reason(err))
+}
+
 // --- VerifyHTTPRequest ---
 
 func newRequest(t *testing.T, method, target string, body []byte, bearer string) *http.Request {

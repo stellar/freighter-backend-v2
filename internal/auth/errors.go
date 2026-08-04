@@ -29,8 +29,11 @@ type ExpiredTokenError struct {
 	// the failure for the same reason ExpiredBy is — so the caller gets an
 	// authentic observability label instead of re-parsing the token unverified.
 	//
-	// ClockAheadError deliberately has no counterpart: it is raised before any
-	// signature check, so no authentic issuer exists to carry.
+	// ClockAheadError has no counterpart yet — but no longer for the original
+	// reason. It used to be raised before any signature check, so no authentic
+	// issuer existed to carry; now that the signature is the first gate it is
+	// raised only after verification, so one does exist. Until it carries it, the
+	// middleware falls back to the spoofable header value for clock_ahead.
 	Issuer string
 	Err    error
 }
@@ -49,8 +52,10 @@ func (e *ExpiredTokenError) Is(target error) bool { return target == ErrUnauthor
 // ExpiredTokenError. It wraps ErrUnauthorized so callers that don't care about
 // the distinction still treat it as a 401.
 //
-// Unlike ExpiredTokenError this is raised during Claims.Validate, i.e. BEFORE
-// signature verification, so it carries no proof of who signed the token.
+// Like ExpiredTokenError, it is only ever raised after the signature has been
+// verified (parseJWT checks the signature before validating claims), so it does
+// imply the token was signed by sub. That is what makes it safe for
+// middleware.Auth to permit in permissive mode.
 type ClockAheadError struct {
 	AheadBy time.Duration
 	Err     error
@@ -71,16 +76,15 @@ func (e *ClockAheadError) Is(target error) bool { return target == ErrUnauthoriz
 const (
 	ReasonExpired      = "expired"       // exp in the past (beyond leeway) — a LAGGING client clock
 	ReasonBadSignature = "bad_signature" // signature/alg verification failed
-	// ReasonClockAhead is a client clock running FAST: iat, or exp, is further in
-	// the future than the leeway allows. It is the mirror of ReasonExpired, split
-	// out of ReasonBadTiming so a wrong clock is distinguishable from a malformed
-	// token — both are "timing" failures, but only this one is a clock symptom,
-	// and conflating them makes the permitted-skew rate unreadable.
+	// ReasonClockAhead is a client clock running FAST: iat, exp, or nbf is further
+	// in the future than the leeway allows. It is the mirror of ReasonExpired,
+	// split out of ReasonBadTiming so a wrong clock is distinguishable from a
+	// malformed token — both are "timing" failures, but only this one is a clock
+	// symptom, and conflating them makes the permitted-skew rate unreadable.
 	//
-	// Unlike ReasonExpired this is assigned BEFORE signature verification (see
-	// parser.go), so it does not imply the token was signed by sub. That is safe
-	// where it is used — permitting attaches no userID — but it means this reason
-	// alone is not evidence of a real user.
+	// Like ReasonExpired, it is assigned only after the signature verifies (see
+	// parser.go), so it is evidence of a real key holder whose clock is wrong —
+	// not something an unauthenticated caller can manufacture.
 	ReasonClockAhead    = "clock_ahead"
 	ReasonBadTiming     = "bad_timing"      // missing/inconsistent exp/iat, or lifetime too long
 	ReasonBadMethodPath = "bad_method_path" // methodAndPath claim does not match the request

@@ -123,23 +123,19 @@ func TestAuth_TruthTable(t *testing.T) {
 	}
 }
 
-// What a forged token gets in permissive mode, by how its timing claims look.
+// A forged token gets exactly one outcome in permissive mode — 401 bad_signature —
+// whatever its timing claims say.
 //
-// This pins a deliberate and slightly uncomfortable consequence of permitting
-// clock_ahead: Claims.Validate runs BEFORE signature verification, so a token
-// signed with an attacker's key but merely dated into the future is classified
-// clock_ahead and is served — it never reaches the signature check at all.
+// The uniformity is the property worth pinning. The signature is verified before
+// any claim is inspected, so an attacker cannot steer the classification by
+// choosing claims: dating a token into the future no longer buys the clock_ahead
+// reason (and with it a served 200 and a tick on the counter that gates the
+// permissive→strict flip), and an over-long lifetime no longer buys bad_timing.
 //
-// That is safe, and the assertions below are what make it safe rather than
-// merely asserted: the request is served with NO userID, so it is byte-for-byte
-// equivalent to one carrying no Authorization header, which these routes already
-// serve anonymously. An attacker gains nothing they could not have by sending no
-// token. The cost is measurement, not access — invalid_permitted{clock_ahead} is
-// an upper bound on fast-clock clients rather than an exact count.
-//
-// A forged token whose timing is otherwise fine still 401s on bad_signature, and
-// one whose timing claims are malformed still 401s on bad_timing. Those two rows
-// are the ones that would break if the permit predicate ever widened further.
+// Each row below produced a different outcome before the signature gate was moved
+// ahead of Claims.Validate. If any of them ever diverges again, a claims check has
+// moved back in front of the signature and whatever reason it yields is no longer
+// evidence of a real user.
 func TestAuth_PermissiveForgedTokenOutcomes(t *testing.T) {
 	pub, _, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
@@ -151,37 +147,13 @@ func TestAuth_PermissiveForgedTokenOutcomes(t *testing.T) {
 	now := time.Now()
 
 	cases := []struct {
-		name       string
-		token      string
-		wantStatus int
-		wantReason string
-		wantResult string
+		name  string
+		token string
 	}{
-		{
-			// Timing is valid, so validation reaches the signature check and fails there.
-			name:       "forged, valid timing -> 401 bad_signature",
-			token:      mintToken(t, attackerPriv, sub, mAndP, auth.MaxTokenLifetime, now),
-			wantStatus: http.StatusUnauthorized,
-			wantReason: "bad_signature",
-			wantResult: "rejected",
-		},
-		{
-			// Over-long lifetime is bad_timing, which is NOT permitted.
-			name:       "forged, malformed timing -> 401 bad_timing",
-			token:      mintToken(t, attackerPriv, sub, mAndP, 2*time.Hour, now),
-			wantStatus: http.StatusUnauthorized,
-			wantReason: "bad_timing",
-			wantResult: "rejected",
-		},
-		{
-			// Indistinguishable from a real fast clock at this point in validation.
-			// Served, but anonymously — see the doc comment above.
-			name:       "forged, future-dated -> served anonymously (clock_ahead)",
-			token:      mintToken(t, attackerPriv, sub, mAndP, auth.MaxTokenLifetime, now.Add(time.Hour)),
-			wantStatus: http.StatusOK,
-			wantReason: auth.ReasonClockAhead,
-			wantResult: metrics.ResultInvalidPermitted,
-		},
+		{"valid timing", mintToken(t, attackerPriv, sub, mAndP, auth.MaxTokenLifetime, now)},
+		{"over-long lifetime (would-be bad_timing)", mintToken(t, attackerPriv, sub, mAndP, 2*time.Hour, now)},
+		{"future-dated (would-be clock_ahead)", mintToken(t, attackerPriv, sub, mAndP, auth.MaxTokenLifetime, now.Add(time.Hour))},
+		{"long expired (would-be expired)", mintToken(t, attackerPriv, sub, mAndP, auth.MaxTokenLifetime, now.Add(-time.Hour))},
 	}
 
 	for _, tc := range cases {
@@ -189,7 +161,9 @@ func TestAuth_PermissiveForgedTokenOutcomes(t *testing.T) {
 			reg := prometheus.NewRegistry()
 			m := metrics.NewAuth(reg)
 			var hasUser bool
+			reached := false
 			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				reached = true
 				_, hasUser = auth.UserIDFromContext(r.Context())
 				w.WriteHeader(http.StatusOK)
 			})
@@ -200,14 +174,15 @@ func TestAuth_PermissiveForgedTokenOutcomes(t *testing.T) {
 			rr := httptest.NewRecorder()
 			handler.ServeHTTP(rr, r)
 
-			assert.Equal(t, tc.wantStatus, rr.Code)
+			assert.Equal(t, http.StatusUnauthorized, rr.Code, "a forged token must 401 regardless of its claims")
+			assert.False(t, reached, "handler must not be reached")
 			assert.Equal(t, float64(1),
-				testutil.ToFloat64(m.RequestsTotal.WithLabelValues(tc.wantResult, tc.wantReason, "freighter-extension")),
-				"expected one %s/%s", tc.wantResult, tc.wantReason)
+				testutil.ToFloat64(m.RequestsTotal.WithLabelValues("rejected", auth.ReasonBadSignature, "freighter-extension")),
+				"expected one rejected/bad_signature")
 
-			// The invariant that makes permitting a forged token safe: it is NEVER
-			// authenticated. If this ever fails, a forged token has become an
-			// identity, which is a different and much worse bug than a 401.
+			// The invariant that matters most: a forged token is NEVER authenticated.
+			// If this ever fails, a forgery has become an identity, which is a
+			// different and much worse bug than a 401.
 			assert.False(t, hasUser, "a forged token must never yield a userID")
 		})
 	}

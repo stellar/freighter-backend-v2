@@ -401,3 +401,42 @@ func TestAuth_PermissiveStillRejectsMalformedTiming(t *testing.T) {
 		testutil.ToFloat64(m.RequestsTotal.WithLabelValues("rejected", "bad_timing", "freighter-extension")),
 		"must be counted as a rejection, not permitted skew")
 }
+
+// The permit path must be reachable only by someone holding sub's private key. A
+// token dated into the future but signed by a different key is a forgery, not a
+// fast clock — and since the reason drives both the 200 and the counter the
+// permissive->strict decision reads, letting it through would mean any
+// unauthenticated caller could manufacture the appearance of skewed clients and
+// hold the rollout open indefinitely.
+func TestAuth_PermissiveRejectsForgedFutureDatedToken(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	sub := hex.EncodeToString(pub)
+
+	_, attackerPriv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+
+	// Exactly the claims a fast clock produces, signed by a key that is not sub.
+	token := mintToken(t, attackerPriv, sub, "GET "+authTestPath, auth.MaxTokenLifetime, time.Now().Add(time.Hour))
+
+	reg := prometheus.NewRegistry()
+	m := metrics.NewAuth(reg)
+	reached := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached = true; w.WriteHeader(http.StatusOK) })
+	handler := Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, m)(next)
+
+	r := httptest.NewRequest(http.MethodGet, authTestPath, nil)
+	r.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, r)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code, "a forged future-dated token must 401, not be served as skew")
+	assert.False(t, reached, "handler must not be reached")
+	assert.Equal(t, float64(1),
+		testutil.ToFloat64(m.RequestsTotal.WithLabelValues("rejected", auth.ReasonBadSignature, "freighter-extension")),
+		"must count as rejected/bad_signature")
+	assert.Equal(t, float64(0),
+		testutil.ToFloat64(m.RequestsTotal.WithLabelValues(
+			metrics.ResultInvalidPermitted, auth.ReasonClockAhead, "freighter-extension")),
+		"must not contaminate the counter that gates the permissive->strict flip")
+}
