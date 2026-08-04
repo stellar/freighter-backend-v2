@@ -96,17 +96,18 @@ func SanitizeClient(iss string) string {
 // CLOCK grounds that was served anonymously rather than 401ed (permissive mode
 // only — see middleware.Auth).
 //
-// Scope is exactly two reasons, the two directions a client clock can be wrong:
-//   - "expired"     — clock lagging. Implies the signature verified, since jwt/v5
-//     returns on signature failure before validating claims. A real user, and the
-//     `client` label is the signature-verified iss (carried out of the failure by
-//     ExpiredTokenError), so per-client attribution on this reason is authentic.
-//   - "clock_ahead" — clock fast. Assigned during Claims.Validate, i.e. BEFORE
-//     signature verification, so it does NOT imply a real user; a forged token
-//     dated into the future lands here too. Read it as an upper bound on
-//     fast-clock clients, not an exact count — and note the `client` label here is
-//     caller-chosen, so do NOT split this reason by client to decide which app
-//     still needs fixing. One request per increment needs no key.
+// Scope is exactly two reasons, the two directions a client clock can be wrong.
+// Both imply the signature verified — parseJWT checks it before validating
+// claims, and jwt/v5 likewise returns on signature failure before running its own
+// claim checks — so both are counts of real users rather than upper bounds, and
+// one increment costs one genuine signing key:
+//   - "expired"     — clock lagging. `client` is the signature-verified iss,
+//     carried out of the failure by ExpiredTokenError.
+//   - "clock_ahead" — clock fast (iat, exp, or nbf). `client` is the
+//     signature-verified iss, carried out of the failure by ClockAheadError.
+//
+// Both reasons are therefore safe to split by client to decide which app still
+// needs fixing: the sender cannot choose its own bucket.
 //
 // Both must stay in any permissive→strict readiness gate. As of the 7 days ending
 // 2026-08-03, prd ran 442 "expired" to 78 "clock_ahead", with clock_ahead the
