@@ -158,14 +158,17 @@ func mapCatalogPools(pools []wbtypes.BlendPool) []types.BlendCatalogPool {
 			})
 		}
 		out = append(out, types.BlendCatalogPool{
-			ID:          p.Address,
-			Name:        p.Name,
-			Status:      (*string)(p.Status),
-			SuppliedUSD: p.SuppliedUsd,
-			BorrowedUSD: p.BorrowedUsd,
-			InterestAPY: p.InterestApy,
-			NetAPY:      p.NetApy,
-			Reserves:    reserves,
+			ID:           p.Address,
+			Name:         p.Name,
+			Status:       (*string)(p.Status),
+			SuppliedUSD:  p.SuppliedUsd,
+			BorrowedUSD:  p.BorrowedUsd,
+			InterestAPY:  p.InterestApy,
+			NetAPY:       p.NetApy,
+			BackstopUSD:  p.BackstopUsd,
+			BackstopRate: p.BackstopRate,
+			InRewardZone: p.InRewardZone,
+			Reserves:     reserves,
 		})
 	}
 	return out
