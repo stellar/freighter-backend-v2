@@ -35,6 +35,15 @@ type BlendCatalogPool struct {
 	// yield, not netted against the pool's borrow side.
 	InterestAPY *float64 `json:"interest_apy"`
 	NetAPY      *float64 `json:"net_apy"`
+	// BackstopUSD is the pool's backstop-LP balance, priced at the Comet LP
+	// rate — the first-loss capital backing this pool, not a user's deposit.
+	BackstopUSD *float64 `json:"backstop_usd"`
+	// BackstopRate is the share of borrower interest routed to the backstop,
+	// as 7-decimal fixed point (4750000 = 47.5%). Null until observed.
+	BackstopRate *int32 `json:"backstop_rate"`
+	// InRewardZone reports whether the pool is in the backstop's reward zone
+	// and therefore earns BLND emissions.
+	InRewardZone bool `json:"in_reward_zone"`
 	// Reserves lists the pool's assets with current market rates.
 	Reserves []BlendCatalogReserve `json:"reserves"`
 }

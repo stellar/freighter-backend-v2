@@ -40,9 +40,12 @@ func poolsFixture() []wbtypes.BlendPool {
 	usdc, xlm, name1, name2 := "USDC", "XLM", "Big Pool", "Small Pool"
 	return []wbtypes.BlendPool{
 		{
-			Address: curatedPool,
-			Name:    &name1,
-			Status:  status(wbtypes.BlendPoolStatusActive),
+			Address:      curatedPool,
+			Name:         &name1,
+			Status:       status(wbtypes.BlendPoolStatusActive),
+			BackstopUsd:  f64(42000),
+			BackstopRate: i32(1000000), // 10%
+			InRewardZone: true,
 			Reserves: []wbtypes.BlendReserve{
 				{AssetContractID: "CUSDC", TokenSymbol: &usdc, Enabled: true, SupplyApy: f64(0.043), EmissionsSupplyApr: f64(0.008), SuppliedUsd: f64(1500000)},
 				{AssetContractID: "CXLM", TokenSymbol: &xlm, Enabled: false, SupplyApy: f64(0.001), SuppliedUsd: f64(99999)}, // disabled: excluded
@@ -185,6 +188,16 @@ func TestGetPoolsMapping(t *testing.T) {
 	assert.True(t, pool.Reserves[0].Enabled)
 	assert.False(t, pool.Reserves[1].Enabled)
 	assert.Nil(t, got.Pools[3].Status)
+
+	require.NotNil(t, pool.BackstopUSD)
+	assert.InDelta(t, 42000, *pool.BackstopUSD, 1e-9)
+	require.NotNil(t, pool.BackstopRate)
+	assert.Equal(t, int32(1000000), *pool.BackstopRate)
+	assert.True(t, pool.InRewardZone)
+	// A pool the fixture never sets these on: zero-value passthrough, not a
+	// mapping bug that silently defaults everyone to true/nonzero.
+	assert.False(t, got.Pools[1].InRewardZone)
+	assert.Nil(t, got.Pools[1].BackstopUSD)
 }
 
 func TestCatalogUpstreamErrors(t *testing.T) {
