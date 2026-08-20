@@ -8,6 +8,7 @@ import (
 )
 
 const validIssuer = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+const validContractID = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
 
 func TestNormalize(t *testing.T) {
 	t.Parallel()
@@ -35,6 +36,10 @@ func TestNormalize(t *testing.T) {
 		{"too many colons", "USDC:" + validIssuer + ":foo", "", true},
 		{"malformed issuer", "USDC:NOT-A-STELLAR-KEY", "", true},
 		{"surrounding whitespace trimmed", "  XLM ", "XLM", false},
+		{"contract token, symbol dropped", "SHRIMP:" + validContractID, validContractID, false},
+		{"contract token, non-classic-legal symbol accepted", "🍤SHRIMP-9:" + validContractID, validContractID, false},
+		{"bare contract id rejected", validContractID, "", true},
+		{"contract id in code position rejected", validContractID + ":" + validIssuer, "", true},
 	}
 
 	for _, tc := range cases {
@@ -65,6 +70,7 @@ func TestToStellarExpert(t *testing.T) {
 		{"1-char code uses type 1", "X:" + validIssuer, "X-" + validIssuer + "-1"},
 		{"5-char code uses type 2", "yXLM2:" + validIssuer, "yXLM2-" + validIssuer + "-2"},
 		{"12-char code uses type 2", "ABCDEFGHIJKL:" + validIssuer, "ABCDEFGHIJKL-" + validIssuer + "-2"},
+		{"contract token, no hyphen or type byte", validContractID, validContractID},
 	}
 
 	for _, tc := range cases {
@@ -74,4 +80,19 @@ func TestToStellarExpert(t *testing.T) {
 			assert.Equal(t, tc.want, ToStellarExpert(tc.canonical))
 		})
 	}
+}
+
+func TestContractTokenRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	canonical, err := Normalize("SHRIMP:" + validContractID)
+	require.NoError(t, err)
+	assert.Equal(t, validContractID, canonical)
+
+	// Guards the §1.2 quiet-failure case: a patched validator without this
+	// short-circuit would hyphenate the contract ID and append a classic type
+	// byte, which Stellar Expert would silently 400.
+	seID := ToStellarExpert(canonical)
+	assert.Equal(t, validContractID, seID)
+	assert.NotContains(t, seID, "-")
 }

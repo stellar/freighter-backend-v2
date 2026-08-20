@@ -40,6 +40,14 @@ func Normalize(input string) (string, error) {
 	}
 
 	code, issuer := parts[0], parts[1]
+
+	// Contract tokens are identified by contract ID alone; the "CODE" half is
+	// contract-supplied metadata (attacker-controlled, non-unique) and is
+	// discarded rather than validated as a classic asset code.
+	if utils.IsValidContractID(issuer) {
+		return issuer, nil
+	}
+
 	if !isValidAssetCode(code) {
 		return "", fmt.Errorf("%w: invalid asset code %q", ErrMalformed, code)
 	}
@@ -53,10 +61,14 @@ func Normalize(input string) (string, error) {
 // ToStellarExpert formats a canonical token id for the Stellar Expert
 // /asset/{id} endpoint. Native maps to "XLM"; classic assets become
 // "CODE-ISSUER-{1|2}" where the trailing type byte is derived from code length
-// (1-4 → 1 / credit_alphanum4, 5-12 → 2 / credit_alphanum12).
+// (1-4 → 1 / credit_alphanum4, 5-12 → 2 / credit_alphanum12). Contract tokens
+// have no type byte and are passed through unchanged.
 func ToStellarExpert(canonical string) string {
 	if canonical == NativeCanonical {
 		return NativeCanonical
+	}
+	if utils.IsValidContractID(canonical) {
+		return canonical
 	}
 	idx := strings.Index(canonical, ":")
 	if idx <= 0 {

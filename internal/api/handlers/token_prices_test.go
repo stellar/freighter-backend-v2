@@ -17,6 +17,7 @@ import (
 )
 
 const validIssuer = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+const validContractID = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
 
 func ptr(s string) *string { return &s }
 
@@ -47,6 +48,58 @@ func TestTokenPrices_Success(t *testing.T) {
 	assert.Equal(t, "0.16", resp.Data["XLM"].CurrentPrice)
 	assert.Equal(t, "1.27", *resp.Data["XLM"].PercentagePriceChange24h)
 	assert.Equal(t, "PUBLIC", mock.LastNetwork)
+}
+
+func TestTokenPrices_MixedClassicAndContractBatch(t *testing.T) {
+	t.Parallel()
+
+	mock := &utils.MockPricesService{
+		GetPricesOverride: map[string]*types.PriceEntry{
+			"USDC:" + validIssuer: {CurrentPrice: "1", PercentagePriceChange24h: ptr("0")},
+			validContractID:       {CurrentPrice: "0.0042", PercentagePriceChange24h: nil},
+		},
+	}
+	handler := NewTokenPricesHandler(mock, 1000)
+
+	body := `{"tokens":["USDC:` + validIssuer + `","SHRIMP:` + validContractID + `"]}`
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/token-prices?network=PUBLIC", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	require.NoError(t, handler.GetPrices(rr, req))
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	var resp struct {
+		Data map[string]*types.PriceEntry `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	require.Contains(t, resp.Data, "USDC:"+validIssuer)
+	assert.Equal(t, "1", resp.Data["USDC:"+validIssuer].CurrentPrice)
+
+	// Response echoes the caller's original "SHRIMP:C..." key, but the
+	// canonical id sent to the price service is the bare contract id.
+	require.Contains(t, resp.Data, "SHRIMP:"+validContractID)
+	assert.Equal(t, "0.0042", resp.Data["SHRIMP:"+validContractID].CurrentPrice)
+	assert.Nil(t, resp.Data["SHRIMP:"+validContractID].PercentagePriceChange24h)
+	assert.ElementsMatch(t, []string{"USDC:" + validIssuer, validContractID}, mock.LastTokens)
+}
+
+func TestTokenPrices_UnknownContractIDReturnsNull(t *testing.T) {
+	t.Parallel()
+
+	mock := &utils.MockPricesService{
+		GetPricesOverride: map[string]*types.PriceEntry{
+			validContractID: nil,
+		},
+	}
+	handler := NewTokenPricesHandler(mock, 1000)
+
+	body := `{"tokens":["SHRIMP:` + validContractID + `"]}`
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/token-prices?network=PUBLIC", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	require.NoError(t, handler.GetPrices(rr, req))
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Body.String(), `"SHRIMP:`+validContractID+`":null`)
 }
 
 func TestTokenPrices_NullableEntry(t *testing.T) {
