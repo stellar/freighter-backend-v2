@@ -83,6 +83,46 @@ func TestTokenPrices_MixedClassicAndContractBatch(t *testing.T) {
 	assert.ElementsMatch(t, []string{"USDC:" + validIssuer, validContractID}, mock.LastTokens)
 }
 
+// The symbol half of a contract-token id is untrusted, contract-supplied
+// metadata (design doc §2.1) — not part of the token's identity. A client
+// (or a spoofed/duplicate balance record) attaching two different symbols to
+// the same contract must still collapse to exactly one upstream/service call
+// and one cache entry, the same way "XLM"/"native"/"xlm" already collapse
+// for classic assets. Regression guard for the exact case §2.1 calls out:
+// "two spoofed symbols for one contract become two cache entries and two
+// upstream calls for the same price" if the symbol ever leaked into the
+// canonical id.
+func TestTokenPrices_SpoofedSymbolsDedupeToOneUpstreamCall(t *testing.T) {
+	t.Parallel()
+
+	mock := &utils.MockPricesService{
+		GetPricesOverride: map[string]*types.PriceEntry{
+			validContractID: {CurrentPrice: "0.0042", PercentagePriceChange24h: nil},
+		},
+	}
+	handler := NewTokenPricesHandler(mock, 1000)
+
+	body := `{"tokens":["SHRIMP:` + validContractID + `","SCAM:` + validContractID + `"]}`
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/token-prices?network=PUBLIC", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	require.NoError(t, handler.GetPrices(rr, req))
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// Exactly one call to the price service for the shared contract id,
+	// however many spoofed symbols the client attaches to it.
+	assert.Equal(t, []string{validContractID}, mock.LastTokens)
+
+	var resp struct {
+		Data map[string]*types.PriceEntry `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	require.Contains(t, resp.Data, "SHRIMP:"+validContractID)
+	require.Contains(t, resp.Data, "SCAM:"+validContractID)
+	assert.Equal(t, "0.0042", resp.Data["SHRIMP:"+validContractID].CurrentPrice)
+	assert.Equal(t, "0.0042", resp.Data["SCAM:"+validContractID].CurrentPrice)
+}
+
 func TestTokenPrices_UnknownContractIDReturnsNull(t *testing.T) {
 	t.Parallel()
 
