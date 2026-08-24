@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -431,6 +432,41 @@ func TestGetLedgerKeyAccounts(t *testing.T) {
 		err := handler.GetLedgerKeyAccounts(rr, req)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, rr.Code)
+	})
+
+	t.Run("should not leak internal RPC error detail on upstream failure", func(t *testing.T) {
+		t.Parallel()
+
+		const internalErr = "failed to get ledger entries: dial tcp 10.0.12.7:8000: connect: connection refused"
+		mockRPC := &utils.MockRPCService{
+			GetLedgerEntryError: errors.New(internalErr),
+		}
+
+		handler := NewLedgerKeyAccountHandler(mockRPC, 100)
+
+		body := `{
+			"public_keys": [
+				"GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
+			]
+		}`
+		req, _ := http.NewRequest("POST", "/api/v1/ledger-key/accounts?network=PUBLIC", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		err := handler.GetLedgerKeyAccounts(rr, req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, rr.Code)
+
+		type expectedResponse struct {
+			Data LedgerKeyAccountsResponse `json:"data"`
+		}
+		var response expectedResponse
+		err = json.Unmarshal(rr.Body.Bytes(), &response)
+		require.NoError(t, err)
+
+		assert.Equal(t, "unable to fetch ledger accounts", response.Data.Error.ErrorMessage)
+		assert.NotContains(t, rr.Body.String(), "10.0.12.7")
+		assert.NotContains(t, rr.Body.String(), "connection refused")
+		assert.NotContains(t, rr.Body.String(), internalErr)
 	})
 }
 
