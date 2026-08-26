@@ -217,7 +217,7 @@ func (s *ApiServer) routes() ([]route, error) {
 	ledgerKeyAccountsHandler := handlers.NewLedgerKeyAccountHandler(s.rpcService, s.cfg.AppConfig.MaxLedgerKeyAddresses)
 	featureFlagsHandler := handlers.NewFeatureFlagsHandler()
 	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
-	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest)
+	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest, s.appMetrics.Prices)
 	accountHistoryHandler, err := handlers.NewAccountHistoryHandler(
 		s.walletBackendService,
 		s.cfg.AppConfig.AccountHistoryDefaultLimit,

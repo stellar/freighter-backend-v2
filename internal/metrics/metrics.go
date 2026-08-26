@@ -241,6 +241,11 @@ type Prices struct {
 	// failed (and were silently fallen-through). Labeled by op: "mget" or
 	// "set".
 	RedisErrors *prometheus.CounterVec
+	// SkippedTokens counts token-prices request entries that failed to parse
+	// into a canonical asset id and were skipped-and-nulled (entry present in
+	// the response with a null price) instead of failing the batch; 400 is
+	// returned only when nothing in the batch parses. Labeled by network.
+	SkippedTokens *prometheus.CounterVec
 }
 
 // NewPrices creates and registers prices-service metrics with the given registerer.
@@ -258,8 +263,12 @@ func NewPrices(reg prometheus.Registerer) *Prices {
 			Name: "freighter_prices_redis_errors_total",
 			Help: "Redis operation failures observed by the prices service.",
 		}, []string{"op"}),
+		SkippedTokens: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_prices_skipped_tokens_total",
+			Help: "Unparseable token-prices request entries skipped-and-nulled instead of failing the batch.",
+		}, []string{"network"}),
 	}
-	reg.MustRegister(p.CacheOutcomes, p.MissBudgetExhausted, p.RedisErrors)
+	reg.MustRegister(p.CacheOutcomes, p.MissBudgetExhausted, p.RedisErrors, p.SkippedTokens)
 	return p
 }
 
