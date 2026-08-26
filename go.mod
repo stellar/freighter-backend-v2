@@ -16,7 +16,7 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
 	github.com/stellar/go v0.0.0-20250903085211-00c0b06cd7cc
-	github.com/stellar/go-stellar-sdk v0.6.1-0.20260625225930-6181cdf8bda5
+	github.com/stellar/go-stellar-sdk v0.7.3
 	github.com/stellar/wallet-backend v0.0.0-20260729203253-5182ba495ddf
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.37.0
@@ -89,7 +89,7 @@ require (
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
-	github.com/stellar/go-xdr v0.0.0-20260529210834-0bf8f4956364 // indirect
+	github.com/stellar/go-xdr v0.0.0-20260806060815-dc590f17552a // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
