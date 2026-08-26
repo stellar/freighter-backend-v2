@@ -15,7 +15,6 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
-	"github.com/stellar/freighter-backend-v2/internal/store"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/freighter-backend-v2/internal/utils/assetid"
@@ -29,6 +28,15 @@ const (
 	defaultMissFetchTTL  = 9 * time.Second
 
 	cacheKeyPrefix = "prices:v1"
+
+	// negativePriceCacheTTL is the flat TTL for cached null entries —
+	// tokens Stellar Expert authoritatively cannot price (not found,
+	// malformed, zero price). This deliberately breaks the positive-only
+	// convention (§6.2): once clients stop filtering custom tokens, an
+	// unpriced token in a balance list would otherwise hit upstream on
+	// every 30-second poll cycle, uncacheably. Transient failures are NOT
+	// cached.
+	negativePriceCacheTTL = 15 * time.Minute
 
 	// candlesWindow / candlesResolutionSec define the rolling 24h window used
 	// to compute percentagePriceChange24h from /asset/{id}/candles. 15-minute
@@ -58,9 +66,17 @@ type PricesServiceConfig struct {
 	MaxConcurrent    int
 }
 
+// JSONCache is the subset of *store.RedisStore the prices services depend
+// on, factored as an interface so tests can substitute an in-memory cache.
+// Implementations must tolerate concurrent use.
+type JSONCache interface {
+	MGetJSON(ctx context.Context, keys []string, makeDest func() any) (map[string]any, error)
+	SetJSON(ctx context.Context, key string, value any, ttl time.Duration) error
+}
+
 type pricesService struct {
 	stellarExpert types.StellarExpertService
-	redis         *store.RedisStore
+	redis         JSONCache
 	cfg           PricesServiceConfig
 	svcMetrics    *metrics.Service
 	pricesMetrics *metrics.Prices
@@ -73,7 +89,7 @@ type pricesService struct {
 // NewPricesService wires the orchestrator. redis may be nil; if so, every
 // request bypasses the cache and hits Stellar Expert. pricesMetrics may be
 // nil for tests; counters become no-ops in that case.
-func NewPricesService(stellarExpert types.StellarExpertService, redis *store.RedisStore, cfg PricesServiceConfig, metricsService *metrics.Service, pricesMetrics *metrics.Prices) types.PricesService {
+func NewPricesService(stellarExpert types.StellarExpertService, redis JSONCache, cfg PricesServiceConfig, metricsService *metrics.Service, pricesMetrics *metrics.Prices) types.PricesService {
 	if cfg.MaxConcurrent <= 0 {
 		cfg.MaxConcurrent = defaultMaxConcurrent
 	}
@@ -88,12 +104,16 @@ func NewPricesService(stellarExpert types.StellarExpertService, redis *store.Red
 
 func (p *pricesService) Name() string { return pricesServiceName }
 
-// cachedPriceEntry is the on-disk shape in Redis. Only positive results are
-// cached; Redis expiry (CacheTTL) alone governs freshness, so any entry that
-// MGET returns is a live hit.
+// cachedPriceEntry is the on-disk shape in Redis. Redis expiry alone governs
+// freshness, so any entry that MGET returns is a live hit. Positive results
+// cache at CacheTTL; authoritative nulls (Unpriced) cache at the flat
+// negativePriceCacheTTL so unpriced tokens don't hit upstream per poll.
 type cachedPriceEntry struct {
 	CurrentPrice             string  `json:"currentPrice,omitempty"`
 	PercentagePriceChange24h *string `json:"percentagePriceChange24h,omitempty"`
+	// Unpriced marks a cached authoritative null: Stellar Expert doesn't
+	// know the asset, rejected its id, or reports no usable price.
+	Unpriced bool `json:"unpriced,omitempty"`
 }
 
 // GetPrices fetches a snapshot for each canonical token id. The returned map
@@ -175,6 +195,13 @@ func (p *pricesService) loadCachedPrices(ctx context.Context, cacheKeys []string
 		entry, _ := v.(*cachedPriceEntry)
 		if !present || entry == nil {
 			p.recordCacheOutcome(network, "miss", 1)
+			continue
+		}
+		if entry.Unpriced {
+			// A cached authoritative null: the token stays in the result map
+			// as an explicit nil so it is not re-fetched as a miss.
+			hits[tokenByCacheKey[k]] = nil
+			p.recordCacheOutcome(network, "hit", 1)
 			continue
 		}
 		hits[tokenByCacheKey[k]] = &types.PriceEntry{
@@ -285,6 +312,7 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 
 	if assetErr != nil {
 		if errors.Is(assetErr, ErrAssetNotFound) || errors.Is(assetErr, ErrAssetMalformed) {
+			p.cacheNegative(ctx, cacheNet, canonical)
 			return nil, true
 		}
 		if errors.Is(assetErr, context.DeadlineExceeded) || errors.Is(assetErr, context.Canceled) {
@@ -300,6 +328,7 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 	// "0" string. Resolves to (nil, true) like not-found/malformed so it caches
 	// as an authoritative miss.
 	if asset.Price == 0 {
+		p.cacheNegative(ctx, cacheNet, canonical)
 		return nil, true
 	}
 
@@ -363,6 +392,21 @@ func (p *pricesService) cachePositive(ctx context.Context, cacheNet, canonical s
 	}
 	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), value, p.cfg.CacheTTL); err != nil {
 		logger.Warn("prices: redis SET failed", "asset", canonical, "error", err)
+		if p.pricesMetrics != nil {
+			p.pricesMetrics.RedisErrors.WithLabelValues("set").Inc()
+		}
+	}
+}
+
+// cacheNegative stores an authoritative-null marker at the flat negative TTL
+// so unpriceable tokens are not re-fetched on every poll cycle. Transient
+// failures never reach this path.
+func (p *pricesService) cacheNegative(ctx context.Context, cacheNet, canonical string) {
+	if p.redis == nil {
+		return
+	}
+	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), cachedPriceEntry{Unpriced: true}, negativePriceCacheTTL); err != nil {
+		logger.Warn("prices: redis SET (negative) failed", "asset", canonical, "error", err)
 		if p.pricesMetrics != nil {
 			p.pricesMetrics.RedisErrors.WithLabelValues("set").Inc()
 		}

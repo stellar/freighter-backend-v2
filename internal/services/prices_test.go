@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -547,6 +548,128 @@ func TestFormatPrice(t *testing.T) {
 }
 
 func ptrStr(s string) *string { return &s }
+
+// fakeJSONCache is an in-memory JSONCache so cache round-trips (positive and
+// negative entries, TTL choice) are testable without a Redis listener.
+type fakeJSONCache struct {
+	mu      sync.Mutex
+	entries map[string][]byte
+	ttls    map[string]time.Duration
+}
+
+func newFakeJSONCache() *fakeJSONCache {
+	return &fakeJSONCache{entries: map[string][]byte{}, ttls: map[string]time.Duration{}}
+}
+
+func (f *fakeJSONCache) MGetJSON(ctx context.Context, keys []string, makeDest func() any) (map[string]any, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[string]any, len(keys))
+	for _, k := range keys {
+		raw, ok := f.entries[k]
+		if !ok {
+			continue
+		}
+		dest := makeDest()
+		if err := json.Unmarshal(raw, dest); err != nil {
+			continue
+		}
+		out[k] = dest
+	}
+	return out, nil
+}
+
+func (f *fakeJSONCache) SetJSON(ctx context.Context, key string, value any, ttl time.Duration) error {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.entries[key] = encoded
+	f.ttls[key] = ttl
+	return nil
+}
+
+func (f *fakeJSONCache) TTL(key string) time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ttls[key]
+}
+
+// Unpriceable tokens are negatively cached (§6.2): once clients stop
+// filtering custom tokens, an unpriced token in a balance list would
+// otherwise hit upstream on every 30s poll, uncacheably. A second request
+// within the negative TTL must make zero upstream calls and still serve an
+// explicit null.
+func TestPrices_NullEntryNegativelyCached(t *testing.T) {
+	t.Parallel()
+
+	stellarExpert := newFakeStellarExpert() // BOGUS unknown → ErrAssetNotFound
+	cache := newFakeJSONCache()
+	svc := NewPricesService(stellarExpert, cache, PricesServiceConfig{}, nil, nil)
+
+	got, err := svc.GetPrices(context.Background(), []string{"BOGUS:" + testIssuer}, types.PUBLIC)
+	require.NoError(t, err)
+	entry, ok := got["BOGUS:"+testIssuer]
+	require.True(t, ok)
+	assert.Nil(t, entry)
+	assert.Equal(t, 1, stellarExpert.CallCount("BOGUS-"+testIssuer+"-2"))
+
+	// The null entry is cached at the flat 15m negative TTL, not the 30s
+	// positive TTL.
+	assert.Equal(t, 15*time.Minute, cache.TTL("prices:v1:public:BOGUS:"+testIssuer))
+
+	got, err = svc.GetPrices(context.Background(), []string{"BOGUS:" + testIssuer}, types.PUBLIC)
+	require.NoError(t, err)
+	entry, ok = got["BOGUS:"+testIssuer]
+	require.True(t, ok)
+	assert.Nil(t, entry, "negative cache hit must still serve an explicit null")
+	assert.Equal(t, 1, stellarExpert.CallCount("BOGUS-"+testIssuer+"-2"),
+		"second request within the negative TTL must make zero upstream calls")
+}
+
+// A transient upstream failure is NOT authoritative and must not be
+// negatively cached — the next request should retry upstream.
+func TestPrices_TransientErrorNotNegativelyCached(t *testing.T) {
+	t.Parallel()
+
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.SetErr("XLM", errors.New("transport boom"))
+	cache := newFakeJSONCache()
+	svc := NewPricesService(stellarExpert, cache, PricesServiceConfig{}, nil, nil)
+
+	_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+	assert.Equal(t, 1, stellarExpert.CallCount("XLM"))
+
+	_, err = svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+	assert.Equal(t, 2, stellarExpert.CallCount("XLM"), "transient failures must retry upstream")
+}
+
+// Positive entries keep the configured (30s default) TTL and round-trip
+// through the cache.
+func TestPrices_PositiveEntryCachedAtConfiguredTTL(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
+	stellarExpert.SetCandles("XLM", candlesAged(now, 24*time.Hour, 0.158, 0.159))
+	cache := newFakeJSONCache()
+	svc := NewPricesService(stellarExpert, cache, PricesServiceConfig{CacheTTL: 45 * time.Second}, nil, nil)
+
+	_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+	assert.Equal(t, 45*time.Second, cache.TTL("prices:v1:public:XLM"))
+
+	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+	require.NotNil(t, got["XLM"])
+	assert.Equal(t, "0.16", got["XLM"].CurrentPrice)
+	assert.Equal(t, 1, stellarExpert.CallCount("XLM"), "cache hit must not refetch")
+}
 
 func TestPrices_CacheOutcomes_NilRedisCountsAllAsMisses(t *testing.T) {
 	t.Parallel()
