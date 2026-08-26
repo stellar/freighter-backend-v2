@@ -61,12 +61,17 @@ type StellarExpertAsset struct {
 }
 
 // StellarExpertCandle is one row of /asset/{id}/candles.
-// Wire shape per Stellar Expert API docs: [ts, open, low, high, close,
-// quote_volume, base_volume, trades].
+// Measured wire shape: [ts, open, high, low, close, quote_volume,
+// base_volume, trades]. NOTE: the upstream API docs list low before high,
+// but index 2 >= index 3 held in 96/96 sampled candles for both XLM and
+// USDC — index 2 is the high and index 3 is the low. Anyone adding
+// High()/Low() accessors must wire them from this measured order, not the
+// docs.
 type StellarExpertCandle [8]float64
 
-func (c StellarExpertCandle) TS() int64     { return int64(c[0]) }
-func (c StellarExpertCandle) Open() float64 { return c[1] }
+func (c StellarExpertCandle) TS() int64      { return int64(c[0]) }
+func (c StellarExpertCandle) Open() float64  { return c[1] }
+func (c StellarExpertCandle) Close() float64 { return c[4] }
 
 type StellarExpertService interface {
 	Service
