@@ -42,6 +42,31 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.PricesConfig.PriceFetchTimeoutSeconds; n < 0 {
 				return fmt.Errorf("--price-fetch-timeout-seconds=%d must be >= 0", n)
 			}
+			// Price-history config: TTLs and budgets must be positive (a zero
+			// TTL would silently disable caching against a paid upstream);
+			// the volume threshold and conversion divisor are magnitudes
+			// where 0 is meaningful ("guard disabled" / "conversion not
+			// enabled") but negatives are operator error.
+			for flag, v := range map[string]int{
+				"price-history-cache-ttl-1h-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1HSeconds,
+				"price-history-cache-ttl-1d-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1DSeconds,
+				"price-history-cache-ttl-1w-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1WSeconds,
+				"price-history-cache-ttl-1m-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1MSeconds,
+				"price-history-cache-ttl-1y-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1YSeconds,
+				"price-history-cache-ttl-all-seconds": s.Cfg.PriceHistoryConfig.CacheTTLALLSeconds,
+				"price-history-fetch-timeout-seconds": s.Cfg.PriceHistoryConfig.FetchTimeoutSeconds,
+				"token-stats-cache-ttl-seconds":       s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds,
+			} {
+				if v <= 0 {
+					return fmt.Errorf("--%s=%d must be positive", flag, v)
+				}
+			}
+			if v := s.Cfg.PriceHistoryConfig.MinVolume7dUSD; v < 0 {
+				return fmt.Errorf("--price-history-min-volume-7d-usd=%v must be >= 0", v)
+			}
+			if v := s.Cfg.PriceHistoryConfig.Volume7dConversionDivisor; v < 0 {
+				return fmt.Errorf("--price-history-volume-7d-conversion-divisor=%v must be >= 0", v)
+			}
 			if d, m := s.Cfg.AppConfig.AccountHistoryDefaultLimit, s.Cfg.AppConfig.AccountHistoryMaxLimit; d <= 0 || m <= 0 || d > m || m > handlers.AccountHistoryUpstreamMaxLimit {
 				return fmt.Errorf("--account-history-default-limit=%d / --account-history-max-limit=%d must be positive, default <= max, and max <= %d", d, m, handlers.AccountHistoryUpstreamMaxLimit)
 			}
@@ -150,6 +175,18 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceFetchTimeoutSeconds, "price-fetch-timeout-seconds", 9, "Budget for uncached token price fetches before returning best-effort results (seconds)")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxTokensPerRequest, "max-tokens-per-request", 1000, "Maximum tokens accepted in a single token-prices request")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxConcurrentPriceFetches, "max-concurrent-price-fetches", 25, "Per-request token-in-flight cap; each token issues GetAsset and GetAssetCandles in parallel, so the upstream HTTP-call ceiling is up to 2× this value")
+
+	// Token Price History + Token Stats Config
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.CacheTTL1HSeconds, "price-history-cache-ttl-1h-seconds", 300, "Redis TTL for cached 1H price-history series (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.CacheTTL1DSeconds, "price-history-cache-ttl-1d-seconds", 900, "Redis TTL for cached 1D price-history series (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.CacheTTL1WSeconds, "price-history-cache-ttl-1w-seconds", 3600, "Redis TTL for cached 1W price-history series (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.CacheTTL1MSeconds, "price-history-cache-ttl-1m-seconds", 21600, "Redis TTL for cached 1M price-history series (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.CacheTTL1YSeconds, "price-history-cache-ttl-1y-seconds", 86400, "Redis TTL for cached 1Y price-history series (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.CacheTTLALLSeconds, "price-history-cache-ttl-all-seconds", 604800, "Redis TTL for cached ALL price-history series (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.FetchTimeoutSeconds, "price-history-fetch-timeout-seconds", 9, "Budget for each uncached price-history/token-stats upstream fetch (seconds)")
+	cmd.Flags().Float64Var(&s.Cfg.PriceHistoryConfig.MinVolume7dUSD, "price-history-min-volume-7d-usd", 7000, "Low-volume warning threshold in USD 7-day volume; 0 disables the guard. The verdict stays false until --price-history-volume-7d-conversion-divisor is also set")
+	cmd.Flags().Float64Var(&s.Cfg.PriceHistoryConfig.Volume7dConversionDivisor, "price-history-volume-7d-conversion-divisor", 0, "Divisor converting the raw upstream volume7d into USD (raw ÷ divisor). The raw units are unconfirmed, so the default 0 disables the conversion and the lowVolume verdict evaluates false; set once units are confirmed (a config change, not a code change)")
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds, "token-stats-cache-ttl-seconds", 3600, "Redis TTL for the cached token-stats asset payload (seconds), shared with the history service's volume verdict")
 	return cmd
 }
 

@@ -41,6 +41,26 @@ PRICE_FETCH_TIMEOUT_SECONDS = "not-set"
 MAX_TOKENS_PER_REQUEST = "not-set"
 MAX_CONCURRENT_PRICE_FETCHES = "not-set"
 
+# Token Price History + Token Stats
+# Per-range series cache TTLs (seconds); defaults: 1H=300, 1D=900, 1W=3600,
+# 1M=21600, 1Y=86400, ALL=604800.
+PRICE_HISTORY_CACHE_TTL_1H_SECONDS = "300"
+PRICE_HISTORY_CACHE_TTL_1D_SECONDS = "900"
+PRICE_HISTORY_CACHE_TTL_1W_SECONDS = "3600"
+PRICE_HISTORY_CACHE_TTL_1M_SECONDS = "21600"
+PRICE_HISTORY_CACHE_TTL_1Y_SECONDS = "86400"
+PRICE_HISTORY_CACHE_TTL_ALL_SECONDS = "604800"
+# Budget for each uncached history/stats upstream fetch (default 9, matching prices).
+PRICE_HISTORY_FETCH_TIMEOUT_SECONDS = "9"
+# Low-volume warning threshold in USD 7-day volume; 0 disables the guard.
+PRICE_HISTORY_MIN_VOLUME_7D_USD = "7000"
+# Raw-volume7d → USD conversion divisor. Units are UNCONFIRMED upstream, so
+# this ships 0 (conversion disabled; the lowVolume verdict evaluates false).
+# Enabling the guard once units are confirmed is this one config change.
+PRICE_HISTORY_VOLUME_7D_CONVERSION_DIVISOR = "0"
+# TTL of the cached token-stats asset payload (shared with the volume verdict).
+TOKEN_STATS_CACHE_TTL_SECONDS = "3600"
+
 # Meridian Pay
 MERIDIAN_PAY_TREASURE_HUNT_ADDRESS = "not-set"
 MERIDIAN_PAY_POAP_ADDRESS = "not-set"
