@@ -1,0 +1,176 @@
+package services
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
+)
+
+func newStatsService(expert types.StellarExpertService, cache JSONCache, cfg PriceHistoryServiceConfig) PriceHistoryAndStatsService {
+	return NewPriceHistoryService(expert, cache, &utils.MockPricesService{}, cfg, nil, nil)
+}
+
+func assetWithStats(price float64, supply string, decimals *int, funded *int64) *types.StellarExpertAsset {
+	asset := &types.StellarExpertAsset{Price: price, Supply: json.Number(supply)}
+	asset.Decimals = decimals
+	asset.Trustlines.Funded = funded
+	return asset
+}
+
+func intPtr(v int) *int       { return &v }
+func int64Ptr(v int64) *int64 { return &v }
+
+// The A.2 XLM fixture: supply is a 19-digit raw integer, decimals absent
+// (default 7), holders = trustlines.funded.
+func TestTokenStats_XLM(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	expert.Set("XLM", assetWithStats(0.1604, "1054439020873472865", nil, int64Ptr(9926520)))
+
+	svc := newStatsService(expert, nil, PriceHistoryServiceConfig{})
+	got, err := svc.GetTokenStats(context.Background(), "XLM", types.PUBLIC)
+	require.NoError(t, err)
+
+	require.NotNil(t, got.SupplyOnStellar)
+	assert.Equal(t, "105443902087.3472865", *got.SupplyOnStellar)
+	require.NotNil(t, got.Holders)
+	assert.Equal(t, int64(9926520), *got.Holders)
+}
+
+func TestTokenStats_ExplicitDecimals(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	expert.Set("USDC-"+testIssuer+"-1", assetWithStats(1.000007, "4349718972397050", intPtr(7), int64Ptr(665679)))
+
+	svc := newStatsService(expert, nil, PriceHistoryServiceConfig{})
+	got, err := svc.GetTokenStats(context.Background(), "USDC:"+testIssuer, types.PUBLIC)
+	require.NoError(t, err)
+
+	require.NotNil(t, got.SupplyOnStellar)
+	assert.Equal(t, "434971897.239705", *got.SupplyOnStellar)
+	require.NotNil(t, got.Holders)
+	assert.Equal(t, int64(665679), *got.Holders)
+}
+
+// D4: unsourceable/absent fields are OMITTED — never emitted as nulls or
+// zeros. The wire assertion is on the marshaled JSON, not just the struct.
+func TestTokenStats_AbsentFieldsOmittedEntirely(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	expert.Set("BARE-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 0.5})
+
+	svc := newStatsService(expert, nil, PriceHistoryServiceConfig{})
+	got, err := svc.GetTokenStats(context.Background(), "BARE:"+testIssuer, types.PUBLIC)
+	require.NoError(t, err)
+
+	assert.Nil(t, got.SupplyOnStellar)
+	assert.Nil(t, got.Holders)
+
+	raw, err := json.Marshal(got)
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "supplyOnStellar")
+	assert.NotContains(t, string(raw), "holders")
+	assert.NotContains(t, string(raw), "null")
+	assert.NotContains(t, string(raw), "volume7d", "no volume row until units are confirmed")
+}
+
+// An unknown asset yields an empty stats block (clients hide the section),
+// not an error and not a 404.
+func TestTokenStats_NotFoundIsEmptyStats(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	svc := newStatsService(expert, nil, PriceHistoryServiceConfig{})
+	got, err := svc.GetTokenStats(context.Background(), "GHOST:"+testIssuer, types.PUBLIC)
+	require.NoError(t, err)
+	assert.Nil(t, got.SupplyOnStellar)
+	assert.Nil(t, got.Holders)
+}
+
+func TestTokenStats_TransientErrorIsError(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	expert.SetErr("XLM", errors.New("boom"))
+	svc := newStatsService(expert, nil, PriceHistoryServiceConfig{})
+	_, err := svc.GetTokenStats(context.Background(), "XLM", types.PUBLIC)
+	require.Error(t, err)
+}
+
+// The asset payload caches under tokenstats:v1 at the configured TTL, and
+// the history service reads the SAME entry — one upstream asset call serves
+// both endpoints.
+func TestTokenStats_SharesCachedAssetPayloadWithHistory(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	expert := newFakeStellarExpert()
+	expert.Set("XLM", assetWithStats(0.16, "1054439020873472865", nil, int64Ptr(9926520)))
+	expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
+	cache := newFakeJSONCache()
+
+	svc := NewPriceHistoryService(expert, cache, spotPrices("0.16"), PriceHistoryServiceConfig{TokenStatsCacheTTL: 30 * time.Minute}, nil, nil)
+
+	_, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
+	require.NoError(t, err)
+	assert.Equal(t, 1, expert.CallCount("XLM"))
+	assert.Equal(t, 30*time.Minute, cache.TTL("tokenstats:v1:public:XLM"))
+
+	got, err := svc.GetTokenStats(context.Background(), "XLM", types.PUBLIC)
+	require.NoError(t, err)
+	require.NotNil(t, got.SupplyOnStellar)
+	assert.Equal(t, "105443902087.3472865", *got.SupplyOnStellar, "supply survives the cache round-trip exactly")
+	assert.Equal(t, 1, expert.CallCount("XLM"), "stats must reuse the history service's cached asset payload")
+}
+
+func TestTokenStats_RejectsUnsupportedNetwork(t *testing.T) {
+	t.Parallel()
+
+	svc := newStatsService(newFakeStellarExpert(), nil, PriceHistoryServiceConfig{})
+	_, err := svc.GetTokenStats(context.Background(), "XLM", types.FUTURENET)
+	require.Error(t, err)
+}
+
+func TestScaleSupplyByDecimals(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		raw      string
+		decimals int
+		want     string
+		ok       bool
+	}{
+		{"XLM 19-digit supply, 7 decimals", "1054439020873472865", 7, "105443902087.3472865", true},
+		{"trailing zeros trimmed", "1000000000", 7, "100", true},
+		{"fraction only", "1", 7, "0.0000001", true},
+		{"exactly decimals digits", "1234567", 7, "0.1234567", true},
+		{"zero decimals", "42", 0, "42", true},
+		{"zero supply", "0", 7, "0", true},
+		{"18-decimal token", "5000000000000000000", 18, "5", true},
+		{"empty (absent upstream)", "", 7, "", false},
+		{"non-integer rejected", "10.5", 7, "", false},
+		{"exponent rejected", "1e18", 7, "", false},
+		{"negative decimals rejected", "100", -1, "", false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := scaleSupplyByDecimals(tc.raw, tc.decimals)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

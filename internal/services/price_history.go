@@ -113,10 +113,10 @@ type priceHistoryService struct {
 	fetchGroup singleflight.Group
 }
 
-// NewPriceHistoryService wires the history orchestrator. redis may be nil
-// (every request then hits upstream); prices supplies the 30s-cached spot the
-// delta anchors on; pricesMetrics may be nil for tests.
-func NewPriceHistoryService(stellarExpert types.StellarExpertService, redis JSONCache, prices types.PricesService, cfg PriceHistoryServiceConfig, metricsService *metrics.Service, pricesMetrics *metrics.Prices) types.PriceHistoryService {
+// NewPriceHistoryService wires the history/stats orchestrator. redis may be
+// nil (every request then hits upstream); prices supplies the 30s-cached spot
+// the delta anchors on; pricesMetrics may be nil for tests.
+func NewPriceHistoryService(stellarExpert types.StellarExpertService, redis JSONCache, prices types.PricesService, cfg PriceHistoryServiceConfig, metricsService *metrics.Service, pricesMetrics *metrics.Prices) PriceHistoryAndStatsService {
 	if cfg.FetchTimeout <= 0 {
 		cfg.FetchTimeout = defaultMissFetchTTL
 	}
