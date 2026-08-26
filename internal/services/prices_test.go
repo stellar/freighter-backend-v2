@@ -20,17 +20,19 @@ import (
 
 const testIssuer = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
 
-// hourlyCandlesAged builds hourly candles whose first entry's timestamp is
-// `oldestAge` before `now` (truncated to the hour) and whose subsequent
-// entries step forward 1h. `opens` supplies the open price for each
-// candle; only Open() (index 1) is read by the service code, so other
-// fields are zeroed.
-func hourlyCandlesAged(now time.Time, oldestAge time.Duration, opens ...float64) []types.StellarExpertCandle {
+// candlesAged builds 15-minute candles whose first entry's timestamp is
+// `oldestAge` before `now` (truncated to the hour, which is also on a
+// 15-minute boundary) and whose subsequent entries step forward 900s.
+// `closes` supplies the close price (index 4) for each candle — the value
+// the 24h formula anchors on. The open (index 1) is deliberately set to a
+// different value so a regression back to the pre-D8 open anchor cannot
+// pass; other fields are zeroed.
+func candlesAged(now time.Time, oldestAge time.Duration, closes ...float64) []types.StellarExpertCandle {
 	base := now.Truncate(time.Hour).Add(-oldestAge).Unix()
-	out := make([]types.StellarExpertCandle, len(opens))
-	for i, op := range opens {
-		ts := float64(base + int64(i)*3600)
-		out[i] = types.StellarExpertCandle{ts, op, 0, 0, op, 0, 0, 0}
+	out := make([]types.StellarExpertCandle, len(closes))
+	for i, cl := range closes {
+		ts := float64(base + int64(i)*900)
+		out[i] = types.StellarExpertCandle{ts, cl * 1.5, 0, 0, cl, 0, 0, 0}
 	}
 	return out
 }
@@ -45,6 +47,7 @@ type fakeStellarExpert struct {
 	errs            map[string]error
 	calls           map[string]int
 	candleCalls     map[string]int
+	candleRes       map[string]int
 	delay           time.Duration
 	concurrentInUse atomic.Int64
 	maxConcurrent   atomic.Int64
@@ -58,6 +61,7 @@ func newFakeStellarExpert() *fakeStellarExpert {
 		errs:        map[string]error{},
 		calls:       map[string]int{},
 		candleCalls: map[string]int{},
+		candleRes:   map[string]int{},
 	}
 }
 
@@ -116,6 +120,7 @@ func (f *fakeStellarExpert) GetAssetCandles(ctx context.Context, network, assetI
 
 	f.mu.Lock()
 	f.candleCalls[assetID]++
+	f.candleRes[assetID] = resolutionSec
 	rows, ok := f.candles[assetID]
 	err := f.candleErrs[assetID]
 	f.mu.Unlock()
@@ -167,17 +172,54 @@ func (f *fakeStellarExpert) CandleCallCount(assetID string) int {
 	return f.candleCalls[assetID]
 }
 
+// LastCandleResolution reports the resolutionSec of the most recent
+// GetAssetCandles call for assetID (0 when never called).
+func (f *fakeStellarExpert) LastCandleResolution(assetID string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.candleRes[assetID]
+}
+
+// D8 alignment (§4.2): the 24h delta anchors on the first candle's CLOSE (the
+// first plotted chart point), not its open, and the candles request uses the
+// chart's 1D resolution (900s). Open and close differ in this fixture so an
+// accidental revert to the open anchor fails loudly.
+func TestPrices_Change24h_AnchorsOnFirstCloseAt15mResolution(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
+	// first candle: open=0.150, close=0.158. Close anchor:
+	// (0.16 - 0.158) / 0.158 * 100 = 1.2658... → 1.27.
+	// The old open anchor would give (0.16 - 0.150) / 0.150 * 100 = 6.67.
+	rows := candlesAged(now, 24*time.Hour, 0.158, 0.159)
+	rows[0][1] = 0.150 // open ≠ close
+	stellarExpert.SetCandles("XLM", rows)
+
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
+	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+
+	xlm := got["XLM"]
+	require.NotNil(t, xlm)
+	require.NotNil(t, xlm.PercentagePriceChange24h)
+	assert.Equal(t, "1.27", *xlm.PercentagePriceChange24h)
+	assert.Equal(t, 900, stellarExpert.LastCandleResolution("XLM"),
+		"24h candles must be requested at the chart's 1D resolution (900s)")
+}
+
 func TestPrices_HappyPath_NoCache(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
 	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
-	// oldest open=0.158 → (0.16-0.158)/0.158*100 ≈ 1.27
-	stellarExpert.SetCandles("XLM", hourlyCandlesAged(now, 24*time.Hour, 0.158, 0.159))
+	// oldest close=0.158 → (0.16-0.158)/0.158*100 ≈ 1.27
+	stellarExpert.SetCandles("XLM", candlesAged(now, 24*time.Hour, 0.158, 0.159))
 	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 1.0})
 	// flat → 0%
-	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", hourlyCandlesAged(now, 24*time.Hour, 1.0, 1.0))
+	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", candlesAged(now, 24*time.Hour, 1.0, 1.0))
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"XLM", "USDC:" + testIssuer}, types.PUBLIC)
@@ -203,8 +245,8 @@ func TestPrices_UsesCandlesWhenAvailable(t *testing.T) {
 	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
 	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 1.10})
-	// oldest open=1.222 → (1.10-1.222)/1.222*100 ≈ -9.98 → -9.98
-	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", hourlyCandlesAged(now, 24*time.Hour, 1.222, 1.21))
+	// oldest close=1.222 → (1.10-1.222)/1.222*100 ≈ -9.98
+	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", candlesAged(now, 24*time.Hour, 1.222, 1.21))
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)
@@ -244,8 +286,8 @@ func TestPrices_XLM_UsesCandles(t *testing.T) {
 	now := time.Now().UTC()
 	stellarExpert := newFakeStellarExpert()
 	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
-	// oldest open=0.1633 → (0.16 - 0.1633) / 0.1633 * 100 ≈ -2.02
-	stellarExpert.SetCandles("XLM", hourlyCandlesAged(now, 24*time.Hour, 0.1633, 0.1625))
+	// oldest close=0.1633 → (0.16 - 0.1633) / 0.1633 * 100 ≈ -2.02
+	stellarExpert.SetCandles("XLM", candlesAged(now, 24*time.Hour, 0.1633, 0.1625))
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
@@ -288,7 +330,7 @@ func TestPrices_SparseCandles_NoChange(t *testing.T) {
 	stellarExpert := newFakeStellarExpert()
 	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 1.0})
 	// Only 6h of coverage — outside [23h, 25h] from `to`.
-	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", hourlyCandlesAged(now, 6*time.Hour, 0.5, 0.6))
+	stellarExpert.SetCandles("USDC-"+testIssuer+"-1", candlesAged(now, 6*time.Hour, 0.5, 0.6))
 
 	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
 	got, err := svc.GetPrices(context.Background(), []string{"USDC:" + testIssuer}, types.PUBLIC)

@@ -31,18 +31,21 @@ const (
 	cacheKeyPrefix = "prices:v1"
 
 	// candlesWindow / candlesResolutionSec define the rolling 24h window used
-	// to compute percentagePriceChange24h from /asset/{id}/candles. Hourly
-	// resolution yields ~25 records, well under Stellar Expert's 200-record cap.
+	// to compute percentagePriceChange24h from /asset/{id}/candles. 15-minute
+	// resolution matches the chart's 1D range (D8 alignment) and yields ~97
+	// records, still well under Stellar Expert's 200-record cap.
 	candlesWindow        = 24 * time.Hour
-	candlesResolutionSec = 3600
+	candlesResolutionSec = 900
 
 	// minCandleWindow / maxCandleWindow bound how far before `to` the
-	// oldest returned candle must open. With hourly resolution and a
-	// truncated `to`, an asset trading continuously yields candles[0] at
-	// exactly 24h ago; sparse trading or upstream truncation can shift it
-	// later (closer to now) or rarely earlier. ±1h around 24h covers
-	// normal bucket-boundary slack while rejecting sparse-data drift that
-	// would make the result not represent a 24h window.
+	// oldest returned candle must open. With a truncated `to`, an asset
+	// trading continuously yields candles[0] at exactly 24h ago; sparse
+	// trading or upstream truncation can shift it later (closer to now) or
+	// rarely earlier. ±1h around 24h covers normal bucket-boundary slack
+	// while rejecting sparse-data drift that would make the result not
+	// represent a 24h window. Kept verbatim through the D8 resolution
+	// change: finer buckets only shrink the boundary slack (60 → 15
+	// minutes), so the guard fires less, and any flips are null → value.
 	minCandleWindow = 23 * time.Hour
 	maxCandleWindow = 25 * time.Hour
 )
@@ -323,10 +326,11 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 }
 
 // change24hFromCandles computes the 24h percentage delta between currentPrice
-// and the open of the oldest candle. Returns nil when the upstream is empty,
-// the open is zero, or the oldest returned candle is too far from 24h before
-// `to` to credibly represent a 24h window (sparse trading or anomalous
-// upstream return).
+// and the close of the oldest candle — the first point the chart plots, so
+// the list row, detail header, and 1D chart share one anchor (D8, §4.2).
+// Returns nil when the upstream is empty, the close is zero, or the oldest
+// returned candle is too far from 24h before `to` to credibly represent a
+// 24h window (sparse trading or anomalous upstream return).
 func change24hFromCandles(currentPrice float64, candles []types.StellarExpertCandle, to time.Time) *string {
 	if len(candles) == 0 {
 		return nil
@@ -335,11 +339,11 @@ func change24hFromCandles(currentPrice float64, candles []types.StellarExpertCan
 	if oldestAge < minCandleWindow || oldestAge > maxCandleWindow {
 		return nil
 	}
-	openPrice := candles[0].Open()
-	if openPrice == 0 {
+	startPrice := candles[0].Close()
+	if startPrice == 0 {
 		return nil
 	}
-	percentChange := (currentPrice - openPrice) / openPrice * 100
+	percentChange := (currentPrice - startPrice) / startPrice * 100
 	rounded := math.Round(percentChange*100) / 100
 	if rounded == 0 {
 		// Collapse negative zero to "0" so the JSON is byte-stable.
