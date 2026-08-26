@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -163,6 +165,28 @@ func TestGetAccountBalances(t *testing.T) {
 		body := `{
 			"addresses": ["invalid-address"]
 		}`
+		req, _ := http.NewRequest("POST", "/api/v1/accounts/balances?network=PUBLIC", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		err := handler.GetAccountBalances(rr, req)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid Stellar address")
+	})
+
+	t.Run("should return error for wrong-length address with valid checksum", func(t *testing.T) {
+		t.Parallel()
+
+		// A 31-byte payload carrying a correct CRC16 under the account-ID
+		// version byte: it base32-decodes cleanly but is not a canonical
+		// 32-byte ed25519 key. SEP-23 requires rejecting it; strkey.Decode
+		// did not until go-stellar-sdk v0.7.2.
+		shortKey, encErr := strkey.Encode(strkey.VersionByteAccountID, make([]byte, 31))
+		require.NoError(t, encErr)
+
+		mockService := &utils.MockWalletBackendService{}
+		handler := NewAccountBalancesHandler(mockService, 100)
+
+		body := fmt.Sprintf(`{"addresses": [%q]}`, shortKey)
 		req, _ := http.NewRequest("POST", "/api/v1/accounts/balances?network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 

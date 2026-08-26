@@ -15,7 +15,6 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
-	github.com/stellar/go v0.0.0-20250903085211-00c0b06cd7cc
 	github.com/stellar/go-stellar-sdk v0.7.3
 	github.com/stellar/wallet-backend v0.0.0-20260729203253-5182ba495ddf
 	github.com/stretchr/testify v1.11.1

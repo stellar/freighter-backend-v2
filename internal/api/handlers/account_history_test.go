@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stellar/wallet-backend/pkg/wbclient"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
@@ -26,6 +27,12 @@ const testAddress = "GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"
 // testContractAddress is a valid contract (C...) strkey — the Meridian Pay
 // treasure-hunt contract from the dev environment config.
 const testContractAddress = "CCRIDTVINSOTNYOY6QNZ7JDCXWPOFF4SS3XXOIJIEPGVDGQ7UJP3DMJS"
+
+// wrongLengthAddress carries a correct CRC16 under the account-ID version byte
+// over a 31-byte payload, so it base32-decodes cleanly but is not a canonical
+// 32-byte ed25519 key. SEP-23 requires rejecting it; strkey.Decode did not
+// until go-stellar-sdk v0.7.2, so this pins the stricter behaviour.
+var wrongLengthAddress = strkey.MustEncode(strkey.VersionByteAccountID, make([]byte, 31))
 
 func TestNewAccountHistoryHandler_Validation(t *testing.T) {
 	t.Parallel()
@@ -112,6 +119,7 @@ func TestParseRequest(t *testing.T) {
 		name, query, address string
 	}{
 		{"invalid address", "network=PUBLIC", "not-a-stellar-address"},
+		{"wrong-length address with valid checksum", "network=PUBLIC", wrongLengthAddress},
 		{"missing network", "", testAddress},
 		{"invalid network futurenet", "network=FUTURENET", testAddress},
 		{"invalid network garbage", "network=foo", testAddress},
