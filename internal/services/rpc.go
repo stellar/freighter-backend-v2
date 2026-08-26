@@ -168,7 +168,7 @@ func (r *rpcService) SimulateInvocation(
 
 	invokeOp := txnbuild.InvokeHostFunction{
 		HostFunction: xdr.HostFunction{
-			Type: xdr.HostFunctionType(0),
+			Type: xdr.HostFunctionTypeHostFunctionTypeInvokeContract,
 			InvokeContract: &xdr.InvokeContractArgs{
 				ContractAddress: contractId,
 				FunctionName:    functionName,
@@ -208,7 +208,7 @@ func (r *rpcService) GetLedgerEntries(ctx context.Context, keys []string, networ
 	networkClient := r.configureNetworkClient(network)
 	response, err := networkClient.GetLedgerEntries(ctx, rpc.GetLedgerEntriesRequest{
 		Keys:   keys,
-		Format: "json",
+		Format: rpc.FormatJSON,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ledger entries: %w", err)
