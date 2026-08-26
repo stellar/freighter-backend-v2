@@ -246,6 +246,19 @@ type Prices struct {
 	// the response with a null price) instead of failing the batch; 400 is
 	// returned only when nothing in the batch parses. Labeled by network.
 	SkippedTokens *prometheus.CounterVec
+	// HistoryCacheOutcomes counts pricehistory:v1 series-cache outcomes.
+	// range is the closed 1H|1D|1W|1M|1Y|ALL enum (cardinality-safe: the
+	// handler 400s anything else before the service runs).
+	HistoryCacheOutcomes *prometheus.CounterVec
+	// TokenStatsCacheOutcomes counts tokenstats:v1 asset-payload cache
+	// outcomes (the cache entry shared by the history service's volume
+	// verdict / ALL-range floor and the token-stats endpoint).
+	TokenStatsCacheOutcomes *prometheus.CounterVec
+	// VolumeVerdictNull counts history responses whose lowVolume verdict was
+	// null — the candles call succeeded but the asset-payload call (the
+	// verdict's input) failed. A failed lookup is never reported as false,
+	// so this metric is how operators see that quadrant. Labeled by network.
+	VolumeVerdictNull *prometheus.CounterVec
 }
 
 // NewPrices creates and registers prices-service metrics with the given registerer.
@@ -267,8 +280,21 @@ func NewPrices(reg prometheus.Registerer) *Prices {
 			Name: "freighter_prices_skipped_tokens_total",
 			Help: "Unparseable token-prices request entries skipped-and-nulled instead of failing the batch.",
 		}, []string{"network"}),
+		HistoryCacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_price_history_cache_outcomes_total",
+			Help: "Series-cache outcomes for the token-price-history endpoint.",
+		}, []string{"network", "range", "outcome"}),
+		TokenStatsCacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_token_stats_cache_outcomes_total",
+			Help: "Asset-payload cache outcomes for the token-stats path (shared with the history service's volume verdict).",
+		}, []string{"network", "outcome"}),
+		VolumeVerdictNull: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_price_history_volume_verdict_null_total",
+			Help: "History responses whose lowVolume verdict was null because the asset-payload call failed while candles succeeded.",
+		}, []string{"network"}),
 	}
-	reg.MustRegister(p.CacheOutcomes, p.MissBudgetExhausted, p.RedisErrors, p.SkippedTokens)
+	reg.MustRegister(p.CacheOutcomes, p.MissBudgetExhausted, p.RedisErrors, p.SkippedTokens,
+		p.HistoryCacheOutcomes, p.TokenStatsCacheOutcomes, p.VolumeVerdictNull)
 	return p
 }
 

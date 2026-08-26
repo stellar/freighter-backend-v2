@@ -49,6 +49,7 @@ type fakeStellarExpert struct {
 	calls           map[string]int
 	candleCalls     map[string]int
 	candleRes       map[string]int
+	candleFrom      map[string]time.Time
 	delay           time.Duration
 	concurrentInUse atomic.Int64
 	maxConcurrent   atomic.Int64
@@ -63,6 +64,7 @@ func newFakeStellarExpert() *fakeStellarExpert {
 		calls:       map[string]int{},
 		candleCalls: map[string]int{},
 		candleRes:   map[string]int{},
+		candleFrom:  map[string]time.Time{},
 	}
 }
 
@@ -122,6 +124,7 @@ func (f *fakeStellarExpert) GetAssetCandles(ctx context.Context, network, assetI
 	f.mu.Lock()
 	f.candleCalls[assetID]++
 	f.candleRes[assetID] = resolutionSec
+	f.candleFrom[assetID] = from
 	rows, ok := f.candles[assetID]
 	err := f.candleErrs[assetID]
 	f.mu.Unlock()
@@ -179,6 +182,14 @@ func (f *fakeStellarExpert) LastCandleResolution(assetID string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.candleRes[assetID]
+}
+
+// LastCandleFrom reports the `from` of the most recent GetAssetCandles call
+// for assetID (zero time when never called).
+func (f *fakeStellarExpert) LastCandleFrom(assetID string) time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.candleFrom[assetID]
 }
 
 // D8 alignment (§4.2): the 24h delta anchors on the first candle's CLOSE (the
