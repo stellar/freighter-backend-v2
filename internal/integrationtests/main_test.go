@@ -33,4 +33,9 @@ func TestIntegrationTests(t *testing.T) {
 			freighterContainer: containers.FreighterContainer,
 		})
 	})
+	t.Run("LedgerKeyAccountsTestSuite", func(t *testing.T) {
+		suite.Run(t, &LedgerKeyAccountsTestSuite{
+			freighterContainer: containers.FreighterContainer,
+		})
+	})
 }

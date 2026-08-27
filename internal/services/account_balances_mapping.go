@@ -5,7 +5,7 @@ package services
 import (
 	"strings"
 
-	"github.com/stellar/go/amount"
+	"github.com/stellar/go-stellar-sdk/amount"
 
 	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
 

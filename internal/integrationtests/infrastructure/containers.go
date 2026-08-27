@@ -40,7 +40,7 @@ const (
 	AppDatabaseURL           = "postgres://freighter:freighter@freighter-postgres:5432/freighter?sslmode=disable"
 
 	RPCHealthTimeout       = 120 * time.Second
-	DefaultProtocolVersion = 24
+	DefaultProtocolVersion = 28
 )
 
 // TestContainer wraps a testcontainer with convenience methods for host/port/connection info.
@@ -243,7 +243,7 @@ func createStellarCoreContainer(ctx context.Context, testNetwork *testcontainers
 
 	containerRequest := testcontainers.ContainerRequest{
 		Name:  "stellar-core",
-		Image: "stellar/stellar-core:24",
+		Image: "stellar/stellar-core:28",
 		Labels: map[string]string{
 			"org.testcontainers.session-id": "freighter-integration-tests",
 		},
@@ -325,7 +325,7 @@ func createRPCContainer(ctx context.Context, testNetwork *testcontainers.DockerN
 
 	containerRequest := testcontainers.ContainerRequest{
 		Name:  "stellar-rpc",
-		Image: "stellar/stellar-rpc:24.0.0",
+		Image: "stellar/stellar-rpc:28.0.0",
 		Labels: map[string]string{
 			"org.testcontainers.session-id": "freighter-integration-tests",
 		},
