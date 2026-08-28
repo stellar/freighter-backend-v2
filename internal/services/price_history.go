@@ -28,8 +28,12 @@ const (
 	// coverage guard is evaluated against: a v1 entry has no `to`, so a
 	// mixed-fleet read of one would measure coverage against the zero
 	// timestamp. A cold cache on deploy is what the segment is for.
-	historyCacheKeyPrefix    = "pricehistory:v2"
-	tokenStatsCacheKeyPrefix = "tokenstats:v1"
+	historyCacheKeyPrefix = "pricehistory:v2"
+	// tokenStatsCacheKeyPrefix rotated v1→v2 when cachedAssetMeta gained the
+	// not-found marker: a v1 reader decodes {"notFound":true} as a payload
+	// with every field zeroed rather than as "upstream doesn't know this
+	// asset".
+	tokenStatsCacheKeyPrefix = "tokenstats:v2"
 
 	historyCurrency = "USD"
 
@@ -431,6 +435,11 @@ type cachedAssetMeta struct {
 	Volume7d float64 `json:"volume7d,omitempty"`
 	Created  int64   `json:"created,omitempty"`
 	Funded   *int64  `json:"funded,omitempty"`
+	// NotFound marks an authoritative "upstream does not know this asset".
+	// Caching it follows §6.2's reasoning for empty series: a 404 asset is
+	// the common case for unpriced SEP-41 tokens, and without this every
+	// history and stats request for one hits the paid GetAsset endpoint.
+	NotFound bool `json:"notFound,omitempty"`
 }
 
 func (m *cachedAssetMeta) toAsset() *types.StellarExpertAsset {
@@ -505,7 +514,9 @@ func (s *priceHistoryService) awaitAssetMeta(ctx context.Context, p *assetMetaPr
 }
 
 // getAssetMeta returns the (1h-cached, singleflight-coalesced) asset payload
-// for one canonical id. Only positive payloads are cached.
+// for one canonical id. Positive payloads cache at TokenStatsCacheTTL;
+// authoritative not-founds cache as a marker at the short
+// emptySeriesCacheTTL. Transient failures are never cached.
 func (s *priceHistoryService) getAssetMeta(ctx context.Context, network, cacheNet, canonical string) (*types.StellarExpertAsset, error) {
 	key := tokenStatsCacheKey(cacheNet, canonical)
 	if s.redis != nil {
@@ -516,6 +527,13 @@ func (s *priceHistoryService) getAssetMeta(ctx context.Context, network, cacheNe
 				s.pricesMetrics.RedisErrors.WithLabelValues("mget").Inc()
 			}
 		} else if entry, _ := cached[key].(*cachedAssetMeta); entry != nil {
+			if entry.NotFound {
+				// Counted apart from "hit" for the same reason the prices
+				// path separates negative_hit: serving cached absence is
+				// not the thing hit rate is meant to measure.
+				s.recordStatsCacheOutcome(network, "negative_hit")
+				return nil, ErrAssetNotFound
+			}
 			s.recordStatsCacheOutcome(network, "hit")
 			return entry.toAsset(), nil
 		}
@@ -527,16 +545,16 @@ func (s *priceHistoryService) getAssetMeta(ctx context.Context, network, cacheNe
 		defer cancel()
 		asset, err := s.stellarExpert.GetAsset(fctx, network, assetid.ToStellarExpert(canonical))
 		if err != nil {
+			// Not-found/malformed are upstream's authoritative answer, and
+			// they are the common case for unpriced SEP-41 tokens — without
+			// caching them, every open of one pays for a GetAsset call.
+			// §6.2's empty-series rationale, at the same short TTL.
+			if errors.Is(err, ErrAssetNotFound) || errors.Is(err, ErrAssetMalformed) {
+				s.cacheAssetMeta(fctx, key, cachedAssetMeta{NotFound: true}, emptySeriesCacheTTL)
+			}
 			return nil, err
 		}
-		if s.redis != nil {
-			if err := s.redis.SetJSON(fctx, key, assetToCachedMeta(asset), s.cfg.TokenStatsCacheTTL); err != nil {
-				logger.Warn("price-history: redis SET failed", "key", key, "error", err)
-				if s.pricesMetrics != nil {
-					s.pricesMetrics.RedisErrors.WithLabelValues("set").Inc()
-				}
-			}
-		}
+		s.cacheAssetMeta(fctx, key, assetToCachedMeta(asset), s.cfg.TokenStatsCacheTTL)
 		return asset, nil
 	})
 	select {
@@ -548,6 +566,18 @@ func (s *priceHistoryService) getAssetMeta(ctx context.Context, network, cacheNe
 		}
 		asset, _ := res.Val.(*types.StellarExpertAsset)
 		return asset, nil
+	}
+}
+
+func (s *priceHistoryService) cacheAssetMeta(ctx context.Context, key string, value cachedAssetMeta, ttl time.Duration) {
+	if s.redis == nil {
+		return
+	}
+	if err := s.redis.SetJSON(ctx, key, value, ttl); err != nil {
+		logger.Warn("price-history: redis SET failed", "key", key, "error", err)
+		if s.pricesMetrics != nil {
+			s.pricesMetrics.RedisErrors.WithLabelValues("set").Inc()
+		}
 	}
 }
 

@@ -9,9 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
@@ -100,6 +103,61 @@ func TestTokenStats_NotFoundIsEmptyStats(t *testing.T) {
 	assert.Nil(t, got.Holders)
 }
 
+// A 404 from the asset endpoint is authoritative — upstream is telling us it
+// does not know this asset — and it is the common case for unpriced SEP-41
+// tokens. Without negative caching, every history and stats request for one
+// hits the paid GetAsset endpoint forever. §6.2's rationale for negatively
+// caching empty series applies unchanged, at the same short TTL.
+func TestTokenStats_AuthoritativeNotFoundIsNegativelyCached(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert() // GHOST unknown → ErrAssetNotFound
+	cache := newFakeJSONCache()
+	reg := prometheus.NewRegistry()
+	pm := metrics.NewPrices(reg)
+	svc := NewPriceHistoryService(expert, cache, &utils.MockPricesService{}, PriceHistoryServiceConfig{}, nil, pm)
+
+	token := "GHOST:" + testIssuer
+	upstreamID := "GHOST-" + testIssuer + "-2"
+
+	got, err := svc.GetTokenStats(context.Background(), token, types.PUBLIC)
+	require.NoError(t, err)
+	assert.Nil(t, got.SupplyOnStellar)
+	assert.Equal(t, 1, expert.CallCount(upstreamID))
+	assert.Equal(t, emptySeriesCacheTTL, cache.TTL("tokenstats:v2:public:"+token),
+		"not-found meta caches at the same short negative TTL as empty series")
+
+	got, err = svc.GetTokenStats(context.Background(), token, types.PUBLIC)
+	require.NoError(t, err)
+	assert.Nil(t, got.SupplyOnStellar, "a cached not-found still yields an empty stats block, not an error")
+	assert.Equal(t, 1, expert.CallCount(upstreamID),
+		"a second request within the negative TTL must make zero upstream asset calls")
+
+	assert.Equal(t, float64(1), testutil.ToFloat64(pm.TokenStatsCacheOutcomes.WithLabelValues(types.PUBLIC, "negative_hit")))
+	assert.Equal(t, float64(0), testutil.ToFloat64(pm.TokenStatsCacheOutcomes.WithLabelValues(types.PUBLIC, "hit")))
+}
+
+// The cached asset-payload schema gained the not-found marker, so its key
+// segment rotates: an old binary would decode {"notFound":true} as a payload
+// with every field zeroed.
+func TestTokenStats_KeySchemaRotatedForNotFoundMarker(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	expert.Set("XLM", assetWithStats(0.16, "1054439020873472865", nil, int64Ptr(9926520)))
+	cache := newFakeJSONCache()
+	require.NoError(t, cache.SetJSON(context.Background(), "tokenstats:v1:public:XLM",
+		cachedAssetMeta{Price: 999}, time.Hour))
+
+	svc := newStatsService(expert, cache, PriceHistoryServiceConfig{})
+	got, err := svc.GetTokenStats(context.Background(), "XLM", types.PUBLIC)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, expert.CallCount("XLM"), "a v1 entry must not satisfy a v2 read")
+	require.NotNil(t, got.SupplyOnStellar)
+	assert.NotEqual(t, time.Duration(0), cache.TTL("tokenstats:v2:public:XLM"))
+}
+
 func TestTokenStats_TransientErrorIsError(t *testing.T) {
 	t.Parallel()
 
@@ -110,7 +168,7 @@ func TestTokenStats_TransientErrorIsError(t *testing.T) {
 	require.Error(t, err)
 }
 
-// The asset payload caches under tokenstats:v1 at the configured TTL, and
+// The asset payload caches under tokenstats:v2 at the configured TTL, and
 // the history service reads the SAME entry — one upstream asset call serves
 // both endpoints.
 func TestTokenStats_SharesCachedAssetPayloadWithHistory(t *testing.T) {
@@ -127,7 +185,7 @@ func TestTokenStats_SharesCachedAssetPayloadWithHistory(t *testing.T) {
 	_, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
 	require.NoError(t, err)
 	assert.Equal(t, 1, expert.CallCount("XLM"))
-	assert.Equal(t, 30*time.Minute, cache.TTL("tokenstats:v1:public:XLM"))
+	assert.Equal(t, 30*time.Minute, cache.TTL("tokenstats:v2:public:XLM"))
 
 	got, err := svc.GetTokenStats(context.Background(), "XLM", types.PUBLIC)
 	require.NoError(t, err)

@@ -256,9 +256,11 @@ type Prices struct {
 	// range is the closed 1H|1D|1W|1M|1Y|ALL enum (cardinality-safe: the
 	// handler 400s anything else before the service runs).
 	HistoryCacheOutcomes *prometheus.CounterVec
-	// TokenStatsCacheOutcomes counts tokenstats:v1 asset-payload cache
+	// TokenStatsCacheOutcomes counts tokenstats:v2 asset-payload cache
 	// outcomes (the cache entry shared by the history service's volume
-	// verdict / ALL-range floor and the token-stats endpoint).
+	// verdict / ALL-range floor and the token-stats endpoint). The outcome
+	// label is the same closed enum as CacheOutcomes: "hit",
+	// "negative_hit" (a cached authoritative asset-not-found), "miss".
 	TokenStatsCacheOutcomes *prometheus.CounterVec
 	// VolumeVerdictNull counts history responses whose lowVolume verdict was
 	// null — the candles call succeeded but the asset-payload call (the
