@@ -90,6 +90,20 @@ func IsValidPriceHistoryRange(r string) bool {
 	return ok
 }
 
+// DefaultRangeCacheTTL returns the §6.2 default series cache TTL for one
+// range enum member (0 for a non-member). The serve command's flag defaults
+// read it rather than repeating the numbers, so the config surface and the
+// service cannot drift apart on what "the default" is.
+func DefaultRangeCacheTTL(r string) time.Duration {
+	return priceHistoryRanges[r].defaultCacheTTL
+}
+
+// DefaultRangeCacheTTLSeconds is DefaultRangeCacheTTL in whole seconds, the
+// unit the *_SECONDS config surface uses.
+func DefaultRangeCacheTTLSeconds(r string) int {
+	return int(DefaultRangeCacheTTL(r) / time.Second)
+}
+
 // ValidCandleResolutionsSec is upstream's closed `resolution` enum, measured
 // in Appendix A.1 — everything outside it returns 400. The set is irregular
 // (4h and 12h are valid, 3h/6h/8h are not; 1d and 3d are valid, 2d is not),
