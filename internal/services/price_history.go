@@ -236,7 +236,7 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 		Range:             historyRange,
 		Currency:          historyCurrency,
 		ResolutionSeconds: deriveResolutionSeconds(points, spec.resolutionSec),
-		LowVolume:         s.volumeVerdict(meta, metaErr, network),
+		LowVolume:         s.volumeVerdict(ctx, meta, metaErr, network),
 		Change:            computeChange(historyRange, spec, points, got.to, spot, spotOK),
 		Points:            points,
 	}, nil
@@ -558,9 +558,14 @@ func (s *priceHistoryService) getAssetMeta(ctx context.Context, network, cacheNe
 // and the null is counted so the quadrant is operator-visible. While the
 // volume7d unit conversion is unconfirmed (divisor 0, the shipped default)
 // the verdict evaluates false.
-func (s *priceHistoryService) volumeVerdict(meta *types.StellarExpertAsset, metaErr error, network string) *bool {
+func (s *priceHistoryService) volumeVerdict(ctx context.Context, meta *types.StellarExpertAsset, metaErr error, network string) *bool {
 	if metaErr != nil || meta == nil {
-		if s.pricesMetrics != nil {
+		// The metric means "upstream degraded". A caller that walked away
+		// mid-request also aborts the meta wait, with a context error, but
+		// nothing upstream failed — counting it would make an
+		// upstream-health signal track client behaviour instead. The
+		// verdict is null either way; only the counter is withheld.
+		if !isCallerCancellation(ctx, metaErr) && s.pricesMetrics != nil {
 			s.pricesMetrics.VolumeVerdictNull.WithLabelValues(network).Inc()
 		}
 		return nil
@@ -570,6 +575,17 @@ func (s *priceHistoryService) volumeVerdict(meta *types.StellarExpertAsset, meta
 		verdict = meta.Volume7d/s.cfg.Volume7dConversionDivisor < s.cfg.MinVolume7dUSD
 	}
 	return &verdict
+}
+
+// isCallerCancellation reports whether err is this request's own context
+// ending rather than something upstream failing. Both surface as
+// context.Canceled/DeadlineExceeded, so the caller's ctx state is what
+// distinguishes them.
+func isCallerCancellation(ctx context.Context, err error) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // computeChange is the §4.2 spot-anchored delta: absolute = spot −

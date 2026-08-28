@@ -416,6 +416,43 @@ func TestPriceHistory_VolumeVerdict(t *testing.T) {
 	})
 }
 
+// freighter_price_history_volume_verdict_null_total means "upstream
+// degraded": the candles succeeded but the asset payload we grade volume on
+// did not. A client that closes its connection mid-request also aborts the
+// meta wait, with a context error — but nothing upstream went wrong, and
+// counting it makes the metric track client behaviour instead of upstream
+// health. lowVolume is still null either way; only the metric changes.
+func TestPriceHistory_VolumeVerdictNullNotCountedForClientCancellation(t *testing.T) {
+	t.Parallel()
+
+	fetchedAt := time.Now().UTC()
+	cache := newFakeJSONCache()
+	require.NoError(t, cache.SetJSON(context.Background(), "pricehistory:v2:public:XLM:1D", cachedSeries{
+		Points: []types.PricePoint{
+			{T: fetchedAt.Add(-24 * time.Hour).Unix(), P: "0.15"},
+			{T: fetchedAt.Add(-time.Hour).Unix(), P: "0.16"},
+		},
+		To: fetchedAt.Unix(),
+	}, time.Hour))
+
+	expert := newFakeStellarExpert()
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	expert.assetDelay = time.Minute // the meta wait cannot finish before the client leaves
+
+	reg := prometheus.NewRegistry()
+	pm := metrics.NewPrices(reg)
+	svc := newHistoryService(expert, cache, spotPrices("0.16"), PriceHistoryServiceConfig{}, pm)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the client is already gone
+
+	got, err := svc.GetPriceHistory(ctx, "XLM", types.PUBLIC, "1D")
+	require.NoError(t, err, "the series was cached, so the request still completes")
+	assert.Nil(t, got.LowVolume, "the verdict is still null — it is genuinely unknown")
+	assert.Equal(t, float64(0), testutil.ToFloat64(pm.VolumeVerdictNull.WithLabelValues(types.PUBLIC)),
+		"a client leaving is not upstream degradation")
+}
+
 // ALL's `from` is max(asset.created, the 2015-09-01 floor); an asset-call
 // failure falls back to the floor rather than failing the chart.
 func TestPriceHistory_ALLRangeFrom(t *testing.T) {
