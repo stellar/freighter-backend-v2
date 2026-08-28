@@ -23,7 +23,12 @@ import (
 const (
 	priceHistoryServiceName = "price-history"
 
-	historyCacheKeyPrefix    = "pricehistory:v1"
+	// historyCacheKeyPrefix carries the cached-entry SCHEMA version. It
+	// rotated v1→v2 when cachedSeries gained the fetch-time `to` the
+	// coverage guard is evaluated against: a v1 entry has no `to`, so a
+	// mixed-fleet read of one would measure coverage against the zero
+	// timestamp. A cold cache on deploy is what the segment is for.
+	historyCacheKeyPrefix    = "pricehistory:v2"
 	tokenStatsCacheKeyPrefix = "tokenstats:v1"
 
 	historyCurrency = "USD"
@@ -164,7 +169,7 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 	// cancel-candles-on-asset-not-found behavior — here candles are the
 	// payload (B.3).
 	var (
-		points    []types.PricePoint
+		got       series
 		seriesErr error
 		meta      *types.StellarExpertAsset
 		metaErr   error
@@ -175,7 +180,7 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		points, seriesErr = s.getSeries(ctx, network, cacheNet, canonical, historyRange, spec)
+		got, seriesErr = s.getSeries(ctx, network, cacheNet, canonical, historyRange, spec)
 	}()
 	go func() {
 		defer wg.Done()
@@ -197,6 +202,7 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 	if seriesErr != nil {
 		return nil, seriesErr
 	}
+	points := got.points
 	if points == nil {
 		points = make([]types.PricePoint, 0)
 	}
@@ -206,19 +212,32 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 		Currency:          historyCurrency,
 		ResolutionSeconds: deriveResolutionSeconds(points, spec.resolutionSec),
 		LowVolume:         s.volumeVerdict(meta, metaErr, network),
-		Change:            computeChange(historyRange, spec, points, spot, spotOK),
+		Change:            computeChange(historyRange, spec, points, got.to, spot, spotOK),
 		Points:            points,
 	}, nil
 }
 
-// cachedSeries is the on-disk shape of one pricehistory:v1 entry. Redis
+// cachedSeries is the on-disk shape of one pricehistory:v2 entry. Redis
 // expiry alone governs freshness. Empty series are cached too (negative
 // caching, emptySeriesCacheTTL).
 type cachedSeries struct {
 	Points []types.PricePoint `json:"points"`
+	// To is the unix time the upstream window ended at when this series was
+	// fetched. The §4.4 rule 5 coverage guard measures the series against
+	// the window that was REQUESTED, so it must be evaluated against this
+	// value — not wall-clock now, which would additionally charge the series
+	// for however long it has since sat in Redis.
+	To int64 `json:"to,omitempty"`
 }
 
-func (s *priceHistoryService) getSeries(ctx context.Context, network, cacheNet, canonical, historyRange string, spec rangeSpec) ([]types.PricePoint, error) {
+// series is one resolved history series plus the window end it was fetched
+// against, carried together because the coverage guard needs both.
+type series struct {
+	points []types.PricePoint
+	to     time.Time
+}
+
+func (s *priceHistoryService) getSeries(ctx context.Context, network, cacheNet, canonical, historyRange string, spec rangeSpec) (series, error) {
 	key := historyCacheKey(cacheNet, canonical, historyRange)
 	if cached, ok := s.loadCachedSeries(ctx, key); ok {
 		s.recordHistoryCacheOutcome(network, historyRange, "hit")
@@ -235,19 +254,19 @@ func (s *priceHistoryService) getSeries(ctx context.Context, network, cacheNet, 
 	})
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return series{}, ctx.Err()
 	case res := <-ch:
 		if res.Err != nil {
-			return nil, res.Err
+			return series{}, res.Err
 		}
-		points, _ := res.Val.([]types.PricePoint)
-		return points, nil
+		got, _ := res.Val.(series)
+		return got, nil
 	}
 }
 
-func (s *priceHistoryService) loadCachedSeries(ctx context.Context, key string) ([]types.PricePoint, bool) {
+func (s *priceHistoryService) loadCachedSeries(ctx context.Context, key string) (series, bool) {
 	if s.redis == nil {
-		return nil, false
+		return series{}, false
 	}
 	cached, err := s.redis.MGetJSON(ctx, []string{key}, func() any { return new(cachedSeries) })
 	if err != nil {
@@ -255,16 +274,25 @@ func (s *priceHistoryService) loadCachedSeries(ctx context.Context, key string) 
 		if s.pricesMetrics != nil {
 			s.pricesMetrics.RedisErrors.WithLabelValues("mget").Inc()
 		}
-		return nil, false
+		return series{}, false
 	}
 	entry, _ := cached[key].(*cachedSeries)
 	if entry == nil {
-		return nil, false
+		return series{}, false
 	}
-	if entry.Points == nil {
-		return make([]types.PricePoint, 0), true
+	out := series{points: entry.Points}
+	if out.points == nil {
+		out.points = make([]types.PricePoint, 0)
 	}
-	return entry.Points, true
+	if entry.To > 0 {
+		out.to = time.Unix(entry.To, 0).UTC()
+	} else {
+		// Defensive: an entry written without a fetch time (only reachable
+		// if the schema segment above is ever reused). Treat it as fetched
+		// now, which is the pre-fix behavior.
+		out.to = time.Now().UTC()
+	}
+	return out, true
 }
 
 // fetchSeries performs one upstream candles fetch and writes the result —
@@ -272,7 +300,7 @@ func (s *priceHistoryService) loadCachedSeries(ctx context.Context, key string) 
 // to an empty series (an unknown asset and an untraded asset are
 // indistinguishable to the UI); transient failures return errors and are
 // never cached.
-func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet, canonical, historyRange string, spec rangeSpec, key string) ([]types.PricePoint, error) {
+func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet, canonical, historyRange string, spec rangeSpec, key string) (series, error) {
 	// `to` is NOW, deliberately untruncated. Rounding it back to the last
 	// completed bucket would drop up to a full bucket off the right edge of
 	// every chart — 15 minutes on 1D, but 3 days on 1Y and 2 weeks on ALL,
@@ -310,11 +338,11 @@ func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet
 	candles, err := s.stellarExpert.GetAssetCandles(ctx, network, assetid.ToStellarExpert(canonical), from, to, int(spec.resolutionSec))
 	if err != nil {
 		if errors.Is(err, ErrAssetNotFound) || errors.Is(err, ErrAssetMalformed) {
-			points := make([]types.PricePoint, 0)
-			s.cacheSeries(ctx, key, points, emptySeriesCacheTTL)
-			return points, nil
+			empty := series{points: make([]types.PricePoint, 0), to: to}
+			s.cacheSeries(ctx, key, empty, emptySeriesCacheTTL)
+			return empty, nil
 		}
-		return nil, err
+		return series{}, err
 	}
 
 	points := make([]types.PricePoint, 0, len(candles))
@@ -329,8 +357,9 @@ func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet
 	if len(points) == 0 {
 		ttl = emptySeriesCacheTTL
 	}
-	s.cacheSeries(ctx, key, points, ttl)
-	return points, nil
+	fetched := series{points: points, to: to}
+	s.cacheSeries(ctx, key, fetched, ttl)
+	return fetched, nil
 }
 
 // metaWaitBudget bounds how long the ALL-range `from` refinement may wait on
@@ -353,11 +382,11 @@ func metaWaitBudget(ctx context.Context) time.Duration {
 	return budget
 }
 
-func (s *priceHistoryService) cacheSeries(ctx context.Context, key string, points []types.PricePoint, ttl time.Duration) {
+func (s *priceHistoryService) cacheSeries(ctx context.Context, key string, value series, ttl time.Duration) {
 	if s.redis == nil {
 		return
 	}
-	if err := s.redis.SetJSON(ctx, key, cachedSeries{Points: points}, ttl); err != nil {
+	if err := s.redis.SetJSON(ctx, key, cachedSeries{Points: value.points, To: value.to.Unix()}, ttl); err != nil {
 		logger.Warn("price-history: redis SET failed", "key", key, "error", err)
 		if s.pricesMetrics != nil {
 			s.pricesMetrics.RedisErrors.WithLabelValues("set").Inc()
@@ -476,11 +505,11 @@ func (s *priceHistoryService) volumeVerdict(meta *types.StellarExpertAsset, meta
 // request from the cached series plus the 30s-cached spot and never cached
 // as a value. Returns nil when the coverage guard rejects the window, when
 // there is no spot, or when the anchor is unusable.
-func computeChange(historyRange string, spec rangeSpec, points []types.PricePoint, spotStr string, spotOK bool) *types.PriceChange {
+func computeChange(historyRange string, spec rangeSpec, points []types.PricePoint, fetchedTo time.Time, spotStr string, spotOK bool) *types.PriceChange {
 	if len(points) == 0 {
 		return nil
 	}
-	if !coverageOK(historyRange, spec, points) {
+	if !coverageOK(historyRange, spec, points, fetchedTo) {
 		return nil
 	}
 	if !spotOK {
@@ -519,11 +548,21 @@ func computeChange(historyRange string, spec rangeSpec, points []types.PricePoin
 // old-enough coverage still support a delta, A.6). 1D keeps the prices
 // path's 23-25h band verbatim; longer ranges require ≥~90% coverage; ALL is
 // exempt because partial coverage is its definition.
-func coverageOK(historyRange string, spec rangeSpec, points []types.PricePoint) bool {
+//
+// `fetchedTo` is the window end the series was actually fetched against, not
+// wall-clock now. The distinction is the whole point: series cache long (15m
+// on 1D by default, and operator-tunable higher), so measuring against now
+// charges a cached series for its own cache age and pushes 1D past the upper
+// 25h bound for the tail of every cache window — nulling `change` on the
+// detail header while the list row still shows it.
+func coverageOK(historyRange string, spec rangeSpec, points []types.PricePoint, fetchedTo time.Time) bool {
 	if historyRange == allRange {
 		return true
 	}
-	to := time.Now().UTC().Truncate(time.Duration(spec.resolutionSec) * time.Second)
+	to := fetchedTo
+	if to.IsZero() {
+		to = time.Now().UTC()
+	}
 	oldestAge := to.Sub(time.Unix(points[0].T, 0))
 	if historyRange == oneDay {
 		return oldestAge >= minCandleWindow && oldestAge <= maxCandleWindow

@@ -169,7 +169,7 @@ func TestPriceHistory_EmptySeriesNegativelyCached(t *testing.T) {
 	assert.Nil(t, got.Change)
 	assert.Equal(t, 1, expert.CandleCallCount(unpricedContract))
 
-	assert.Equal(t, 15*time.Minute, cache.TTL("pricehistory:v1:public:"+unpricedContract+":1D"),
+	assert.Equal(t, 15*time.Minute, cache.TTL("pricehistory:v2:public:"+unpricedContract+":1D"),
 		"empty series cache at the flat negative TTL")
 
 	got, err = svc.GetPriceHistory(context.Background(), unpricedContract, types.PUBLIC, "1D")
@@ -209,7 +209,7 @@ func TestPriceHistory_TransientCandlesErrorIsError(t *testing.T) {
 	svc := newHistoryService(expert, cache, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
 	_, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
 	require.Error(t, err)
-	assert.Equal(t, time.Duration(0), cache.TTL("pricehistory:v1:public:XLM:1D"), "transient failure must not be cached")
+	assert.Equal(t, time.Duration(0), cache.TTL("pricehistory:v2:public:XLM:1D"), "transient failure must not be cached")
 }
 
 // Series cache TTLs are per range (§6.2).
@@ -225,7 +225,7 @@ func TestPriceHistory_SeriesCachedAtPerRangeTTL(t *testing.T) {
 	svc := newHistoryService(expert, cache, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
 	_, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1W")
 	require.NoError(t, err)
-	assert.Equal(t, time.Hour, cache.TTL("pricehistory:v1:public:XLM:1W"), "1W default TTL is 1h")
+	assert.Equal(t, time.Hour, cache.TTL("pricehistory:v2:public:XLM:1W"), "1W default TTL is 1h")
 
 	_, err = svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1W")
 	require.NoError(t, err)
@@ -608,6 +608,63 @@ func TestPriceHistory_SeriesAndSpotFetchConcurrently(t *testing.T) {
 		"the series fetch and the spot fetch must be in flight at the same time, not one after the other")
 	require.NotNil(t, got.Change, "the delta still resolves from the concurrently-fetched spot")
 	assert.Equal(t, "0.16", got.Points[1].P)
+}
+
+// The coverage guard measures the series against the window that was
+// REQUESTED, so it has to be evaluated against the `to` that series was
+// fetched with — not against wall-clock now. Recomputing to=now against a
+// cached series ages it by however long it has sat in Redis, so a 1D series
+// (15m TTL by default, and operator-tunable higher) drifts past the 23-25h
+// band and nulls `change` for the tail of every cache window. That is a D8
+// violation reachable purely through config.
+func TestPriceHistory_CoverageEvaluatedAgainstFetchTimeNotCacheAge(t *testing.T) {
+	t.Parallel()
+
+	fetchedAt := time.Now().UTC().Add(-2 * time.Hour)
+	cache := newFakeJSONCache()
+	key := "pricehistory:v2:public:XLM:1D"
+	require.NoError(t, cache.SetJSON(context.Background(), key, cachedSeries{
+		Points: []types.PricePoint{
+			{T: fetchedAt.Add(-24 * time.Hour).Unix(), P: "0.15"},
+			{T: fetchedAt.Add(-12 * time.Hour).Unix(), P: "0.16"},
+		},
+		To: fetchedAt.Unix(),
+	}, 4*time.Hour))
+
+	expert := newFakeStellarExpert()
+	svc := newHistoryService(expert, cache, spotPrices("0.17"), PriceHistoryServiceConfig{}, nil)
+
+	got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
+	require.NoError(t, err)
+	assert.Equal(t, 0, expert.CandleCallCount("XLM"), "served from cache")
+	require.Len(t, got.Points, 2)
+	require.NotNil(t, got.Change,
+		"a cached 1D series is still a 24h series two hours later; cache age is not sparse data")
+	assert.Equal(t, "0.02", got.Change.Absolute)
+}
+
+// The cached-series schema gained the fetch-time `to`, so the key-schema
+// segment rotates with it: a v1 entry carries no `to` and would be evaluated
+// against a zero timestamp.
+func TestPriceHistory_KeySchemaRotatedForStoredFetchTime(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	expert := newFakeStellarExpert()
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
+	cache := newFakeJSONCache()
+
+	require.NoError(t, cache.SetJSON(context.Background(), "pricehistory:v1:public:XLM:1D",
+		cachedSeries{Points: []types.PricePoint{{T: now.Unix(), P: "999"}}}, time.Hour))
+
+	svc := newHistoryService(expert, cache, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
+	got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, expert.CandleCallCount("XLM"), "a v1 entry must not satisfy a v2 read")
+	require.Len(t, got.Points, 2)
+	assert.NotEqual(t, time.Duration(0), cache.TTL("pricehistory:v2:public:XLM:1D"))
 }
 
 func TestPriceHistory_CacheOutcomeMetrics(t *testing.T) {
