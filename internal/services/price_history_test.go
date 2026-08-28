@@ -458,6 +458,74 @@ func TestPriceHistory_ALLRangeFrom(t *testing.T) {
 	})
 }
 
+// The upstream window must end at `now`, not at the last completed bucket.
+// Truncating `to` to the range's resolution drops up to a full bucket off the
+// right edge of every chart — 15 minutes on 1D, but 3 days on 1Y and 2 weeks
+// on ALL, and the ALL entry is then cached for 7 days on top of that. The
+// cache key carries no timestamp, so the truncation bought nothing.
+func TestPriceHistory_UpstreamWindowEndsAtNow(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+
+	for _, tc := range []struct {
+		historyRange string
+		stepSec      int64
+		oldestAge    time.Duration
+	}{
+		{"1D", 900, 24 * time.Hour},
+		{"1Y", 259200, 360 * 24 * time.Hour},
+		{allRange, 1209600, 360 * 24 * time.Hour},
+	} {
+		tc := tc
+		t.Run(tc.historyRange, func(t *testing.T) {
+			t.Parallel()
+			expert := newFakeStellarExpert()
+			expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+			expert.SetCandles("XLM", historyCandles(now, tc.oldestAge, tc.stepSec, 0.15, 0.16))
+
+			svc := newHistoryService(expert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
+			_, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, tc.historyRange)
+			require.NoError(t, err)
+
+			to := expert.LastCandleTo("XLM")
+			require.False(t, to.IsZero())
+			assert.WithinDuration(t, time.Now().UTC(), to, time.Minute,
+				"`to` must be now, never truncated back to the last completed bucket")
+		})
+	}
+}
+
+// The final bucket of a live series is always in progress. Its timestamp sits
+// past the last completed bucket boundary, and it must survive the round trip
+// — it is the newest point the chart draws and the right edge of the line.
+func TestPriceHistory_InProgressFinalBucketRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	expert := newFakeStellarExpert()
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.17, Volume7d: xlmRawVolume7d})
+	// Three 15m buckets ending with one that opened after the last completed
+	// boundary — i.e. the bucket now sits inside.
+	inProgress := now.Truncate(15 * time.Minute)
+	candles := []types.StellarExpertCandle{
+		{float64(inProgress.Add(-24 * time.Hour).Unix()), 0.20, 0, 0, 0.15, 0, 0, 0},
+		{float64(inProgress.Add(-15 * time.Minute).Unix()), 0.20, 0, 0, 0.16, 0, 0, 0},
+		{float64(inProgress.Unix()), 0.20, 0, 0, 0.169, 0, 0, 0},
+	}
+	expert.SetCandles("XLM", candles)
+
+	svc := newHistoryService(expert, nil, spotPrices("0.17"), PriceHistoryServiceConfig{}, nil)
+	got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
+	require.NoError(t, err)
+
+	require.Len(t, got.Points, 3, "the in-progress bucket is a point like any other")
+	assert.Equal(t, "0.169", got.Points[2].P)
+	assert.Equal(t, inProgress.Unix(), got.Points[2].T)
+	assert.Equal(t, int64(900), got.ResolutionSeconds)
+	require.NotNil(t, got.Change, "the 23-25h guard still passes with an untruncated `to`")
+}
+
 func TestPriceHistory_CacheOutcomeMetrics(t *testing.T) {
 	t.Parallel()
 

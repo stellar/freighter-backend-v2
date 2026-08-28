@@ -255,9 +255,15 @@ func (s *priceHistoryService) loadCachedSeries(ctx context.Context, key string) 
 // indistinguishable to the UI); transient failures return errors and are
 // never cached.
 func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet, canonical, historyRange string, spec rangeSpec, key string) ([]types.PricePoint, error) {
-	resolution := time.Duration(spec.resolutionSec) * time.Second
-	// Truncate to the bucket size so `from`/`to` align to bucket boundaries.
-	to := time.Now().UTC().Truncate(resolution)
+	// `to` is NOW, deliberately untruncated. Rounding it back to the last
+	// completed bucket would drop up to a full bucket off the right edge of
+	// every chart — 15 minutes on 1D, but 3 days on 1Y and 2 weeks on ALL,
+	// and the ALL entry then carries that staleness for its 7-day TTL. The
+	// final bucket of a live series is always in progress; its close is the
+	// newest trade and is exactly the point §4.2 anchors the delta's other
+	// end against. Truncation bought nothing in return: the cache key
+	// contains no timestamp, so aligned windows never shared an entry.
+	to := time.Now().UTC()
 
 	var from time.Time
 	if spec.window > 0 {
