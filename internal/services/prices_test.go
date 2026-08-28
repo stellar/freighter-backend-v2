@@ -842,6 +842,37 @@ func TestPrices_CacheOutcomes_NilRedisCountsAllAsMisses(t *testing.T) {
 	assert.Equal(t, float64(0), testutil.ToFloat64(pm.CacheOutcomes.WithLabelValues(types.PUBLIC, "hit")))
 }
 
+// A cached unpriceable entry is a cache hit mechanically, but it is not the
+// thing "hit rate" is meant to measure: it means we are serving a null. If it
+// counted as "hit", a mass-negative-caching incident — every token turning
+// unpriceable during an upstream wobble — would make the cache dashboards
+// look BETTER as the product broke. It gets its own closed-enum outcome.
+func TestPrices_CacheOutcomes_NegativeHitIsItsOwnOutcome(t *testing.T) {
+	t.Parallel()
+
+	stellarExpert := newFakeStellarExpert() // BOGUS unknown → ErrAssetNotFound
+	cache := newFakeJSONCache()
+	reg := prometheus.NewRegistry()
+	pm := metrics.NewPrices(reg)
+	svc := NewPricesService(stellarExpert, cache, PricesServiceConfig{}, nil, pm)
+
+	token := "BOGUS:" + testIssuer
+	_, err := svc.GetPrices(context.Background(), []string{token}, types.PUBLIC)
+	require.NoError(t, err)
+	// First pass is a miss; the null is then negatively cached.
+	assert.Equal(t, float64(1), testutil.ToFloat64(pm.CacheOutcomes.WithLabelValues(types.PUBLIC, "miss")))
+
+	got, err := svc.GetPrices(context.Background(), []string{token}, types.PUBLIC)
+	require.NoError(t, err)
+	entry, ok := got[token]
+	require.True(t, ok)
+	assert.Nil(t, entry)
+
+	assert.Equal(t, float64(1), testutil.ToFloat64(pm.CacheOutcomes.WithLabelValues(types.PUBLIC, "negative_hit")))
+	assert.Equal(t, float64(0), testutil.ToFloat64(pm.CacheOutcomes.WithLabelValues(types.PUBLIC, "hit")),
+		"serving a cached null must never inflate the hit rate")
+}
+
 func TestPrices_MissBudgetExhausted_EmitsMetric(t *testing.T) {
 	t.Parallel()
 

@@ -239,10 +239,14 @@ func (p *pricesService) loadCachedPrices(ctx context.Context, cacheKeys []string
 			continue
 		}
 		if entry.Unpriced {
-			// A cached authoritative null: the token stays in the result map
-			// as an explicit nil so it is not re-fetched as a miss.
+			// A cached null: the token stays in the result map as an
+			// explicit nil so it is not re-fetched as a miss. It is counted
+			// as its own outcome, never as a "hit" — otherwise a mass
+			// negative-caching incident (an upstream wobble turning every
+			// token unpriceable) would make the cache dashboards improve
+			// while the product broke.
 			hits[tokenByCacheKey[k]] = nil
-			p.recordCacheOutcome(network, "hit", 1)
+			p.recordCacheOutcome(network, "negative_hit", 1)
 			continue
 		}
 		hits[tokenByCacheKey[k]] = &types.PriceEntry{

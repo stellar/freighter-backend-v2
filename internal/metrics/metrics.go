@@ -229,9 +229,15 @@ func NewService(reg prometheus.Registerer) *Service {
 // degraded-mode signals (miss-budget exhaustion), and
 // Redis-from-this-service-POV errors.
 type Prices struct {
-	// CacheOutcomes counts per-token cache outcomes by network and outcome:
-	// "hit" (live entry within --price-cache-ttl-seconds) or "miss" (no
-	// entry, expired, or upstream-only path).
+	// CacheOutcomes counts per-token cache outcomes by network and outcome.
+	// The outcome label is a closed enum:
+	//   "hit"          — live priced entry within --price-cache-ttl-seconds
+	//   "negative_hit" — live cached null within
+	//                    --price-negative-cache-ttl-seconds; we served an
+	//                    unpriceable token from cache. Counted separately so
+	//                    a mass negative-caching incident does not read as
+	//                    an improving hit rate.
+	//   "miss"         — no entry, expired, or upstream-only path
 	CacheOutcomes *prometheus.CounterVec
 	// MissBudgetExhausted counts requests whose miss-fetch budget
 	// (--price-fetch-timeout-seconds) tripped before all misses resolved.
@@ -266,7 +272,7 @@ func NewPrices(reg prometheus.Registerer) *Prices {
 	p := &Prices{
 		CacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_cache_outcomes_total",
-			Help: "Per-token cache outcomes for the token-prices endpoint.",
+			Help: "Per-token cache outcomes for the token-prices endpoint (hit, negative_hit, miss).",
 		}, []string{"network", "outcome"}),
 		MissBudgetExhausted: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_miss_budget_exhausted_total",
