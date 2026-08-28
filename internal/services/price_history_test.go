@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -558,6 +559,55 @@ func TestPriceHistory_InProgressFinalBucketRoundTrips(t *testing.T) {
 	assert.Equal(t, inProgress.Unix(), got.Points[2].T)
 	assert.Equal(t, int64(900), got.ResolutionSeconds)
 	require.NotNil(t, got.Change, "the 23-25h guard still passes with an untruncated `to`")
+}
+
+// The series fetch and the spot fetch are independent, and each carries its
+// own multi-second budget. Run serially they stack — worst case ~18s against
+// a 10s http.Server WriteTimeout, so the connection dies before the handler
+// can write anything at all. They must overlap.
+func TestPriceHistory_SeriesAndSpotFetchConcurrently(t *testing.T) {
+	t.Parallel()
+
+	const probeWait = 3 * time.Second
+	now := time.Now().UTC()
+
+	seriesStarted := make(chan struct{})
+	spotStarted := make(chan struct{})
+	var overlapped atomic.Bool
+
+	expert := newFakeStellarExpert()
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
+	// The probe is deliberately one-sided: the candles call announces itself
+	// and then waits, still in flight, to see whether the spot call starts.
+	// Only that direction distinguishes overlap from "ran second and found
+	// the first one's flag already set", which a symmetric probe cannot.
+	expert.beforeCandles = func() {
+		close(seriesStarted)
+		select {
+		case <-spotStarted:
+			overlapped.Store(true)
+		case <-time.After(probeWait):
+		}
+	}
+
+	prices := &utils.MockPricesService{GetPricesFunc: func(ctx context.Context, tokens []string, network string) (map[string]*types.PriceEntry, error) {
+		close(spotStarted)
+		out := make(map[string]*types.PriceEntry, len(tokens))
+		for _, tok := range tokens {
+			out[tok] = &types.PriceEntry{CurrentPrice: "0.16"}
+		}
+		return out, nil
+	}}
+
+	svc := newHistoryService(expert, nil, prices, PriceHistoryServiceConfig{}, nil)
+	got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
+	require.NoError(t, err)
+
+	assert.True(t, overlapped.Load(),
+		"the series fetch and the spot fetch must be in flight at the same time, not one after the other")
+	require.NotNil(t, got.Change, "the delta still resolves from the concurrently-fetched spot")
+	assert.Equal(t, "0.16", got.Points[1].P)
 }
 
 func TestPriceHistory_CacheOutcomeMetrics(t *testing.T) {

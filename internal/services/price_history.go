@@ -168,9 +168,11 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 		seriesErr error
 		meta      *types.StellarExpertAsset
 		metaErr   error
+		spot      string
+		spotOK    bool
 		wg        sync.WaitGroup
 	)
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		points, seriesErr = s.getSeries(ctx, network, cacheNet, canonical, historyRange, spec)
@@ -178,6 +180,18 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 	go func() {
 		defer wg.Done()
 		meta, metaErr = s.getAssetMeta(ctx, network, cacheNet, canonical)
+	}()
+	// Spot joins the fan-out rather than running after it. The delta's two
+	// inputs are independent — the series comes from /candles, the spot from
+	// the prices service — and each carries its own multi-second fetch
+	// budget, so serially they stack to roughly twice the http.Server
+	// WriteTimeout and the connection dies before any status line is
+	// written. Fetching it unconditionally costs one extra prices lookup on
+	// series-less tokens, which the prices service's 30s positive and
+	// negative caches absorb.
+	go func() {
+		defer wg.Done()
+		spot, spotOK = s.spotPrice(ctx, canonical, network)
 	}()
 	wg.Wait()
 	if seriesErr != nil {
@@ -192,7 +206,7 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 		Currency:          historyCurrency,
 		ResolutionSeconds: deriveResolutionSeconds(points, spec.resolutionSec),
 		LowVolume:         s.volumeVerdict(meta, metaErr, network),
-		Change:            s.computeChange(ctx, canonical, network, historyRange, spec, points),
+		Change:            computeChange(historyRange, spec, points, spot, spotOK),
 		Points:            points,
 	}, nil
 }
@@ -462,16 +476,14 @@ func (s *priceHistoryService) volumeVerdict(meta *types.StellarExpertAsset, meta
 // request from the cached series plus the 30s-cached spot and never cached
 // as a value. Returns nil when the coverage guard rejects the window, when
 // there is no spot, or when the anchor is unusable.
-func (s *priceHistoryService) computeChange(ctx context.Context, canonical, network, historyRange string, spec rangeSpec, points []types.PricePoint) *types.PriceChange {
+func computeChange(historyRange string, spec rangeSpec, points []types.PricePoint, spotStr string, spotOK bool) *types.PriceChange {
 	if len(points) == 0 {
 		return nil
 	}
 	if !coverageOK(historyRange, spec, points) {
 		return nil
 	}
-
-	spotStr, ok := s.spotPrice(ctx, canonical, network)
-	if !ok {
+	if !spotOK {
 		return nil
 	}
 	spot, err := strconv.ParseFloat(spotStr, 64)

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -178,4 +179,52 @@ func TestTokenPriceHistory_ErrorMapping(t *testing.T) {
 			assert.Equal(t, tc.wantCode, unwrapHttpStatus(t, err))
 		})
 	}
+}
+
+// The service's series and spot fetches each carry a multi-second budget, and
+// the http.Server enforces a 10s WriteTimeout — after which the connection is
+// closed and no status line reaches the client at all. The handler therefore
+// bounds the request itself, so a slow upstream produces a real 503 instead
+// of a dropped connection.
+func TestTokenPriceHistory_BoundsTheRequestUnderWriteTimeout(t *testing.T) {
+	t.Parallel()
+
+	// api.DefaultWriteTimeout, inlined: importing internal/api from the
+	// handlers package would be an import cycle.
+	const serverWriteTimeout = 10 * time.Second
+	assert.Less(t, TokenPriceHistoryContextTimeout, serverWriteTimeout,
+		"the handler deadline must fire before the server stops being able to write a response")
+
+	var gotDeadline time.Time
+	var hadDeadline bool
+	mock := &utils.MockPriceHistoryService{GetPriceHistoryFunc: func(ctx context.Context, canonical, network, historyRange string) (*types.TokenPriceHistory, error) {
+		gotDeadline, hadDeadline = ctx.Deadline()
+		return &types.TokenPriceHistory{Range: historyRange, Currency: "USD", Points: []types.PricePoint{}}, nil
+	}}
+	handler := NewTokenPriceHistoryHandler(mock)
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/token-price-history?token=native&network=PUBLIC&range=1D", nil)
+	rr := httptest.NewRecorder()
+	require.NoError(t, handler.GetTokenPriceHistory(rr, req))
+
+	require.True(t, hadDeadline, "the service must run under a bounded context")
+	assert.LessOrEqual(t, time.Until(gotDeadline), TokenPriceHistoryContextTimeout)
+}
+
+// The stats endpoint shares the same upstream and the same WriteTimeout.
+func TestTokenStats_BoundsTheRequestUnderWriteTimeout(t *testing.T) {
+	t.Parallel()
+
+	var hadDeadline bool
+	mock := &utils.MockTokenStatsService{GetTokenStatsFunc: func(ctx context.Context, canonical, network string) (*types.TokenStats, error) {
+		_, hadDeadline = ctx.Deadline()
+		return &types.TokenStats{}, nil
+	}}
+	handler := NewTokenStatsHandler(mock)
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/token-stats?token=native&network=PUBLIC", nil)
+	rr := httptest.NewRecorder()
+	require.NoError(t, handler.GetTokenStats(rr, req))
+
+	require.True(t, hadDeadline, "the service must run under a bounded context")
 }

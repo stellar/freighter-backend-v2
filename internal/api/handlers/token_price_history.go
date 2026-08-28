@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
@@ -13,6 +14,14 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils/assetid"
 )
+
+// TokenPriceHistoryContextTimeout caps each /token-price-history and
+// /token-stats request. It must stay strictly under api.DefaultWriteTimeout
+// (10s): past that the server closes the connection mid-write and the client
+// sees a dropped connection rather than the 503 the error mapping below
+// produces. The service fans its upstream fetches out concurrently, so this
+// is one fetch budget, not the sum of them.
+const TokenPriceHistoryContextTimeout = 9 * time.Second
 
 type TokenPriceHistoryHandler struct {
 	HistoryService types.PriceHistoryService
@@ -66,7 +75,10 @@ func (h *TokenPriceHistoryHandler) GetTokenPriceHistory(w http.ResponseWriter, r
 		return httperror.BadRequest("invalid range: range must be one of 1H, 1D, 1W, 1M, 1Y, ALL", errors.New("invalid range"))
 	}
 
-	history, err := h.HistoryService.GetPriceHistory(r.Context(), canonical, network, historyRange)
+	ctx, cancel := context.WithTimeout(r.Context(), TokenPriceHistoryContextTimeout)
+	defer cancel()
+
+	history, err := h.HistoryService.GetPriceHistory(ctx, canonical, network, historyRange)
 	if err != nil {
 		logger.ErrorWithContext(r.Context(), "getting token price history", "error", err)
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {

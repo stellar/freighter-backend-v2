@@ -41,18 +41,21 @@ func candlesAged(now time.Time, oldestAge time.Duration, closes ...float64) []ty
 // fakeStellarExpert is a programmable stub for the StellarExpertService
 // interface. Tests configure assets via Set and inspect call counts via Calls.
 type fakeStellarExpert struct {
-	mu              sync.Mutex
-	assets          map[string]*types.StellarExpertAsset
-	candles         map[string][]types.StellarExpertCandle
-	candleErrs      map[string]error
-	errs            map[string]error
-	calls           map[string]int
-	candleCalls     map[string]int
-	candleRes       map[string]int
-	candleFrom      map[string]time.Time
-	candleTo        map[string]time.Time
-	delay           time.Duration
-	assetDelay      time.Duration
+	mu          sync.Mutex
+	assets      map[string]*types.StellarExpertAsset
+	candles     map[string][]types.StellarExpertCandle
+	candleErrs  map[string]error
+	errs        map[string]error
+	calls       map[string]int
+	candleCalls map[string]int
+	candleRes   map[string]int
+	candleFrom  map[string]time.Time
+	candleTo    map[string]time.Time
+	delay       time.Duration
+	assetDelay  time.Duration
+	// beforeCandles, when set, runs at the top of GetAssetCandles. Tests use
+	// it as an ordering probe to observe what else is in flight.
+	beforeCandles   func()
 	concurrentInUse atomic.Int64
 	maxConcurrent   atomic.Int64
 }
@@ -110,6 +113,9 @@ func (f *fakeStellarExpert) GetAsset(ctx context.Context, network, assetID strin
 }
 
 func (f *fakeStellarExpert) GetAssetCandles(ctx context.Context, network, assetID string, from, to time.Time, resolutionSec int) ([]types.StellarExpertCandle, error) {
+	if f.beforeCandles != nil {
+		f.beforeCandles()
+	}
 	in := f.concurrentInUse.Add(1)
 	for {
 		cur := f.maxConcurrent.Load()

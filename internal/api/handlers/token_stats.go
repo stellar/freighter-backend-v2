@@ -34,7 +34,10 @@ func (h *TokenStatsHandler) GetTokenStats(w http.ResponseWriter, r *http.Request
 		return herr
 	}
 
-	stats, err := h.StatsService.GetTokenStats(r.Context(), canonical, network)
+	ctx, cancel := context.WithTimeout(r.Context(), TokenPriceHistoryContextTimeout)
+	defer cancel()
+
+	stats, err := h.StatsService.GetTokenStats(ctx, canonical, network)
 	if err != nil {
 		logger.ErrorWithContext(r.Context(), "getting token stats", "error", err)
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
