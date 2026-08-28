@@ -64,9 +64,11 @@ jobs:
             DEV_TAG="${ECR_REGISTRY}/dev/freighter-backend-v2:dev-${LABEL}"
             docker tag "${TAG}" "${DEV_TAG}"
             ecr-push "${DEV_TAG}"
-            echo "Pushed ${DEV_TAG} — shared wallet-eng-dev will roll onto this image."
+            echo "Pushed ${TAG} and ${DEV_TAG}."
+            echo "The dev- tag is the one shared wallet-eng-dev follows."
           else
-            echo "Pushed ${TAG} only. Shared dev is NOT updated; pin this tag in your sandbox."
+            echo "Pushed ${TAG}. No dev- tag was published."
+            echo "Pin this tag in your sandbox."
           fi
 
       - name: Slack notification — success
