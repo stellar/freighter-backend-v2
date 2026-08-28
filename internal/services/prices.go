@@ -27,7 +27,14 @@ const (
 	defaultCacheTTL      = 30 * time.Second
 	defaultMissFetchTTL  = 9 * time.Second
 
-	cacheKeyPrefix = "prices:v1"
+	// cacheKeyPrefix carries the cached-entry SCHEMA version, not the
+	// service version. It rotated v1→v2 when cachedPriceEntry gained the
+	// `unpriced` marker: a negative entry carries no `currentPrice`, so a
+	// pod still running the old binary would decode one as a positive hit
+	// and serve currentPrice: "". Rotating the segment keeps the two
+	// schemas in disjoint keyspaces during a rollout; the cost is a cold
+	// cache on deploy, which is exactly what the segment is for.
+	cacheKeyPrefix = "prices:v2"
 
 	// defaultNegativeCacheTTL is the default TTL for cached null entries —
 	// tokens Stellar Expert reports as unpriceable (not found, malformed,

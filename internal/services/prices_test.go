@@ -629,7 +629,7 @@ func TestPrices_NullEntryNegativelyCached(t *testing.T) {
 
 	// The null entry is cached at the flat negative TTL, not the 30s
 	// positive TTL.
-	assert.Equal(t, defaultNegativeCacheTTL, cache.TTL("prices:v1:public:BOGUS:"+testIssuer))
+	assert.Equal(t, defaultNegativeCacheTTL, cache.TTL("prices:v2:public:BOGUS:"+testIssuer))
 
 	got, err = svc.GetPrices(context.Background(), []string{"BOGUS:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
@@ -638,6 +638,31 @@ func TestPrices_NullEntryNegativelyCached(t *testing.T) {
 	assert.Nil(t, entry, "negative cache hit must still serve an explicit null")
 	assert.Equal(t, 1, stellarExpert.CallCount("BOGUS-"+testIssuer+"-2"),
 		"second request within the negative TTL must make zero upstream calls")
+}
+
+// The cached-entry schema gained the `unpriced` marker, so the key-schema
+// segment rotates with it. Without the rotation an old-binary pod decodes a
+// negative entry — which has no `currentPrice` — as a positive hit and serves
+// currentPrice: "". A cold cache on deploy is exactly what the rotation
+// segment exists for.
+func TestPrices_KeySchemaRotatedForUnpricedMarker(t *testing.T) {
+	t.Parallel()
+
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
+	cache := newFakeJSONCache()
+
+	// A pre-rotation entry written by the old binary must not be read.
+	require.NoError(t, cache.SetJSON(context.Background(), "prices:v1:public:XLM",
+		cachedPriceEntry{CurrentPrice: "999"}, time.Minute))
+
+	svc := NewPricesService(stellarExpert, cache, PricesServiceConfig{}, nil, nil)
+	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+	require.NotNil(t, got["XLM"])
+	assert.Equal(t, "0.16", got["XLM"].CurrentPrice, "a v1 entry must not satisfy a v2 read")
+	assert.Equal(t, 1, stellarExpert.CallCount("XLM"))
+	assert.NotEqual(t, time.Duration(0), cache.TTL("prices:v2:public:XLM"), "writes land under the v2 schema segment")
 }
 
 // A transient upstream failure is NOT authoritative and must not be
@@ -656,7 +681,7 @@ func TestPrices_TransientErrorNotNegativelyCached(t *testing.T) {
 	_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
 	require.NoError(t, err)
 	assert.Equal(t, 1, stellarExpert.CallCount("XLM"))
-	assert.Equal(t, time.Duration(0), cache.TTL("prices:v1:public:XLM"),
+	assert.Equal(t, time.Duration(0), cache.TTL("prices:v2:public:XLM"),
 		"a transient failure must write no cache entry at all")
 
 	_, err = svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
@@ -686,7 +711,7 @@ func TestPrices_NegativeCacheTTLIsConfigurable(t *testing.T) {
 		got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
 		require.NoError(t, err)
 		assert.Nil(t, got["XLM"])
-		assert.Equal(t, defaultNegativeCacheTTL, cache.TTL("prices:v1:public:XLM"))
+		assert.Equal(t, defaultNegativeCacheTTL, cache.TTL("prices:v2:public:XLM"))
 		assert.Equal(t, 2*time.Minute, defaultNegativeCacheTTL,
 			"the default bounds a blip to ~2 minutes, not 15")
 	})
@@ -701,7 +726,7 @@ func TestPrices_NegativeCacheTTLIsConfigurable(t *testing.T) {
 
 		_, err := svc.GetPrices(context.Background(), []string{"BOGUS:" + testIssuer}, types.PUBLIC)
 		require.NoError(t, err)
-		assert.Equal(t, 45*time.Second, cache.TTL("prices:v1:public:BOGUS:"+testIssuer))
+		assert.Equal(t, 45*time.Second, cache.TTL("prices:v2:public:BOGUS:"+testIssuer))
 	})
 }
 
@@ -719,7 +744,7 @@ func TestPrices_PositiveEntryCachedAtConfiguredTTL(t *testing.T) {
 
 	_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
 	require.NoError(t, err)
-	assert.Equal(t, 45*time.Second, cache.TTL("prices:v1:public:XLM"))
+	assert.Equal(t, 45*time.Second, cache.TTL("prices:v2:public:XLM"))
 
 	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
 	require.NoError(t, err)
