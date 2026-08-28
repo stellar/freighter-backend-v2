@@ -47,6 +47,12 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.PricesConfig.PriceNegativeCacheTTLSeconds; n <= 0 {
 				return fmt.Errorf("--price-negative-cache-ttl-seconds=%d must be positive", n)
 			}
+			// Upstream's resolution enum is closed and irregular (A.1);
+			// anything outside it 400s every candles call, so catch it at
+			// boot rather than as a fleet-wide null 24h change.
+			if n := s.Cfg.PricesConfig.PriceChange24hResolutionSeconds; !services.IsValidCandleResolutionSec(n) {
+				return fmt.Errorf("--price-change-24h-resolution-seconds=%d is not a Stellar Expert resolution enum member %v", n, services.ValidCandleResolutionsSec)
+			}
 			// Price-history config: TTLs and budgets must be positive (a zero
 			// TTL would silently disable caching against a paid upstream);
 			// the volume threshold and conversion divisor are magnitudes
@@ -177,6 +183,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertAPIKey, "stellar-expert-api-key", "", "Bearer token for the Stellar Expert API (required)")
 	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertOrigin, "stellar-expert-origin", "https://stellar.expert", "Origin header sent on Stellar Expert requests; Stellar Expert associates the API key with this origin (e.g. https://api.freighter.app in production)")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceCacheTTLSeconds, "price-cache-ttl-seconds", 30, "TTL for cached token prices in Redis (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceChange24hResolutionSeconds, "price-change-24h-resolution-seconds", 900, "Candle bucket size (seconds) for the /token-prices 24h change. 900 aligns the number with the chart's 1D range (D8) and is the supported value; 3600 is an incident lever that quarters the rows fetched per token and re-splits the two formulas, so the header will disagree with the list row. Must be a member of Stellar Expert's resolution enum")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceNegativeCacheTTLSeconds, "price-negative-cache-ttl-seconds", 120, "TTL for cached unpriceable token entries in Redis (seconds). Separate from --price-cache-ttl-seconds because a degraded upstream 200 (price omitted) or a transient 404 also lands here, so this is the blast radius of an upstream blip; 120 still dedupes four 30s poll cycles")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceFetchTimeoutSeconds, "price-fetch-timeout-seconds", 9, "Budget for uncached token price fetches before returning best-effort results (seconds)")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxTokensPerRequest, "max-tokens-per-request", 1000, "Maximum tokens accepted in a single token-prices request")

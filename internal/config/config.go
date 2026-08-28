@@ -154,6 +154,11 @@ type PricesConfig struct {
 	// shared across pods — so this value is the blast radius of an upstream
 	// blip.
 	PriceNegativeCacheTTLSeconds int
+	// PriceChange24hResolutionSeconds is the candle bucket size the
+	// 24h-change window is requested at. 900 is the D8-required alignment
+	// with the chart's 1D range; it is configurable only so the 4x row
+	// volume that alignment costs can be backed out without a deploy.
+	PriceChange24hResolutionSeconds int
 }
 
 // PriceHistoryConfig tunes the token-price-history and token-stats

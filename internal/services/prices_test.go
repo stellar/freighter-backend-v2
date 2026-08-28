@@ -242,6 +242,56 @@ func TestPrices_Change24h_AnchorsOnFirstCloseAt15mResolution(t *testing.T) {
 		"24h candles must be requested at the chart's 1D resolution (900s)")
 }
 
+// 900 is the D8-required alignment, but it fetches ~97 records per token
+// where the previous 3600 fetched ~25 — a 4x row increase on the hottest path
+// in the service, against a paid upstream. The resolution is therefore an
+// operator knob so that cost can be backed out without a deploy, at the
+// documented price of re-splitting the two delta formulas.
+func TestPrices_CandlesResolutionIsConfigurable(t *testing.T) {
+	t.Parallel()
+
+	t.Run("defaults to the D8-aligned 900", func(t *testing.T) {
+		t.Parallel()
+		stellarExpert := newFakeStellarExpert()
+		stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
+
+		svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
+		_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+		require.NoError(t, err)
+		assert.Equal(t, defaultCandlesResolutionSec, stellarExpert.LastCandleResolution("XLM"))
+	})
+
+	t.Run("an operator can coarsen it", func(t *testing.T) {
+		t.Parallel()
+		now := time.Now().UTC()
+		stellarExpert := newFakeStellarExpert()
+		stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
+		stellarExpert.SetCandles("XLM", candlesAged(now, 24*time.Hour, 0.158, 0.159))
+
+		svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{CandlesResolutionSec: 3600}, nil, nil)
+		got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+		require.NoError(t, err)
+		assert.Equal(t, 3600, stellarExpert.LastCandleResolution("XLM"))
+		require.NotNil(t, got["XLM"])
+		require.NotNil(t, got["XLM"].PercentagePriceChange24h,
+			"the 23-25h guard still passes at the coarser bucket")
+	})
+}
+
+// A resolution outside upstream's closed enum 400s every candles call, so it
+// must be caught at boot, not in production.
+func TestIsValidCandleResolutionSec(t *testing.T) {
+	t.Parallel()
+
+	for _, sec := range ValidCandleResolutionsSec {
+		assert.True(t, IsValidCandleResolutionSec(sec), sec)
+	}
+	// The enum is irregular: these neighbours are all measured-invalid (A.1).
+	for _, sec := range []int{0, 60, 120, 600, 10800, 21600, 172800, 2592000} {
+		assert.False(t, IsValidCandleResolutionSec(sec), sec)
+	}
+}
+
 func TestPrices_HappyPath_NoCache(t *testing.T) {
 	t.Parallel()
 

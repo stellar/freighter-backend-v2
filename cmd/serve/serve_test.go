@@ -397,6 +397,50 @@ func TestServeCmd_PriceNegativeCacheTTLFlag(t *testing.T) {
 	assert.Contains(t, err.Error(), "--price-negative-cache-ttl-seconds=0 must be positive")
 }
 
+// The 24h-change resolution defaults to the D8-aligned 900 and is validated
+// against Stellar Expert's closed, irregular resolution enum — anything
+// outside it 400s every candles call in production.
+func TestServeCmd_PriceChange24hResolutionFlag(t *testing.T) {
+	t.Parallel()
+
+	cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
+	got, err := cmd.Flags().GetInt("price-change-24h-resolution-seconds")
+	require.NoError(t, err)
+	assert.Equal(t, 900, got, "D8 requires the chart's 1D resolution")
+
+	for _, tc := range []struct {
+		value   string
+		wantErr bool
+	}{
+		{"3600", false}, // the documented incident lever
+		{"1800", false},
+		{"600", true},   // measured-invalid upstream
+		{"21600", true}, // 6h: not in the enum despite 4h and 12h being
+		{"0", true},
+	} {
+		tc := tc
+		t.Run(tc.value, func(t *testing.T) {
+			t.Parallel()
+			serveCmd := &ServeCmd{Cfg: &config.Config{}}
+			c := serveCmd.Command()
+			c.RunE = func(*cobra.Command, []string) error { return nil }
+			c.SetOut(io.Discard)
+			c.SetErr(io.Discard)
+			c.SetArgs([]string{
+				"--price-change-24h-resolution-seconds", tc.value,
+				"--database-url", "postgres://localhost/test",
+			})
+			err := c.Execute()
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "is not a Stellar Expert resolution enum member")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestServeCmd_PriceHistoryValidation(t *testing.T) {
 	t.Parallel()
 

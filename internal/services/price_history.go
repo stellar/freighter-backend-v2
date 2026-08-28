@@ -86,6 +86,25 @@ func IsValidPriceHistoryRange(r string) bool {
 	return ok
 }
 
+// ValidCandleResolutionsSec is upstream's closed `resolution` enum, measured
+// in Appendix A.1 — everything outside it returns 400. The set is irregular
+// (4h and 12h are valid, 3h/6h/8h are not; 1d and 3d are valid, 2d is not),
+// so it cannot be derived from a rule and is hard-coded from that sweep.
+// Config that feeds a resolution upstream is validated against this at boot,
+// because the alternative is every candles call 400ing in production.
+var ValidCandleResolutionsSec = []int{300, 900, 1800, 3600, 7200, 14400, 43200, 86400, 259200, 604800, 1209600}
+
+// IsValidCandleResolutionSec reports whether sec is a member of upstream's
+// resolution enum.
+func IsValidCandleResolutionSec(sec int) bool {
+	for _, v := range ValidCandleResolutionsSec {
+		if v == sec {
+			return true
+		}
+	}
+	return false
+}
+
 // PriceHistoryServiceConfig tunes the history/stats orchestrator. Zero values
 // fall back to safe defaults so callers can construct a service with
 // PriceHistoryServiceConfig{}.

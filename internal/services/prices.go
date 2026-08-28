@@ -55,12 +55,22 @@ const (
 	// radius to about two minutes.
 	defaultNegativeCacheTTL = 2 * time.Minute
 
-	// candlesWindow / candlesResolutionSec define the rolling 24h window used
-	// to compute percentagePriceChange24h from /asset/{id}/candles. 15-minute
-	// resolution matches the chart's 1D range (D8 alignment) and yields ~97
-	// records, still well under Stellar Expert's 200-record cap.
-	candlesWindow        = 24 * time.Hour
-	candlesResolutionSec = 900
+	// candlesWindow is the rolling window used to compute
+	// percentagePriceChange24h from /asset/{id}/candles.
+	candlesWindow = 24 * time.Hour
+
+	// defaultCandlesResolutionSec is the bucket size that window is
+	// requested at. 900 (15m) is REQUIRED by D8: it is the chart's 1D
+	// resolution, and the whole point of §4.2 is that the list row, the
+	// detail header, and the 1D chart compute one number from one series.
+	//
+	// It is nevertheless an operator knob, because 900 fetches ~97 records
+	// per token where the previous 3600 fetched ~25 — a 4x increase in rows
+	// pulled from a paid upstream on the hottest path in the service, with
+	// no way to back it out without a deploy. Raising it back to 3600 is an
+	// incident lever, not a supported configuration: it re-splits the two
+	// formulas and the header will visibly disagree with the list row again.
+	defaultCandlesResolutionSec = 900
 
 	// minCandleWindow / maxCandleWindow bound how far before `to` the
 	// oldest returned candle must open. With a truncated `to`, an asset
@@ -84,6 +94,11 @@ type PricesServiceConfig struct {
 	// NegativeCacheTTL is the TTL for cached unpriceable ("unpriced")
 	// entries. Zero falls back to defaultNegativeCacheTTL.
 	NegativeCacheTTL time.Duration
+	// CandlesResolutionSec is the bucket size the 24h-change candles window
+	// is requested at. Zero falls back to defaultCandlesResolutionSec (900,
+	// the D8-required chart alignment); see that constant for why raising it
+	// is an incident lever rather than a tuning option.
+	CandlesResolutionSec int
 }
 
 // JSONCache is the subset of *store.RedisStore the prices services depend
@@ -121,6 +136,9 @@ func NewPricesService(stellarExpert types.StellarExpertService, redis JSONCache,
 	}
 	if cfg.NegativeCacheTTL <= 0 {
 		cfg.NegativeCacheTTL = defaultNegativeCacheTTL
+	}
+	if cfg.CandlesResolutionSec <= 0 {
+		cfg.CandlesResolutionSec = defaultCandlesResolutionSec
 	}
 	return &pricesService{stellarExpert: stellarExpert, redis: redis, cfg: cfg, svcMetrics: metricsService, pricesMetrics: pricesMetrics}
 }
@@ -304,7 +322,8 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 	// boundaries; otherwise upstream may return a window 23–25h wide with
 	// no consistent rule. The current price is still as-of-now via
 	// /asset/{id}, so the actual price comparison is at most ~1h off 24h.
-	resolution := time.Duration(candlesResolutionSec) * time.Second
+	resolutionSec := p.cfg.CandlesResolutionSec
+	resolution := time.Duration(resolutionSec) * time.Second
 	to := time.Now().UTC().Truncate(resolution)
 	from := to.Add(-candlesWindow)
 
@@ -329,7 +348,7 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		candles, candlesErr = p.stellarExpert.GetAssetCandles(fetchCtx, network, stellarExpertID, from, to, candlesResolutionSec)
+		candles, candlesErr = p.stellarExpert.GetAssetCandles(fetchCtx, network, stellarExpertID, from, to, resolutionSec)
 	}()
 	wg.Wait()
 
