@@ -135,6 +135,7 @@ func (s *ApiServer) initServices() error {
 		CacheTTL:         time.Duration(s.cfg.PricesConfig.PriceCacheTTLSeconds) * time.Second,
 		MissFetchTimeout: time.Duration(s.cfg.PricesConfig.PriceFetchTimeoutSeconds) * time.Second,
 		MaxConcurrent:    s.cfg.PricesConfig.MaxConcurrentPriceFetches,
+		NegativeCacheTTL: time.Duration(s.cfg.PricesConfig.PriceNegativeCacheTTLSeconds) * time.Second,
 	}, s.appMetrics.Service, s.appMetrics.Prices)
 
 	// One implementation serves both the history and stats endpoints: they

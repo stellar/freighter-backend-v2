@@ -627,9 +627,9 @@ func TestPrices_NullEntryNegativelyCached(t *testing.T) {
 	assert.Nil(t, entry)
 	assert.Equal(t, 1, stellarExpert.CallCount("BOGUS-"+testIssuer+"-2"))
 
-	// The null entry is cached at the flat 15m negative TTL, not the 30s
+	// The null entry is cached at the flat negative TTL, not the 30s
 	// positive TTL.
-	assert.Equal(t, 15*time.Minute, cache.TTL("prices:v1:public:BOGUS:"+testIssuer))
+	assert.Equal(t, defaultNegativeCacheTTL, cache.TTL("prices:v1:public:BOGUS:"+testIssuer))
 
 	got, err = svc.GetPrices(context.Background(), []string{"BOGUS:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
@@ -641,7 +641,10 @@ func TestPrices_NullEntryNegativelyCached(t *testing.T) {
 }
 
 // A transient upstream failure is NOT authoritative and must not be
-// negatively cached — the next request should retry upstream.
+// negatively cached — the next request should retry upstream. Transport
+// errors and 5xx both surface here as a plain error, so this pins the whole
+// class: nothing but ErrAssetNotFound / ErrAssetMalformed / a genuine zero
+// price ever reaches cacheNegative.
 func TestPrices_TransientErrorNotNegativelyCached(t *testing.T) {
 	t.Parallel()
 
@@ -653,10 +656,53 @@ func TestPrices_TransientErrorNotNegativelyCached(t *testing.T) {
 	_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
 	require.NoError(t, err)
 	assert.Equal(t, 1, stellarExpert.CallCount("XLM"))
+	assert.Equal(t, time.Duration(0), cache.TTL("prices:v1:public:XLM"),
+		"a transient failure must write no cache entry at all")
 
 	_, err = svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
 	require.NoError(t, err)
 	assert.Equal(t, 2, stellarExpert.CallCount("XLM"), "transient failures must retry upstream")
+}
+
+// The negative-cache TTL is its own knob, separate from the 30s positive TTL.
+// It exists because the negative path is entered by *degraded* upstream
+// states as well as authoritative ones — a 200 with `price` omitted decodes
+// to 0, and a transient 404/400 maps to ErrAssetNotFound/Malformed. Those
+// blips self-heal upstream in ~30s, so the flat 15m the negative cache
+// originally used turned a blip into a 15-minute price blackout across every
+// pod sharing Redis. 120s still dedupes four 30s poll cycles per blip while
+// bounding the blast radius.
+func TestPrices_NegativeCacheTTLIsConfigurable(t *testing.T) {
+	t.Parallel()
+
+	t.Run("degraded 200 with price omitted caches at the negative TTL", func(t *testing.T) {
+		t.Parallel()
+		stellarExpert := newFakeStellarExpert()
+		// `price` absent from the JSON decodes to 0 — the degraded-200 shape.
+		stellarExpert.Set("XLM", &types.StellarExpertAsset{})
+		cache := newFakeJSONCache()
+		svc := NewPricesService(stellarExpert, cache, PricesServiceConfig{}, nil, nil)
+
+		got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+		require.NoError(t, err)
+		assert.Nil(t, got["XLM"])
+		assert.Equal(t, defaultNegativeCacheTTL, cache.TTL("prices:v1:public:XLM"))
+		assert.Equal(t, 2*time.Minute, defaultNegativeCacheTTL,
+			"the default bounds a blip to ~2 minutes, not 15")
+	})
+
+	t.Run("operators can override it", func(t *testing.T) {
+		t.Parallel()
+		stellarExpert := newFakeStellarExpert() // unknown → ErrAssetNotFound
+		cache := newFakeJSONCache()
+		svc := NewPricesService(stellarExpert, cache, PricesServiceConfig{
+			NegativeCacheTTL: 45 * time.Second,
+		}, nil, nil)
+
+		_, err := svc.GetPrices(context.Background(), []string{"BOGUS:" + testIssuer}, types.PUBLIC)
+		require.NoError(t, err)
+		assert.Equal(t, 45*time.Second, cache.TTL("prices:v1:public:BOGUS:"+testIssuer))
+	})
 }
 
 // Positive entries keep the configured (30s default) TTL and round-trip

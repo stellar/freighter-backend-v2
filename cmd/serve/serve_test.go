@@ -375,6 +375,28 @@ func TestServeCmd_PriceHistoryFlagDefaults(t *testing.T) {
 	assert.Equal(t, float64(0), divisor, "the volume7d unit conversion ships disabled — enabling it is a config change")
 }
 
+// The negative-price cache TTL is its own knob (default 120s), separate from
+// the 30s positive TTL: a degraded upstream 200 or a transient 404 also lands
+// in the negative cache, so this value is the blast radius of a blip.
+func TestServeCmd_PriceNegativeCacheTTLFlag(t *testing.T) {
+	t.Parallel()
+
+	cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
+	got, err := cmd.Flags().GetInt("price-negative-cache-ttl-seconds")
+	require.NoError(t, err)
+	assert.Equal(t, 120, got)
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	bad := serveCmd.Command()
+	bad.RunE = func(*cobra.Command, []string) error { return nil }
+	bad.SetOut(io.Discard)
+	bad.SetErr(io.Discard)
+	bad.SetArgs([]string{"--price-negative-cache-ttl-seconds", "0"})
+	err = bad.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--price-negative-cache-ttl-seconds=0 must be positive")
+}
+
 func TestServeCmd_PriceHistoryValidation(t *testing.T) {
 	t.Parallel()
 

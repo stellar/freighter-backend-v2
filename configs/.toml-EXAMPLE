@@ -38,6 +38,12 @@ STELLAR_EXPERT_TESTNET_URL = "not-set"
 STELLAR_EXPERT_API_KEY = "not-set"
 PRICE_CACHE_TTL_SECONDS = "not-set"
 PRICE_FETCH_TIMEOUT_SECONDS = "not-set"
+# TTL of cached unpriceable ("null") token entries. Separate from
+# PRICE_CACHE_TTL_SECONDS: a degraded upstream 200 (price omitted) or a
+# transient 404 also lands in the negative cache, and the entry is shared
+# across pods — so this is the blast radius of an upstream blip. 120 still
+# dedupes four 30s client poll cycles.
+PRICE_NEGATIVE_CACHE_TTL_SECONDS = "120"
 MAX_TOKENS_PER_REQUEST = "not-set"
 MAX_CONCURRENT_PRICE_FETCHES = "not-set"
 

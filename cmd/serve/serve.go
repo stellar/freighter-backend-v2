@@ -42,6 +42,11 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.PricesConfig.PriceFetchTimeoutSeconds; n < 0 {
 				return fmt.Errorf("--price-fetch-timeout-seconds=%d must be >= 0", n)
 			}
+			// A zero/negative negative-cache TTL would silently fall back to
+			// the package default rather than doing what the operator asked.
+			if n := s.Cfg.PricesConfig.PriceNegativeCacheTTLSeconds; n <= 0 {
+				return fmt.Errorf("--price-negative-cache-ttl-seconds=%d must be positive", n)
+			}
 			// Price-history config: TTLs and budgets must be positive (a zero
 			// TTL would silently disable caching against a paid upstream);
 			// the volume threshold and conversion divisor are magnitudes
@@ -172,6 +177,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertAPIKey, "stellar-expert-api-key", "", "Bearer token for the Stellar Expert API (required)")
 	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertOrigin, "stellar-expert-origin", "https://stellar.expert", "Origin header sent on Stellar Expert requests; Stellar Expert associates the API key with this origin (e.g. https://api.freighter.app in production)")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceCacheTTLSeconds, "price-cache-ttl-seconds", 30, "TTL for cached token prices in Redis (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceNegativeCacheTTLSeconds, "price-negative-cache-ttl-seconds", 120, "TTL for cached unpriceable token entries in Redis (seconds). Separate from --price-cache-ttl-seconds because a degraded upstream 200 (price omitted) or a transient 404 also lands here, so this is the blast radius of an upstream blip; 120 still dedupes four 30s poll cycles")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceFetchTimeoutSeconds, "price-fetch-timeout-seconds", 9, "Budget for uncached token price fetches before returning best-effort results (seconds)")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxTokensPerRequest, "max-tokens-per-request", 1000, "Maximum tokens accepted in a single token-prices request")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxConcurrentPriceFetches, "max-concurrent-price-fetches", 25, "Per-request token-in-flight cap; each token issues GetAsset and GetAssetCandles in parallel, so the upstream HTTP-call ceiling is up to 2× this value")

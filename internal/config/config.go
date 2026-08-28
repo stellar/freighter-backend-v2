@@ -146,6 +146,14 @@ type PricesConfig struct {
 	PriceFetchTimeoutSeconds  int
 	MaxTokensPerRequest       int
 	MaxConcurrentPriceFetches int
+	// PriceNegativeCacheTTLSeconds is the TTL of cached unpriceable ("null")
+	// token entries. It is separate from PriceCacheTTLSeconds because the
+	// negative path is reached by degraded upstream states as well as
+	// authoritative ones (a 200 with `price` omitted decodes to 0; a
+	// transient 404/400 maps to not-found/malformed), and the entry is
+	// shared across pods — so this value is the blast radius of an upstream
+	// blip.
+	PriceNegativeCacheTTLSeconds int
 }
 
 // PriceHistoryConfig tunes the token-price-history and token-stats

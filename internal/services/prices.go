@@ -29,14 +29,24 @@ const (
 
 	cacheKeyPrefix = "prices:v1"
 
-	// negativePriceCacheTTL is the flat TTL for cached null entries —
-	// tokens Stellar Expert authoritatively cannot price (not found,
-	// malformed, zero price). This deliberately breaks the positive-only
+	// defaultNegativeCacheTTL is the default TTL for cached null entries —
+	// tokens Stellar Expert reports as unpriceable (not found, malformed,
+	// zero price). Negative caching deliberately breaks the positive-only
 	// convention (§6.2): once clients stop filtering custom tokens, an
 	// unpriced token in a balance list would otherwise hit upstream on
-	// every 30-second poll cycle, uncacheably. Transient failures are NOT
-	// cached.
-	negativePriceCacheTTL = 15 * time.Minute
+	// every 30-second poll cycle, uncacheably. Transient transport failures
+	// and 5xx are NOT cached.
+	//
+	// It is deliberately its own knob rather than sharing the 15m the
+	// history endpoint uses for empty series. The signals that land here
+	// are not all authoritative: a degraded 200 with `price` omitted
+	// decodes to 0, and a transient upstream 404/400 maps to
+	// ErrAssetNotFound/ErrAssetMalformed. Those blips self-heal in ~30s,
+	// but the cache entry is shared across every pod, so a long TTL turns a
+	// momentary upstream wobble into a price blackout of that length. 120s
+	// still dedupes four 30s poll cycles per blip while bounding the blast
+	// radius to about two minutes.
+	defaultNegativeCacheTTL = 2 * time.Minute
 
 	// candlesWindow / candlesResolutionSec define the rolling 24h window used
 	// to compute percentagePriceChange24h from /asset/{id}/candles. 15-minute
@@ -64,6 +74,9 @@ type PricesServiceConfig struct {
 	CacheTTL         time.Duration
 	MissFetchTimeout time.Duration
 	MaxConcurrent    int
+	// NegativeCacheTTL is the TTL for cached unpriceable ("unpriced")
+	// entries. Zero falls back to defaultNegativeCacheTTL.
+	NegativeCacheTTL time.Duration
 }
 
 // JSONCache is the subset of *store.RedisStore the prices services depend
@@ -98,6 +111,9 @@ func NewPricesService(stellarExpert types.StellarExpertService, redis JSONCache,
 	}
 	if cfg.MissFetchTimeout <= 0 {
 		cfg.MissFetchTimeout = defaultMissFetchTTL
+	}
+	if cfg.NegativeCacheTTL <= 0 {
+		cfg.NegativeCacheTTL = defaultNegativeCacheTTL
 	}
 	return &pricesService{stellarExpert: stellarExpert, redis: redis, cfg: cfg, svcMetrics: metricsService, pricesMetrics: pricesMetrics}
 }
@@ -398,14 +414,14 @@ func (p *pricesService) cachePositive(ctx context.Context, cacheNet, canonical s
 	}
 }
 
-// cacheNegative stores an authoritative-null marker at the flat negative TTL
-// so unpriceable tokens are not re-fetched on every poll cycle. Transient
-// failures never reach this path.
+// cacheNegative stores an unpriceable marker at the (configurable) negative
+// TTL so unpriceable tokens are not re-fetched on every poll cycle.
+// Transient transport failures and 5xx never reach this path.
 func (p *pricesService) cacheNegative(ctx context.Context, cacheNet, canonical string) {
 	if p.redis == nil {
 		return
 	}
-	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), cachedPriceEntry{Unpriced: true}, negativePriceCacheTTL); err != nil {
+	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), cachedPriceEntry{Unpriced: true}, p.cfg.NegativeCacheTTL); err != nil {
 		logger.Warn("prices: redis SET (negative) failed", "asset", canonical, "error", err)
 		if p.pricesMetrics != nil {
 			p.pricesMetrics.RedisErrors.WithLabelValues("set").Inc()
