@@ -48,6 +48,10 @@ const (
 
 	allRange = "ALL"
 	oneDay   = "1D"
+
+	// metaWaitCap is the ceiling on the ALL-range `from` refinement's wait
+	// for the advisory asset call (see metaWaitBudget).
+	metaWaitCap = 3 * time.Second
 )
 
 // rangeSpec is one row of the range→request map (Appendix A.1). Every
@@ -273,8 +277,17 @@ func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet
 		// payload is the same cached entry the stats endpoint reads; on
 		// failure fall back to the floor, which returns the identical series
 		// since the API only returns buckets that exist.
+		//
+		// The wait is sub-budgeted because this call and the candles call
+		// share ONE fetch budget. The asset payload is advisory here — the
+		// floor returns the same series — while the candles are the payload,
+		// so the refinement must never be allowed to spend the budget the
+		// chart needs.
 		fromUnix := allRangeFromFloor
-		if meta, err := s.getAssetMeta(ctx, network, cacheNet, canonical); err == nil && meta.Created > allRangeFromFloor {
+		mctx, cancelMeta := context.WithTimeout(ctx, metaWaitBudget(ctx))
+		meta, err := s.getAssetMeta(mctx, network, cacheNet, canonical)
+		cancelMeta()
+		if err == nil && meta != nil && meta.Created > allRangeFromFloor {
 			fromUnix = meta.Created
 		}
 		from = time.Unix(fromUnix, 0).UTC()
@@ -304,6 +317,26 @@ func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet
 	}
 	s.cacheSeries(ctx, key, points, ttl)
 	return points, nil
+}
+
+// metaWaitBudget bounds how long the ALL-range `from` refinement may wait on
+// the advisory asset call before falling back to the 1441065600 floor. It
+// spends at most metaWaitCap, and never more than half of whatever remains
+// of the shared fetch budget — so a hanging /asset endpoint costs the chart
+// at most half its budget and GetAssetCandles always still gets issued. A
+// non-positive result means the budget is already gone; the timeout then
+// fires immediately and the floor is used, which is the correct answer.
+func metaWaitBudget(ctx context.Context) time.Duration {
+	budget := metaWaitCap
+	if deadline, ok := ctx.Deadline(); ok {
+		if half := time.Until(deadline) / 2; half < budget {
+			budget = half
+		}
+	}
+	if budget < 0 {
+		budget = 0
+	}
+	return budget
 }
 
 func (s *priceHistoryService) cacheSeries(ctx context.Context, key string, points []types.PricePoint, ttl time.Duration) {

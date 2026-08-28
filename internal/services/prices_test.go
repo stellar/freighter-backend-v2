@@ -52,6 +52,7 @@ type fakeStellarExpert struct {
 	candleFrom      map[string]time.Time
 	candleTo        map[string]time.Time
 	delay           time.Duration
+	assetDelay      time.Duration
 	concurrentInUse atomic.Int64
 	maxConcurrent   atomic.Int64
 }
@@ -82,9 +83,12 @@ func (f *fakeStellarExpert) GetAsset(ctx context.Context, network, assetID strin
 	}
 	defer f.concurrentInUse.Add(-1)
 
-	if f.delay > 0 {
+	// assetDelay stalls only the /asset endpoint, so tests can model the
+	// half-degraded upstream where asset metadata hangs while candles are
+	// healthy.
+	if d := f.delay + f.assetDelay; d > 0 {
 		select {
-		case <-time.After(f.delay):
+		case <-time.After(d):
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}

@@ -456,6 +456,40 @@ func TestPriceHistory_ALLRangeFrom(t *testing.T) {
 		assert.Len(t, got.Points, 2)
 		assert.Equal(t, int64(1441065600), expert.LastCandleFrom("XLM").Unix())
 	})
+
+	// §9 documents "asset payload fails, candles succeed → ALL falls back to
+	// the 2015-09-01 floor". A HANGING /asset endpoint is that failure mode's
+	// most likely shape, and it must not starve the candles call: the two
+	// share one fetch budget, so an unbounded meta wait burns the whole
+	// budget before GetAssetCandles is even issued and the fallback dies at
+	// exactly the moment it should save the request.
+	t.Run("a hanging asset call still leaves budget for candles", func(t *testing.T) {
+		t.Parallel()
+		expert := newFakeStellarExpert()
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Created: 1611161688, Volume7d: xlmRawVolume7d})
+		expert.assetDelay = time.Minute // /asset hangs; candles are healthy
+		// A non-zero candles delay makes the fake honour ctx, so a candles
+		// call issued on an already-spent budget fails the way a real one
+		// would rather than quietly succeeding.
+		expert.delay = 50 * time.Millisecond
+		expert.SetCandles("XLM", historyCandles(time.Now().UTC(), 60*24*time.Hour, 1209600, 0.15, 0.16))
+
+		svc := newHistoryService(expert, nil, spotPrices("0.16"),
+			PriceHistoryServiceConfig{FetchTimeout: 2 * time.Second}, nil)
+
+		start := time.Now().UTC()
+		got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, allRange)
+		require.NoError(t, err)
+
+		assert.Len(t, got.Points, 2, "candles must still be fetched")
+		assert.Equal(t, int64(allRangeFromFloor), expert.LastCandleFrom("XLM").Unix(),
+			"the meta wait times out into the documented floor fallback")
+		// LastCandleTo is the wall clock at which the candles call was
+		// issued: it must land around the half-budget mark, not after the
+		// whole 2s budget has been spent waiting on /asset.
+		assert.Less(t, expert.LastCandleTo("XLM").Sub(start), 1500*time.Millisecond,
+			"the meta wait must consume at most half the shared budget, leaving the rest for candles")
+	})
 }
 
 // The upstream window must end at `now`, not at the last completed bucket.
