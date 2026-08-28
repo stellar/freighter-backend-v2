@@ -187,6 +187,12 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 	// the series still returns. Deliberately NOT the prices service's
 	// cancel-candles-on-asset-not-found behavior — here candles are the
 	// payload (B.3).
+	// One asset payload per request. Both the volume verdict and (on ALL)
+	// the `from` floor need it, but it is one fact about one asset:
+	// resolving it twice double-counts the tokenstats cache outcomes and can
+	// issue two upstream calls.
+	metaP := s.startAssetMeta(network, cacheNet, canonical)
+
 	var (
 		got       series
 		seriesErr error
@@ -199,11 +205,11 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		got, seriesErr = s.getSeries(ctx, network, cacheNet, canonical, historyRange, spec)
+		got, seriesErr = s.getSeries(ctx, network, cacheNet, canonical, historyRange, spec, metaP)
 	}()
 	go func() {
 		defer wg.Done()
-		meta, metaErr = s.getAssetMeta(ctx, network, cacheNet, canonical)
+		meta, metaErr = metaP.await(ctx)
 	}()
 	// Spot joins the fan-out rather than running after it. The delta's two
 	// inputs are independent — the series comes from /candles, the spot from
@@ -256,7 +262,7 @@ type series struct {
 	to     time.Time
 }
 
-func (s *priceHistoryService) getSeries(ctx context.Context, network, cacheNet, canonical, historyRange string, spec rangeSpec) (series, error) {
+func (s *priceHistoryService) getSeries(ctx context.Context, network, cacheNet, canonical, historyRange string, spec rangeSpec, metaP *assetMetaPromise) (series, error) {
 	key := historyCacheKey(cacheNet, canonical, historyRange)
 	if cached, ok := s.loadCachedSeries(ctx, key); ok {
 		s.recordHistoryCacheOutcome(network, historyRange, "hit")
@@ -269,7 +275,7 @@ func (s *priceHistoryService) getSeries(ctx context.Context, network, cacheNet, 
 	ch := s.fetchGroup.DoChan(key, func() (any, error) {
 		fctx, cancel := context.WithTimeout(context.Background(), s.cfg.FetchTimeout)
 		defer cancel()
-		return s.fetchSeries(fctx, network, cacheNet, canonical, historyRange, spec, key)
+		return s.fetchSeries(fctx, network, cacheNet, canonical, historyRange, spec, key, metaP)
 	})
 	select {
 	case <-ctx.Done():
@@ -319,7 +325,7 @@ func (s *priceHistoryService) loadCachedSeries(ctx context.Context, key string) 
 // to an empty series (an unknown asset and an untraded asset are
 // indistinguishable to the UI); transient failures return errors and are
 // never cached.
-func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet, canonical, historyRange string, spec rangeSpec, key string) (series, error) {
+func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet, canonical, historyRange string, spec rangeSpec, key string, metaP *assetMetaPromise) (series, error) {
 	// `to` is NOW, deliberately untruncated. Rounding it back to the last
 	// completed bucket would drop up to a full bucket off the right edge of
 	// every chart — 15 minutes on 1D, but 3 days on 1Y and 2 weeks on ALL,
@@ -346,7 +352,7 @@ func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet
 		// chart needs.
 		fromUnix := allRangeFromFloor
 		mctx, cancelMeta := context.WithTimeout(ctx, metaWaitBudget(ctx))
-		meta, err := s.getAssetMeta(mctx, network, cacheNet, canonical)
+		meta, err := s.awaitAssetMeta(mctx, metaP, network, cacheNet, canonical)
 		cancelMeta()
 		if err == nil && meta != nil && meta.Created > allRangeFromFloor {
 			fromUnix = meta.Created
@@ -448,6 +454,54 @@ func assetToCachedMeta(a *types.StellarExpertAsset) cachedAssetMeta {
 		Created:  a.Created,
 		Funded:   a.Trustlines.Funded,
 	}
+}
+
+// assetMetaPromise memoizes one asset-payload resolution for the lifetime of
+// a single request. The volume verdict and the ALL-range `from` floor both
+// need the payload, but it is one fact about one asset: resolving it twice
+// records two tokenstats cache outcomes (so the cache's own hit-rate metric
+// is computed over lookups that shouldn't exist) and, when the two land
+// either side of the singleflight window, issues two upstream calls.
+type assetMetaPromise struct {
+	done chan struct{}
+	meta *types.StellarExpertAsset
+	err  error
+}
+
+// startAssetMeta kicks off the request's single asset-payload resolution.
+// The fetch is deliberately detached from any one caller's context: it is
+// awaited both by the orchestrator (under the request context) and by
+// fetchSeries (under the singleflight fetch budget, possibly on behalf of a
+// different caller), and neither may cancel it out from under the other.
+func (s *priceHistoryService) startAssetMeta(network, cacheNet, canonical string) *assetMetaPromise {
+	p := &assetMetaPromise{done: make(chan struct{})}
+	go func() {
+		defer close(p.done)
+		ctx, cancel := context.WithTimeout(context.Background(), s.cfg.FetchTimeout)
+		defer cancel()
+		p.meta, p.err = s.getAssetMeta(ctx, network, cacheNet, canonical)
+	}()
+	return p
+}
+
+// await blocks for the promised payload, bounded by ctx.
+func (p *assetMetaPromise) await(ctx context.Context) (*types.StellarExpertAsset, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-p.done:
+		return p.meta, p.err
+	}
+}
+
+// awaitAssetMeta reads the request's shared payload, falling back to a direct
+// resolution if no promise was supplied (the singleflight closure can outlive
+// the request that created it).
+func (s *priceHistoryService) awaitAssetMeta(ctx context.Context, p *assetMetaPromise, network, cacheNet, canonical string) (*types.StellarExpertAsset, error) {
+	if p == nil {
+		return s.getAssetMeta(ctx, network, cacheNet, canonical)
+	}
+	return p.await(ctx)
 }
 
 // getAssetMeta returns the (1h-cached, singleflight-coalesced) asset payload

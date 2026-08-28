@@ -689,6 +689,36 @@ func TestPriceHistory_CacheOutcomeMetrics(t *testing.T) {
 	assert.Equal(t, float64(1), testutil.ToFloat64(pm.HistoryCacheOutcomes.WithLabelValues(types.PUBLIC, "1D", "hit")))
 }
 
+// On the ALL range the asset payload is needed twice in one request — once
+// for the lowVolume verdict, once for the `from` floor — but it is ONE fact
+// about ONE asset. Resolving it twice double-counts every tokenstats cache
+// outcome for ALL requests, so the metric that is supposed to show how well
+// that cache is working reports a hit rate computed over phantom lookups.
+func TestPriceHistory_ALLResolvesAssetMetaExactlyOnce(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	expert := newFakeStellarExpert()
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Created: 1611161688, Volume7d: xlmRawVolume7d})
+	expert.SetCandles("XLM", historyCandles(now, 60*24*time.Hour, 1209600, 0.15, 0.16))
+
+	reg := prometheus.NewRegistry()
+	pm := metrics.NewPrices(reg)
+	svc := newHistoryService(expert, newFakeJSONCache(), spotPrices("0.16"), PriceHistoryServiceConfig{}, pm)
+
+	got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, allRange)
+	require.NoError(t, err)
+	require.NotNil(t, got.LowVolume, "the verdict still resolves off the shared payload")
+	assert.Equal(t, int64(1611161688), expert.LastCandleFrom("XLM").Unix(),
+		"the `from` floor still refines off the shared payload")
+
+	outcomes := testutil.ToFloat64(pm.TokenStatsCacheOutcomes.WithLabelValues(types.PUBLIC, "miss")) +
+		testutil.ToFloat64(pm.TokenStatsCacheOutcomes.WithLabelValues(types.PUBLIC, "hit"))
+	assert.Equal(t, float64(1), outcomes,
+		"one request needs the asset payload once, so it must record exactly one cache outcome")
+	assert.Equal(t, 1, expert.CallCount("XLM"), "and issue at most one upstream asset call")
+}
+
 func TestPriceHistory_RejectsInvalidInputs(t *testing.T) {
 	t.Parallel()
 
