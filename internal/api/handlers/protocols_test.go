@@ -90,3 +90,38 @@ func TestGetProtocols(t *testing.T) {
 		assert.Equal(t, ErrFailedToEncodeProtocolsToJSONResponse.ClientMessage, err.Error())
 	})
 }
+
+func TestCollectCategories(t *testing.T) {
+	t.Run("returns distinct tags sorted", func(t *testing.T) {
+		got := collectCategories([]Protocol{
+			{Name: "a", Tags: []string{"Payments", "Bridge"}},
+			{Name: "b", Tags: []string{"Bridge"}},
+			{Name: "c", Tags: []string{"DEX / Trading", "Payments"}},
+		})
+		assert.Equal(t, []string{"Bridge", "DEX / Trading", "Payments"}, got)
+	})
+
+	t.Run("includes tags from blacklisted protocols", func(t *testing.T) {
+		// Filtering is the caller's concern; dropping these here would make the
+		// category list disagree with a client that renders the full list.
+		got := collectCategories([]Protocol{
+			{Name: "a", Tags: []string{"Payments"}},
+			{Name: "b", Tags: []string{"Lending"}, IsBlacklisted: true},
+		})
+		assert.Equal(t, []string{"Lending", "Payments"}, got)
+	})
+
+	t.Run("returns empty slice, not nil, when there are no tags", func(t *testing.T) {
+		// Must marshal as [] rather than null so clients can iterate without a
+		// nil check.
+		got := collectCategories([]Protocol{{Name: "a"}})
+		assert.NotNil(t, got)
+		assert.Empty(t, got)
+	})
+
+	t.Run("handles no protocols", func(t *testing.T) {
+		got := collectCategories(nil)
+		assert.NotNil(t, got)
+		assert.Empty(t, got)
+	})
+}

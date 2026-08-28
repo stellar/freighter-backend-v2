@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
@@ -42,6 +43,30 @@ type Protocol struct {
 // This is used to structure the response under a "data" field.
 type GetProtocolsPayload struct {
 	Protocols []Protocol `json:"protocols"`
+	// Categories is the distinct, sorted set of tags across the returned
+	// protocols. Clients render category filters from this rather than
+	// deriving it themselves, so the ordering is stable across callers and
+	// a client doesn't have to re-scan the whole list on every render.
+	Categories []string `json:"categories"`
+}
+
+// collectCategories returns the distinct tags across protocols, sorted. Blacklisted
+// protocols are still included: filtering is the caller's concern, and omitting
+// their tags here would make the category list disagree with the protocol list.
+func collectCategories(protocols []Protocol) []string {
+	seen := make(map[string]struct{}, len(protocols))
+	categories := make([]string, 0, len(protocols))
+	for _, p := range protocols {
+		for _, tag := range p.Tags {
+			if _, ok := seen[tag]; ok {
+				continue
+			}
+			seen[tag] = struct{}{}
+			categories = append(categories, tag)
+		}
+	}
+	sort.Strings(categories)
+	return categories
 }
 
 // ProtocolHandler holds dependencies for protocol-related handlers.
@@ -83,7 +108,8 @@ func (h *ProtocolsHandler) GetProtocols(w http.ResponseWriter, r *http.Request) 
 
 	responseData := HttpResponse{
 		Data: GetProtocolsPayload{
-			Protocols: protocols,
+			Protocols:  protocols,
+			Categories: collectCategories(protocols),
 		},
 	}
 
