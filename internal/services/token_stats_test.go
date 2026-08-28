@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,6 +136,44 @@ func TestTokenStats_SharesCachedAssetPayloadWithHistory(t *testing.T) {
 	assert.Equal(t, 1, expert.CallCount("XLM"), "stats must reuse the history service's cached asset payload")
 }
 
+// `decimals` is contract-controlled: a hostile SEP-41 token can report an
+// arbitrarily large value. Scaling must never allocate proportional to it —
+// the supply row is simply omitted (unsourceable) and the rest of the stats
+// block still serves. No real token exceeds ~18 decimals; Stellar's default
+// is 7.
+func TestTokenStats_AbsurdDecimalsOmitsSupplyWithoutAllocating(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	hostile := 2_000_000_000 // 2e9: a naive strings.Repeat would allocate ~2 GB
+	expert.Set("EVIL-"+testIssuer+"-1", assetWithStats(1.0, "1000000", &hostile, int64Ptr(3)))
+
+	svc := newStatsService(expert, nil, PriceHistoryServiceConfig{})
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	done := make(chan struct{})
+	var got *types.TokenStats
+	var err error
+	go func() {
+		defer close(done)
+		got, err = svc.GetTokenStats(context.Background(), "EVIL:"+testIssuer, types.PUBLIC)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("GetTokenStats did not return promptly for a hostile decimals value")
+	}
+	runtime.ReadMemStats(&after)
+
+	require.NoError(t, err)
+	assert.Nil(t, got.SupplyOnStellar, "an out-of-range decimals makes supply unsourceable")
+	require.NotNil(t, got.Holders, "the rest of the stats block still serves")
+	assert.Equal(t, int64(3), *got.Holders)
+	assert.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(64<<20),
+		"scaling must never allocate proportional to the contract-controlled decimals")
+}
+
 func TestTokenStats_RejectsUnsupportedNetwork(t *testing.T) {
 	t.Parallel()
 
@@ -163,6 +203,8 @@ func TestScaleSupplyByDecimals(t *testing.T) {
 		{"non-integer rejected", "10.5", 7, "", false},
 		{"exponent rejected", "1e18", 7, "", false},
 		{"negative decimals rejected", "100", -1, "", false},
+		{"max supported decimals accepted", "1", maxSupplyDecimals, "0." + strings.Repeat("0", maxSupplyDecimals-1) + "1", true},
+		{"absurd decimals rejected", "100", maxSupplyDecimals + 1, "", false},
 	}
 	for _, tc := range cases {
 		tc := tc

@@ -15,6 +15,14 @@ import (
 // `decimals` (classic assets and XLM — Appendix A.2).
 const defaultSupplyDecimals = 7
 
+// maxSupplyDecimals bounds the contract-controlled `decimals` field. A SEP-41
+// contract can report any value it likes, and scaling shifts the decimal
+// point by that many digits — so an unbounded value is an allocation lever
+// aimed at us. No real token exceeds ~18 decimals (Stellar's classic default
+// is 7), so anything past 30 is reported unsourceable and the supply row is
+// omitted rather than allocated for.
+const maxSupplyDecimals = 30
+
 // PriceHistoryAndStatsService is what NewPriceHistoryService returns: one
 // implementation serves both the history and stats endpoints because they
 // share the tokenstats:v1-cached asset payload — one upstream asset call
@@ -69,8 +77,11 @@ func (s *priceHistoryService) GetTokenStats(ctx context.Context, canonical, netw
 // float64's exact-integer range and may exceed int64 for high-decimal
 // SEP-41 tokens. Anything that is not a plain unsigned integer is reported
 // unsourceable (ok=false) so the row is omitted rather than emitted wrong.
+// `decimals` is contract-controlled, so it is bounded on BOTH sides: the
+// padding below is proportional to it, and an unbounded value would let a
+// hostile token dictate a multi-gigabyte allocation.
 func scaleSupplyByDecimals(raw string, decimals int) (string, bool) {
-	if raw == "" || decimals < 0 {
+	if raw == "" || decimals < 0 || decimals > maxSupplyDecimals {
 		return "", false
 	}
 	for _, r := range raw {
