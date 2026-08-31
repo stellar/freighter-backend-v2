@@ -50,6 +50,7 @@ jobs:
       # shared dev — and, because forceUpdate re-asserts within seconds, could
       # not be released by rebuilding main or by editing the pin by hand.
       - name: Build and push docker image
+        id: push
         env:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.ecr-registry }}
           LABEL: ${{ steps.vars.outputs.label }}
@@ -60,15 +61,21 @@ jobs:
           make docker-build-tag
           ecr-push "${TAG}"
 
+          # `summary` is built by whichever branch actually ran, so the Slack
+          # message cannot drift from what was really pushed. Keep it on one
+          # line and free of double quotes — it is interpolated into the JSON
+          # payload below.
           if [ "${DEPLOY_TO_DEV}" = "true" ]; then
             DEV_TAG="${ECR_REGISTRY}/dev/freighter-backend-v2:dev-${LABEL}"
             docker tag "${TAG}" "${DEV_TAG}"
             ecr-push "${DEV_TAG}"
             echo "Pushed ${TAG} and ${DEV_TAG}."
             echo "The dev- tag is the one shared wallet-eng-dev follows."
+            echo "summary=pushed \`${LABEL}\` and \`dev-${LABEL}\` (opted in to shared wallet-eng-dev)" >> "$GITHUB_OUTPUT"
           else
             echo "Pushed ${TAG}. No dev- tag was published."
             echo "Pin this tag in your sandbox."
+            echo "summary=pushed \`${LABEL}\` (no dev- tag; shared dev not targeted)" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Slack notification — success
@@ -80,7 +87,7 @@ jobs:
           payload: |
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": "Freighter backend V2 *dev* build complete for ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}."
+              "text": "Freighter backend V2 *dev* build complete for ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }} — ${{ steps.push.outputs.summary }}."
             }
 
       - name: Slack notification — failure
