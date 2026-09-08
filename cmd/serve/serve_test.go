@@ -417,6 +417,18 @@ func TestServeCmd_PriceChange24hResolutionFlag(t *testing.T) {
 		{"600", true},   // measured-invalid upstream
 		{"21600", true}, // 6h: not in the enum despite 4h and 12h being
 		{"0", true},
+		// Enum MEMBERS that do not divide the 24h window. Upstream accepts
+		// them, so the candles call succeeds and the coverage guard nulls
+		// the change for every token with nothing logged upstream — the
+		// silent mode, which is why membership alone is not enough.
+		{"259200", true},  // 3d
+		{"604800", true},  // 1w
+		{"1209600", true}, // 2w
+		// Members that DO divide 24h stay accepted.
+		{"300", false},
+		{"7200", false},
+		{"43200", false},
+		{"86400", false},
 	} {
 		tc := tc
 		t.Run(tc.value, func(t *testing.T) {
@@ -433,7 +445,11 @@ func TestServeCmd_PriceChange24hResolutionFlag(t *testing.T) {
 			err := c.Execute()
 			if tc.wantErr {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "is not a Stellar Expert resolution enum member")
+				// The message must name BOTH conditions: an operator who set
+				// an enum member that simply does not divide 24h would
+				// otherwise be told only that it is not a member.
+				assert.Contains(t, err.Error(), "must be a Stellar Expert resolution enum member")
+				assert.Contains(t, err.Error(), "divides the 24h change window evenly")
 				return
 			}
 			require.NoError(t, err)

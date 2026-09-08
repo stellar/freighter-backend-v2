@@ -280,6 +280,35 @@ func TestPrices_CandlesResolutionIsConfigurable(t *testing.T) {
 
 // A resolution outside upstream's closed enum 400s every candles call, so it
 // must be caught at boot, not in production.
+// Enum membership is necessary but not sufficient for the 24h change: a
+// member that does not divide the 24h window nulls the change for every
+// token WITHOUT any upstream error, which is strictly harder to notice than
+// a rejected value. The three non-divisors stay valid for the history
+// ranges, whose windows are not 24h — so the two predicates must disagree.
+func TestIsValid24hChangeResolutionSec(t *testing.T) {
+	t.Parallel()
+
+	// Divides 86400 and in the enum.
+	for _, sec := range []int{300, 900, 1800, 3600, 7200, 14400, 43200, 86400} {
+		assert.True(t, IsValid24hChangeResolutionSec(sec), sec)
+	}
+	// In the enum, does NOT divide 86400 — the silent-null values.
+	for _, sec := range []int{259200, 604800, 1209600} {
+		assert.False(t, IsValid24hChangeResolutionSec(sec), sec)
+		assert.True(t, IsValidCandleResolutionSec(sec),
+			"still a valid upstream resolution for the non-24h history ranges")
+	}
+	// Not in the enum at all; 0 must not reach the modulo.
+	for _, sec := range []int{0, -1, 600, 10800, 21600, 28800, 172800} {
+		assert.False(t, IsValid24hChangeResolutionSec(sec), sec)
+	}
+	// Every resolution the history range table actually requests must be a
+	// valid upstream member, even where it is not 24h-divisible.
+	for _, spec := range priceHistoryRanges {
+		assert.True(t, IsValidCandleResolutionSec(int(spec.resolutionSec)), spec.resolutionSec)
+	}
+}
+
 func TestIsValidCandleResolutionSec(t *testing.T) {
 	t.Parallel()
 

@@ -53,9 +53,11 @@ PRICE_NEGATIVE_CACHE_TTL_SECONDS = "120"
 # with the chart's 1D range (D8) and is the ONLY supported value. 3600
 # quarters the rows fetched per token but re-splits the two delta formulas,
 # so the detail header visibly disagrees with the list row again. Must be a
-# Stellar Expert resolution enum member — and note membership alone is not
-# sufficient: an enum member that does not divide 24h (259200, 604800,
-# 1209600) makes the 24h change null for every token, with no upstream error.
+# Stellar Expert resolution enum member that also divides 24h evenly. Both
+# halves are enforced at boot: a non-member 400s every candles call, and a
+# member that does not divide 24h (259200, 604800, 1209600) would null the
+# change for every token with no upstream error at all. The service refuses
+# to start rather than serve either.
 PRICE_CHANGE_24H_RESOLUTION_SECONDS = "900"
 MAX_TOKENS_PER_REQUEST = "not-set"
 MAX_CONCURRENT_PRICE_FETCHES = "not-set"

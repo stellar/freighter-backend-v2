@@ -469,6 +469,29 @@ func cacheKey(cacheNet, canonical string) string {
 	return cacheKeyPrefix + ":" + cacheNet + ":" + canonical
 }
 
+// IsValid24hChangeResolutionSec reports whether sec is usable as the
+// percentagePriceChange24h candle resolution. Enum membership is necessary
+// but NOT sufficient: `to` is truncated to the resolution and `from` is
+// to−candlesWindow, so a resolution that does not divide the 24h window
+// leaves `from` off a bucket boundary, puts the oldest returned candle
+// outside the 23–25h guard band, and nulls the change for EVERY token —
+// with no upstream error, because the candles call itself succeeds. That is
+// strictly worse than a rejected value, so both conditions are checked at
+// boot.
+//
+// 259200 (3d), 604800 (1w) and 1209600 (2w) are enum members that fail this.
+// They remain valid resolutions for the price-history ranges, whose windows
+// are 1Y and ALL rather than 24h — divisibility is a property of the
+// (window, resolution) pair, not of the enum, which is why this predicate is
+// separate from IsValidCandleResolutionSec rather than folded into it.
+func IsValid24hChangeResolutionSec(sec int) bool {
+	// Non-members short-circuit first, so sec == 0 never reaches the modulo.
+	if !IsValidCandleResolutionSec(sec) {
+		return false
+	}
+	return int(candlesWindow.Seconds())%sec == 0
+}
+
 // formatPrice emits the shortest decimal string that round-trips a float64.
 // Avoids scientific notation so client-side BigNumber parsers see only
 // fixed-point representations.
