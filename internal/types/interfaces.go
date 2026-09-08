@@ -80,6 +80,78 @@ type StellarExpertAsset struct {
 	} `json:"trustlines"`
 }
 
+// stellarExpertAssetCore is the part of /asset/{id} the service depends on:
+// `price`, which /token-prices exists to serve, and `created`, which the
+// price-history meta carries. Both decode strictly — a shape change in
+// either is a real failure that must surface as an error so the result goes
+// uncached and is retried, not be flattened to a zero and negative-cached
+// as unpriceable.
+type stellarExpertAssetCore struct {
+	Price   float64 `json:"price"`
+	Created int64   `json:"created"`
+}
+
+// UnmarshalJSON decodes the core fields strictly and each stats field
+// independently, dropping any whose upstream shape has drifted.
+//
+// The tolerance is not politeness, it is blast radius. This struct is shared
+// by /token-prices, /token-price-history and /token-stats, but only
+// /token-prices is on the home screen and it reads nothing but `price`.
+// Under a single strict struct, encoding/json fails the WHOLE payload on the
+// first mismatched field, doJSON returns a generic error, fetchFromUpstream
+// reports unresolved, and every token's price goes null — over a stats field
+// that caller never reads. `trustlines` is the live example: upstream has
+// shipped both an object and an array for that key, so the shape is not
+// something we control. Decoding it per field means such a drift costs the
+// one section that needs it, not the price of every asset.
+//
+// Dropping rather than coercing is deliberate: a field we cannot parse is
+// reported as absent, which every caller already handles (nil Decimals means
+// "default to 7", an empty Supply means "hide the row"). Guessing at a new
+// shape would put an unverified number in front of users instead.
+func (a *StellarExpertAsset) UnmarshalJSON(data []byte) error {
+	var core stellarExpertAssetCore
+	if err := json.Unmarshal(data, &core); err != nil {
+		return err
+	}
+
+	// Per-field envelope. Any JSON value parses into a RawMessage, so this
+	// decode fails only on input the strict decode above already rejected.
+	var raw struct {
+		Supply     json.RawMessage `json:"supply"`
+		Decimals   json.RawMessage `json:"decimals"`
+		Volume7d   json.RawMessage `json:"volume7d"`
+		Trustlines json.RawMessage `json:"trustlines"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	*a = StellarExpertAsset{Price: core.Price, Created: core.Created}
+	// Errors are dropped by design (see the doc comment); an unparseable
+	// field is left at its zero value, which means "upstream omitted it".
+	decodeOptional(raw.Supply, &a.Supply)
+	decodeOptional(raw.Decimals, &a.Decimals)
+	decodeOptional(raw.Volume7d, &a.Volume7d)
+	decodeOptional(raw.Trustlines, &a.Trustlines)
+	return nil
+}
+
+// decodeOptional decodes one stats field, leaving dst untouched when the
+// field is absent or its shape has drifted. Absent and undecodable are
+// deliberately the same outcome: callers already treat the zero value as
+// "upstream did not report this".
+func decodeOptional[T any](raw json.RawMessage, dst *T) {
+	if len(raw) == 0 {
+		return
+	}
+	var v T
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return
+	}
+	*dst = v
+}
+
 // StellarExpertCandle is one row of /asset/{id}/candles.
 // Measured wire shape: [ts, open, high, low, close, quote_volume,
 // base_volume, trades]. NOTE: the upstream API docs list low before high,

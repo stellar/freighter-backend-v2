@@ -224,3 +224,25 @@ func TestStellarExpert_Name(t *testing.T) {
 	svc := NewStellarExpertService("a", "b", "test-key", "", nil)
 	assert.Equal(t, "stellar-expert", svc.Name())
 }
+
+// The regression this guards is not in the stats fields, it is in
+// /token-prices. GetAsset decodes one struct shared by all three endpoints,
+// so while every field decoded strictly, a single drifted stats field failed
+// the whole payload here, surfaced to fetchFromUpstream as a generic error,
+// and nulled the price of every token on the home screen — over a field
+// /token-prices never reads.
+func TestStellarExpert_GetAsset_StatsDriftStillYieldsAPrice(t *testing.T) {
+	t.Parallel()
+
+	// `trustlines` as an array: upstream has shipped both shapes for it.
+	body := `{"price":0.15968,"supply":"1054439020873472865","trustlines":[{"funded":9926520}]}`
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+
+	asset, err := svc.GetAsset(context.Background(), types.PUBLIC, "XLM")
+	require.NoError(t, err, "a drifted stats field must not fail the asset call")
+	assert.Equal(t, 0.15968, asset.Price)
+	assert.Nil(t, asset.Trustlines.Funded, "the drifted field is reported as absent")
+}

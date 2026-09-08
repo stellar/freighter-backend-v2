@@ -77,3 +77,69 @@ func TestStellarExpertCandle_Accessors(t *testing.T) {
 	assert.Equal(t, 0.158900, candle.Open())
 	assert.Equal(t, 0.158955, candle.Close())
 }
+
+// A stats field whose upstream shape drifts must be dropped, never fail the
+// whole payload. StellarExpertAsset is shared with /token-prices, which
+// needs only `price`: while every field decoded strictly, a `trustlines`
+// array (upstream has shipped both an object and an array for that key)
+// failed the decode and nulled the price for EVERY token on the home
+// screen — a field none of those callers even read.
+func TestStellarExpertAsset_StatsShapeDriftKeepsPrice(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{"supply as a quoted number", `{"price":0.16,"supply":"1054439020873472865"}`},
+		{"supply as an object", `{"price":0.16,"supply":{"amount":1}}`},
+		{"decimals as a float", `{"price":0.16,"decimals":7.0}`},
+		{"volume7d as a quoted number", `{"price":0.16,"volume7d":"103319258398384"}`},
+		{"trustlines as an array", `{"price":0.16,"trustlines":[{"funded":9926520}]}`},
+		{"trustlines.funded as a string", `{"price":0.16,"trustlines":{"funded":"9926520"}}`},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var asset types.StellarExpertAsset
+			require.NoError(t, json.Unmarshal([]byte(tc.payload), &asset),
+				"a drifted stats field must be dropped, not fail the payload")
+			assert.Equal(t, 0.16, asset.Price, "price must still decode")
+		})
+	}
+}
+
+// Tolerance is per field: one drifted stats field must not take the others
+// with it, or /token-stats degrades to an empty section on any drift.
+func TestStellarExpertAsset_DriftIsIsolatedToTheDriftedField(t *testing.T) {
+	t.Parallel()
+
+	payload := `{
+		"price": 0.1604,
+		"supply": "not-a-number",
+		"decimals": 7,
+		"volume7d": 103319258398384,
+		"trustlines": {"funded": 9926520}
+	}`
+	var asset types.StellarExpertAsset
+	require.NoError(t, json.Unmarshal([]byte(payload), &asset))
+
+	assert.Equal(t, "", asset.Supply.String(), "the drifted field is dropped")
+	assert.Equal(t, 0.1604, asset.Price)
+	require.NotNil(t, asset.Decimals)
+	assert.Equal(t, 7, *asset.Decimals)
+	assert.Equal(t, float64(103319258398384), asset.Volume7d)
+	require.NotNil(t, asset.Trustlines.Funded)
+	assert.Equal(t, int64(9926520), *asset.Trustlines.Funded)
+}
+
+// `price` stays strict. It is the only field /token-prices reads, so a shape
+// change there is a real failure that must surface as an error and go
+// uncached, not be silently flattened to 0 and negative-cached as unpriced.
+func TestStellarExpertAsset_PriceDriftStillFails(t *testing.T) {
+	t.Parallel()
+
+	var asset types.StellarExpertAsset
+	assert.Error(t, json.Unmarshal([]byte(`{"price":"0.16"}`), &asset))
+}
