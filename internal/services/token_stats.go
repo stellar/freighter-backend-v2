@@ -94,7 +94,10 @@ func scaleSupplyByDecimals(raw string, decimals int) (string, bool) {
 		return raw, true
 	}
 
-	intPart, fracPart := "0", raw
+	// intPart defaults to "0" for the raw-shorter-than-decimals case, which
+	// leaves it alone; fracPart is always assigned by both branches.
+	intPart := "0"
+	var fracPart string
 	if len(raw) > decimals {
 		intPart, fracPart = raw[:len(raw)-decimals], raw[len(raw)-decimals:]
 	} else {
