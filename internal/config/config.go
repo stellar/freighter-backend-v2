@@ -182,9 +182,10 @@ type PriceHistoryConfig struct {
 	MinVolume7dUSD float64
 	// Volume7dConversionDivisor converts the raw upstream volume7d into USD
 	// (raw ÷ divisor). The raw units are UNCONFIRMED, so the default 0
-	// leaves the conversion disabled and the lowVolume verdict evaluates
-	// false; enabling the guard once units are confirmed is a config
-	// change, not a code change.
+	// leaves the conversion disabled, which makes the lowVolume verdict
+	// NULL — with no conversion there is no check to pass, and a false
+	// would assert one that never ran. Enabling the guard once units are
+	// confirmed is a config change, not a code change.
 	Volume7dConversionDivisor float64
 	// TokenStatsCacheTTLSeconds is the tokenstats:v2 asset-payload cache TTL.
 	TokenStatsCacheTTLSeconds int
