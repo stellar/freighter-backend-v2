@@ -133,8 +133,11 @@ type PriceChange struct {
 // wire contract:
 //   - ResolutionSeconds is DERIVED from the returned timestamps, never
 //     echoed from the request (upstream silently coarsens).
-//   - LowVolume is true|false|null: null means the verdict's input (the
-//     asset payload) was unavailable — never reported as false.
+//   - LowVolume is true|false|null and answers "did the check run?".
+//     null means it could not: the asset payload was unavailable, or the
+//     volume7d unit conversion is not enabled (the shipped default). false
+//     means it ran and the token passed. Absence of a signal is never
+//     reported as false.
 //   - Change is null when the coverage guard rejects the window.
 //   - Points is always present ([] when there is no data — never null, and
 //     no-data is a 200, never a 404).

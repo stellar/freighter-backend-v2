@@ -155,9 +155,9 @@ type PriceHistoryServiceConfig struct {
 	MinVolume7dUSD float64
 	// Volume7dConversionDivisor converts the raw upstream volume7d into USD
 	// (raw ÷ divisor). The units are UNCONFIRMED (§13), so the default 0
-	// means "conversion not enabled" and the verdict evaluates false —
-	// enabling the guard is a config change, never a code change. A failed
-	// asset lookup is still reported as null, never false, regardless.
+	// means "conversion not enabled", which makes the verdict null: with no
+	// conversion there is no check to pass. Enabling the guard is a config
+	// change, never a code change. A failed asset lookup is null too.
 	Volume7dConversionDivisor float64
 	// TokenStatsCacheTTL is the TTL of the tokenstats:v2 asset-payload cache
 	// entry shared by the volume verdict, the ALL-range from, and the
@@ -613,13 +613,35 @@ func (s *priceHistoryService) cacheAssetMeta(ctx context.Context, key string, va
 	}
 }
 
-// volumeVerdict is the §4.4 rule 2 low-volume verdict. It is a pure function
-// of the asset payload; when that payload is unavailable the verdict is null
-// — NEVER false, since defaulting to false would drop the warning during
-// exactly the upstream degradation where a painted price goes unchallenged —
-// and the null is counted so the quadrant is operator-visible. While the
-// volume7d unit conversion is unconfirmed (divisor 0, the shipped default)
-// the verdict evaluates false.
+// volumeVerdict is the §4.4 rule 2 low-volume verdict. The tri-state answers
+// "did the check run?", which is the only reading under which all three
+// values are truthful:
+//
+//	null   the check could not run — no usable volume signal exists
+//	false  the check ran and this token passed
+//	true   the check ran and this token failed; show the banner
+//
+// So an unavailable asset payload is null and NEVER false: defaulting to
+// false would drop the warning during exactly the upstream degradation where
+// a painted price goes unchallenged. That null is counted, so the quadrant
+// is operator-visible.
+//
+// An unconfirmed unit conversion (divisor 0, the shipped default) is null for
+// the same reason. It previously evaluated false, which asserted "we checked
+// and this token is fine" for every token on every response while no check
+// was possible — a claim the service could not support, and the one value the
+// tri-state offers no way to walk back. Three things gate the conversion and
+// all are open (§13): whether the raw scale is flat or per-asset (a flat ÷1e7
+// would permanently flag an 18-decimal token, and a single scalar divisor
+// cannot express a per-asset scale), whether the field even counts AMM venues,
+// and the absence of any unit-independent proxy to cross-check against. Until
+// they close, "unknown" is the honest answer, and the eventual rollout then
+// reads as null → true|false — new information arriving — rather than
+// false → true, which looks like the token changed.
+//
+// A zero MinVolume7dUSD is different and stays false: that is an operator
+// deliberately turning the banner off, so the check did run and nothing is
+// flagged.
 func (s *priceHistoryService) volumeVerdict(ctx context.Context, meta *types.StellarExpertAsset, metaErr error, network string) *bool {
 	if metaErr != nil || meta == nil {
 		// The metric means "upstream degraded". A caller that walked away
@@ -632,8 +654,15 @@ func (s *priceHistoryService) volumeVerdict(ctx context.Context, meta *types.Ste
 		}
 		return nil
 	}
+	if s.cfg.Volume7dConversionDivisor <= 0 {
+		// Deliberately NOT counted in VolumeVerdictNull: that counter means
+		// "the asset-payload call failed while candles succeeded", and this
+		// null is a static config state every response would share. Mixing
+		// them would swamp an upstream-health signal with a constant.
+		return nil
+	}
 	verdict := false
-	if s.cfg.Volume7dConversionDivisor > 0 && s.cfg.MinVolume7dUSD > 0 {
+	if s.cfg.MinVolume7dUSD > 0 {
 		verdict = meta.Volume7d/s.cfg.Volume7dConversionDivisor < s.cfg.MinVolume7dUSD
 	}
 	return &verdict

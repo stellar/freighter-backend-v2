@@ -84,9 +84,9 @@ func TestPriceHistory_HappyPath1D(t *testing.T) {
 	assert.Equal(t, "0.001359", got.Change.Absolute)
 	assert.Equal(t, "0.86", got.Change.Percent)
 
-	// Verdict input present, conversion not enabled → forced false, not null.
-	require.NotNil(t, got.LowVolume)
-	assert.False(t, *got.LowVolume)
+	// Verdict input present but the conversion is not enabled, so the check
+	// could not run: null, not a false "we checked and it's fine".
+	assert.Nil(t, got.LowVolume)
 
 	// The requested resolution is itself a valid upstream enum member.
 	assert.Equal(t, 900, expert.LastCandleResolution("XLM"))
@@ -371,21 +371,43 @@ func TestPriceHistory_VolumeVerdict(t *testing.T) {
 		require.NotNil(t, got.Change, "delta still returns — the banner is the entire intervention")
 	})
 
-	t.Run("verdict ships forced-false while the conversion is unconfirmed", func(t *testing.T) {
+	// A token that WOULD be flagged once units are confirmed must not be
+	// reported as false in the meantime: with no conversion there is no
+	// check, and false would assert a passing verdict this token fails.
+	t.Run("verdict is null while the conversion is unconfirmed", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
 		expert.Set("THIN-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 0.01, Volume7d: lowRawVolume7d})
 		expert.SetCandles("THIN-"+testIssuer+"-1", historyCandles(now, 24*time.Hour, 900, 0.009, 0.01))
 
-		// Default config: divisor 0 → conversion disabled → false, never true.
+		// Default config: divisor 0 → no conversion → the check cannot run.
 		svc := newHistoryService(expert, nil, spotPrices("0.01"), PriceHistoryServiceConfig{MinVolume7dUSD: 7000}, nil)
 		got, err := svc.GetPriceHistory(context.Background(), "THIN:"+testIssuer, types.PUBLIC, "1D")
 		require.NoError(t, err)
-		require.NotNil(t, got.LowVolume)
-		assert.False(t, *got.LowVolume)
+		assert.Nil(t, got.LowVolume, "the same payload reads true once the divisor is set")
 	})
 
-	t.Run("threshold 0 disables the guard", func(t *testing.T) {
+	// The config-state null is NOT the upstream-degradation null, so it must
+	// not move the counter that means "the asset call failed".
+	t.Run("the unconfirmed-conversion null does not count as upstream degradation", func(t *testing.T) {
+		t.Parallel()
+		expert := newFakeStellarExpert()
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+		expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
+
+		reg := prometheus.NewRegistry()
+		pm := metrics.NewPrices(reg)
+		svc := newHistoryService(expert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{MinVolume7dUSD: 7000}, pm)
+		got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
+		require.NoError(t, err)
+		require.Nil(t, got.LowVolume)
+		assert.Equal(t, float64(0), testutil.ToFloat64(pm.VolumeVerdictNull.WithLabelValues(types.PUBLIC)))
+	})
+
+	// Distinct from the unconfirmed-conversion case above: the conversion
+	// works, so the check runs — the operator has just chosen to flag
+	// nothing. That is a real passing verdict, not an unknown.
+	t.Run("threshold 0 disables the guard and stays false", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
 		expert.Set("THIN-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 0.01, Volume7d: lowRawVolume7d})
@@ -741,7 +763,10 @@ func TestPriceHistory_ALLResolvesAssetMetaExactlyOnce(t *testing.T) {
 
 	reg := prometheus.NewRegistry()
 	pm := metrics.NewPrices(reg)
-	svc := newHistoryService(expert, newFakeJSONCache(), spotPrices("0.16"), PriceHistoryServiceConfig{}, pm)
+	// The conversion is enabled so the verdict is a real value: a nil here
+	// would prove nothing about whether the payload was resolved.
+	cfg := PriceHistoryServiceConfig{MinVolume7dUSD: 7000, Volume7dConversionDivisor: stroopDivisor}
+	svc := newHistoryService(expert, newFakeJSONCache(), spotPrices("0.16"), cfg, pm)
 
 	got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, allRange)
 	require.NoError(t, err)

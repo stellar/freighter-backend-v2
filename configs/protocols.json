@@ -1,0 +1,130 @@
+[
+  {
+    "name": "Abroad Finance",
+    "tags": [
+      "Payments"
+    ],
+    "website_url": "https://app.abroad.finance/",
+    "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/abroad.png",
+    "background_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/abroad.png",
+    "description": "Pay at local merchants via QR code in Brazil and Colombia using your Stellar wallet. Abroad bridges crypto and everyday payments, letting you spend digital assets across Latin America."
+  },
+  {
+    "name": "Allbridge",
+    "tags": [
+      "Bridge"
+    ],
+    "website_url": "https://core.allbridge.io/",
+    "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/allbridge.png",
+    "background_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/allbridge.png",
+    "description": "Bridge stablecoins between Stellar and other blockchains. Allbridge enables native cross-chain swaps between EVM and non-EVM networks with a simple, seamless experience.",
+    "is_wc_not_supported": false
+  },
+  {
+    "name": "Aquarius",
+    "tags": [
+      "DEX / Trading"
+    ],
+    "website_url": "https://aqua.network/",
+    "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/aquarius.png",
+    "background_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/aquarius.png",
+    "description": "Swap tokens and earn rewards on Stellar's largest AMM. Aquarius offers volatile and stable pools, community voting for liquidity incentives, and delegation to maximize your yield.",
+    "is_trending": true
+  },
+  {
+    "name": "Blend",
+    "tags": [
+      "Lending"
+    ],
+    "website_url": "https://mainnet.blend.capital/",
+    "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/blend.png",
+    "background_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/blend.png",
+    "description": "Lend and borrow assets on Stellar through permissionless, immutable markets. Blend lets anyone create or use lending pools tailored to their needs, earning yield or accessing liquidity.",
+    "is_trending": true
+  },
+  {
+    "name": "Etherfuse",
+    "tags": [
+      "RWA"
+    ],
+    "website_url": "https://app.etherfuse.com/dashboard",
+    "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/etherfuse.png",
+    "background_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/etherfuse.png",
+    "description": "Invest in Stablebonds - tokens backed by government bonds that pay interest to holders. Etherfuse brings real-world fixed income on-chain, combining crypto flexibility with bond stability."
+  },
+  {
+    "name": "Litemint",
+    "tags": [
+      "NFT Marketplace"
+    ],
+    "website_url": "https://market.litemint.com/",
+    "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/litemint.png",
+    "background_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/litemint.png",
+    "description": "Discover, collect, and trade NFTs on Stellar. Litemint connects creators, collectors, and gamers through a marketplace built for unique digital experiences.",
+    "is_blacklisted": false,
+    "is_wc_not_supported": true
+  },
+  {
+    "name": "Phoenix",
+    "tags": [
+      "DEX / Trading"
+    ],
+    "website_url": "https://app.phoenix-hub.io/",
+    "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/phoenix.png",
+    "background_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/phoenix.png",
+    "description": "Trade and provide liquidity on Soroban's DeFi hub. Phoenix offers decentralized swaps and advanced financial tools powered by Stellar smart contracts.",
+    "is_wc_not_supported": true
+  },
+  {
+    "name": "Smoothie",
+    "tags": [
+      "Lending"
+    ],
+    "website_url": "https://smoothie.capital/",
+    "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/smoothie.png",
+    "background_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/smoothie.png",
+    "description": "Track your Blend lending and borrowing positions on Stellar. Smoothie provides a clear dashboard to monitor pool balances, yields, and health factors across your Blend positions."
+  },
+  {
+    "name": "Soroswap",
+    "tags": [
+      "DEX / Trading"
+    ],
+    "website_url": "https://app.soroswap.finance/",
+    "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/soroswap.png",
+    "background_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/soroswap.png",
+    "description": "Swap tokens at the best prices on Stellar. Soroswap aggregates liquidity across multiple sources, letting you trade, provide liquidity, and earn yield - all from your wallet.",
+    "is_wc_not_supported": true
+  },
+  {
+    "name": "Soroban Domains",
+    "tags": [
+      "Social"
+    ],
+    "website_url": "https://app.sorobandomains.org/",
+    "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/soroban-domains.png",
+    "background_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/soroban-domains.png",
+    "description": "Claim a human-readable .xlm name for your Stellar address. Soroban Domains makes your on-chain identity simple and memorable, replacing complex wallet addresses with names that are easy to share."
+  },
+  {
+    "name": "StellarBroker",
+    "tags": [
+      "DEX / Trading"
+    ],
+    "website_url": "https://stellar.broker/",
+    "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/stellar-broker.png",
+    "background_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/stellar-broker.png",
+    "description": "Swap tokens across Stellar's classic DEX and Soroban smart contracts in one place. StellarBroker aggregates liquidity from both layers to find you the best rates on every trade."
+  },
+  {
+    "name": "xBull Swap",
+    "tags": [
+      "DEX / Trading"
+    ],
+    "website_url": "https://swap.xbull.io/",
+    "icon_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-icons/xbull.png",
+    "background_url": "https://freighter-protocol-icons-dev.stellar.org/protocol-backgrounds/xbull.png",
+    "description": "Find the cheapest swap routes across Stellar protocols. xBull is an AMM router connected to all major DEXs on the network, giving you the best trade execution at the lowest cost.",
+    "is_trending": true
+  }
+]
