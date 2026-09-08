@@ -345,6 +345,18 @@ func (s *priceHistoryService) loadCachedSeries(ctx context.Context, key string) 
 	return out, true
 }
 
+// floorMod is Euclidean modulo: unlike Go's %, it never returns a negative
+// remainder, so truncation still rounds DOWN for pre-1970 timestamps. The
+// ALL range's floor is 2015, but nothing stops a future range from being
+// older, and a negative remainder would round such a `from` up.
+func floorMod(a, b int64) int64 {
+	m := a % b
+	if m < 0 {
+		m += b
+	}
+	return m
+}
+
 // fetchSeries performs one upstream candles fetch and writes the result —
 // including an empty one — to Redis. ErrAssetNotFound/ErrAssetMalformed map
 // to an empty series (an unknown asset and an untraded asset are
@@ -363,7 +375,26 @@ func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet
 
 	var from time.Time
 	if spec.window > 0 {
-		from = to.Add(-spec.window)
+		// `from` IS truncated, and has to be for a reason `to` does not
+		// share. Upstream returns the buckets whose start is >= `from`, so
+		// an unaligned `from` lands mid-bucket and the series silently
+		// begins one bucket late. That shifts the candle every delta
+		// anchors on (computeChange reads points[0]), and it breaks D8: the
+		// prices path derives `from` by subtracting 24h from a TRUNCATED
+		// `to`, so its window opens exactly on a bucket boundary. Two
+		// windows one bucket apart produce two different "24h changes" for
+		// the same asset — the detail header disagreeing with the list row,
+		// which is the whole thing D8 exists to prevent. Truncating here
+		// reproduces the prices path's boundary without also rounding `to`
+		// back and losing the live bucket.
+		//
+		// Truncated on the Unix timestamp, NOT via time.Time.Truncate:
+		// that rounds relative to the zero time (Jan 1, year 1), which is a
+		// whole number of days from the epoch but not a whole number of 3d
+		// or 2w periods — so it would misalign 1Y and ALL against upstream's
+		// epoch-anchored grid while looking correct for the sub-day ranges.
+		fromUnix := to.Add(-spec.window).Unix()
+		from = time.Unix(fromUnix-floorMod(fromUnix, spec.resolutionSec), 0).UTC()
 	} else {
 		// ALL: start at the floor. It previously refined this to
 		// max(asset.created, floor) by waiting on the asset payload, which

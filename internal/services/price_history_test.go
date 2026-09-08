@@ -791,3 +791,106 @@ func TestPriceHistory_RejectsInvalidInputs(t *testing.T) {
 	_, err = svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "2D")
 	require.Error(t, err, "range is a closed enum")
 }
+
+// alignedCandles builds candles whose first bucket opens exactly `oldestAge`
+// before the current `resSec` boundary, so the fixture sits on the same grid
+// upstream buckets do. historyCandles aligns to the hour instead, which
+// hides sub-hour window misalignment.
+func alignedCandles(resSec int64, oldestAge time.Duration, closes ...float64) []types.StellarExpertCandle {
+	res := time.Duration(resSec) * time.Second
+	base := time.Now().UTC().Truncate(res).Add(-oldestAge).Unix()
+	out := make([]types.StellarExpertCandle, len(closes))
+	for i, cl := range closes {
+		out[i] = types.StellarExpertCandle{float64(base + int64(i)*resSec), cl * 1.5, 0, 0, cl, 0, 0, 0}
+	}
+	return out
+}
+
+// Upstream returns buckets whose start is >= `from`, so an unaligned `from`
+// silently shifts the left edge of the series — and with it the candle every
+// delta anchors on — by one bucket. `to` is deliberately NOW (truncating it
+// would drop the in-progress bucket the delta's other end needs), so `from`
+// has to be aligned on its own rather than inheriting alignment from `to`
+// the way the prices path does.
+func TestPriceHistory_WindowedFromIsBucketAligned(t *testing.T) {
+	t.Parallel()
+
+	for _, r := range []string{"1H", oneDay, "1W", "1M", "1Y"} {
+		r := r
+		t.Run(r, func(t *testing.T) {
+			t.Parallel()
+
+			spec := priceHistoryRanges[r]
+			expert := newFakeStellarExpert()
+			expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+			svc := newHistoryService(expert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
+
+			_, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, r)
+			require.NoError(t, err)
+
+			from := expert.LastCandleFrom("XLM")
+			assert.Zero(t, from.Unix()%spec.resolutionSec,
+				"from=%s must open a %ds bucket", from, spec.resolutionSec)
+			assert.WithinDuration(t, time.Now().UTC(), expert.LastCandleTo("XLM"), 5*time.Second,
+				"to stays NOW: truncating it drops the live bucket the delta anchors against")
+		})
+	}
+}
+
+// D8's one-formula property depends on both paths asking upstream for the
+// same window, not merely on both using the same arithmetic. The prices path
+// truncates `to` and subtracts 24h, so its `from` lands on a bucket
+// boundary; the 1D history path must arrive at that same instant.
+func TestPriceHistory_1DWindowMatchesPricesPath(t *testing.T) {
+	t.Parallel()
+
+	// Separate experts: the history service resolves spot through the
+	// prices service, which issues its own candles call and would otherwise
+	// overwrite the recorded window before it is read.
+	pricesExpert := newFakeStellarExpert()
+	pricesExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	pricesSvc := NewPricesService(pricesExpert, nil, PricesServiceConfig{}, nil, nil)
+	_, err := pricesSvc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+
+	historyExpert := newFakeStellarExpert()
+	historyExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	historySvc := newHistoryService(historyExpert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
+	_, err = historySvc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, oneDay)
+	require.NoError(t, err)
+
+	assert.Equal(t, pricesExpert.LastCandleFrom("XLM").Unix(), historyExpert.LastCandleFrom("XLM").Unix(),
+		"the 1D chart and percentagePriceChange24h must anchor on the same candle")
+}
+
+// The same property as TestPriceHistory_D8EqualityOnIdenticalInputs, but
+// against an upstream that actually applies `from`. That test cannot fail on
+// a misaligned window: its fake returns the same candle slice whatever
+// window is requested, so both paths see the same candles[0] even when they
+// asked for different ones.
+func TestPriceHistory_D8EqualityWhenUpstreamHonorsTheWindow(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	expert.HonorFrom()
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.160259, Volume7d: xlmRawVolume7d})
+	// The oldest bucket opens exactly on the prices path's `from`. An
+	// unaligned history window starts one bucket later and anchors on
+	// 0.1596 instead of 0.1589.
+	expert.SetCandles("XLM", alignedCandles(900, 24*time.Hour, 0.1589, 0.1596, 0.1601))
+
+	pricesSvc := NewPricesService(expert, nil, PricesServiceConfig{}, nil, nil)
+	historySvc := newHistoryService(expert, nil, pricesSvc, PriceHistoryServiceConfig{}, nil)
+
+	prices, err := pricesSvc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+	require.NotNil(t, prices["XLM"])
+	require.NotNil(t, prices["XLM"].PercentagePriceChange24h)
+
+	hist, err := historySvc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, oneDay)
+	require.NoError(t, err)
+	require.NotNil(t, hist.Change)
+
+	assert.Equal(t, *prices["XLM"].PercentagePriceChange24h, hist.Change.Percent,
+		"the 1D header delta and percentagePriceChange24h must be one formula")
+}

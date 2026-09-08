@@ -53,6 +53,11 @@ type fakeStellarExpert struct {
 	candleTo    map[string]time.Time
 	delay       time.Duration
 	assetDelay  time.Duration
+	// honorFrom makes GetAssetCandles drop rows older than `from`, the way
+	// upstream does. Off by default because most tests want the fixture
+	// back verbatim; on for the tests that assert the requested WINDOW is
+	// right, which a fake ignoring `from` cannot detect.
+	honorFrom bool
 	// beforeCandles, when set, runs at the top of GetAssetCandles. Tests use
 	// it as an ordering probe to observe what else is in flight.
 	beforeCandles   func()
@@ -140,6 +145,7 @@ func (f *fakeStellarExpert) GetAssetCandles(ctx context.Context, network, assetI
 	f.candleTo[assetID] = to
 	rows, ok := f.candles[assetID]
 	err := f.candleErrs[assetID]
+	honorFrom := f.honorFrom
 	f.mu.Unlock()
 
 	if err != nil {
@@ -149,6 +155,15 @@ func (f *fakeStellarExpert) GetAssetCandles(ctx context.Context, network, assetI
 		// No candles configured: return empty so the prices service's
 		// empty-candles → null-change path is exercised.
 		return nil, nil
+	}
+	if honorFrom {
+		kept := make([]types.StellarExpertCandle, 0, len(rows))
+		for _, c := range rows {
+			if c.TS() >= from.Unix() {
+				kept = append(kept, c)
+			}
+		}
+		return kept, nil
 	}
 	return rows, nil
 }
@@ -163,6 +178,17 @@ func (f *fakeStellarExpert) SetCandles(assetID string, rows []types.StellarExper
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.candles[assetID] = rows
+}
+
+// HonorFrom switches the fake from returning the candle fixture verbatim to
+// returning only the rows upstream would: those whose bucket opens at or
+// after `from`. Any test asserting that two code paths agree on a number
+// derived from candles[0] needs this, or the assertion holds no matter what
+// window either path asked for.
+func (f *fakeStellarExpert) HonorFrom() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.honorFrom = true
 }
 
 func (f *fakeStellarExpert) SetCandleErr(assetID string, err error) {
