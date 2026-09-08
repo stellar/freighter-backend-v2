@@ -20,6 +20,10 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/utils/assetid"
 )
 
+// The Dn / A.n / §n.n markers below refer to the token-price-graphs design doc.
+// See the header comment in price_history.go for its path and what each marker
+// form means.
+
 const (
 	pricesServiceName = "prices"
 
@@ -61,7 +65,7 @@ const (
 
 	// defaultCandlesResolutionSec is the bucket size that window is
 	// requested at. 900 (15m) is REQUIRED by D8: it is the chart's 1D
-	// resolution, and the whole point of §4.2 is that the list row, the
+	// resolution, and the whole point of D8 is that the list row, the
 	// detail header, and the 1D chart compute one number from one series.
 	//
 	// It is nevertheless an operator knob, because 900 fetches ~97 records
@@ -404,7 +408,7 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 
 // change24hFromCandles computes the 24h percentage delta between currentPrice
 // and the close of the oldest candle — the first point the chart plots, so
-// the list row, detail header, and 1D chart share one anchor (D8, §4.2).
+// the list row, detail header, and 1D chart share one anchor (D8).
 // Returns nil when the upstream is empty, the close is zero, or the oldest
 // returned candle is too far from 24h before `to` to credibly represent a
 // 24h window (sparse trading or anomalous upstream return).

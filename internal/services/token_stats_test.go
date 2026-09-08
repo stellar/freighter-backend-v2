@@ -106,8 +106,8 @@ func TestTokenStats_NotFoundIsEmptyStats(t *testing.T) {
 // A 404 from the asset endpoint is authoritative — upstream is telling us it
 // does not know this asset — and it is the common case for unpriced SEP-41
 // tokens. Without negative caching, every history and stats request for one
-// hits the paid GetAsset endpoint forever. §6.2's rationale for negatively
-// caching empty series applies unchanged, at the same short TTL.
+// hits the paid GetAsset endpoint forever. The emptySeriesCacheTTL rationale
+// applies unchanged, at that same short TTL.
 func TestTokenStats_AuthoritativeNotFoundIsNegativelyCached(t *testing.T) {
 	t.Parallel()
 

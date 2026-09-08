@@ -213,7 +213,7 @@ func (f *fakeStellarExpert) LastCandleTo(assetID string) time.Time {
 	return f.candleTo[assetID]
 }
 
-// D8 alignment (§4.2): the 24h delta anchors on the first candle's CLOSE (the
+// D8 alignment: the 24h delta anchors on the first candle's CLOSE (the
 // first plotted chart point), not its open, and the candles request uses the
 // chart's 1D resolution (900s). Open and close differ in this fixture so an
 // accidental revert to the open anchor fails loudly.
@@ -679,7 +679,7 @@ func (f *fakeJSONCache) TTL(key string) time.Duration {
 	return f.ttls[key]
 }
 
-// Unpriceable tokens are negatively cached (§6.2): once clients stop
+// Unpriceable tokens are negatively cached: once clients stop
 // filtering custom tokens, an unpriced token in a balance list would
 // otherwise hit upstream on every 30s poll, uncacheably. A second request
 // within the negative TTL must make zero upstream calls and still serve an

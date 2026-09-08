@@ -120,7 +120,7 @@ type PricePoint struct {
 	P string `json:"p"`
 }
 
-// PriceChange is the spot-anchored range delta (§4.2): absolute =
+// PriceChange is the spot-anchored range delta (D8): absolute =
 // spot − first plotted close; percent = the same, relative, ×100. Both are
 // JSON strings.
 type PriceChange struct {

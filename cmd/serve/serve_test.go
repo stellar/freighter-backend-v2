@@ -342,7 +342,7 @@ func TestServeCmd_AcceptsAuthClockSkewLeewayBoundaries(t *testing.T) {
 	}
 }
 
-// The §6.2 defaults: 1H=5m, 1D=15m, 1W=1h, 1M=6h, 1Y=24h, ALL=7d; fetch
+// The defaults: 1H=5m, 1D=15m, 1W=1h, 1M=6h, 1Y=24h, ALL=7d; fetch
 // budget 9s (matching prices); $7k volume threshold with the unit conversion
 // shipped DISABLED (divisor 0 → verdict forced false); stats TTL 1h.
 func TestServeCmd_PriceHistoryFlagDefaults(t *testing.T) {

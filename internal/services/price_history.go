@@ -20,6 +20,24 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/utils/assetid"
 )
 
+// Design doc for the price-history and token-stats work, referenced by the
+// markers throughout this package:
+//
+//	stellar/wallet-eng-monorepo → design-docs/token-price-graphs/token-price-graphs-design.md
+//
+//	Dn    a numbered decision from the doc's Decisions table. Stable — an id is
+//	      assigned once and is never renumbered. Prefer this form.
+//	A.n   a measured fact from the Stellar Expert appendix, recorded from a real
+//	      sweep rather than derived. Appendix letters are stable in practice.
+//	§n.n  a section number. LEAST stable: inserting a section renumbers every
+//	      reference below it, and nothing verifies these. Do not add new ones —
+//	      inline the reasoning, or cite a Dn.
+//
+// A marker points at reasoning that code cannot express; it is never a source of
+// truth. Where a doc claim is load-bearing it is pinned by a test and the marker
+// is omitted, so a drift between doc and code fails CI rather than misleading a
+// reader. The doc lives in another repo, so no commit can update both atomically.
+
 const (
 	priceHistoryServiceName = "price-history"
 
@@ -127,8 +145,8 @@ func IsValidCandleResolutionSec(sec int) bool {
 // fall back to safe defaults so callers can construct a service with
 // PriceHistoryServiceConfig{}.
 type PriceHistoryServiceConfig struct {
-	// CacheTTLs overrides the per-range series cache TTLs (§6.2 defaults),
-	// keyed by range enum member. Zero/absent entries keep the default.
+	// CacheTTLs overrides the per-range series cache TTLs, keyed by range
+	// enum member. Zero/absent entries keep DefaultRangeCacheTTL.
 	CacheTTLs map[string]time.Duration
 	// FetchTimeout bounds each upstream fetch (shared singleflight budget).
 	FetchTimeout time.Duration
@@ -349,7 +367,7 @@ func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet
 	// every chart — 15 minutes on 1D, but 3 days on 1Y and 2 weeks on ALL,
 	// and the ALL entry then carries that staleness for its 7-day TTL. The
 	// final bucket of a live series is always in progress; its close is the
-	// newest trade and is exactly the point §4.2 anchors the delta's other
+	// newest trade and is exactly the point D8 anchors the delta's other
 	// end against. Truncation bought nothing in return: the cache key
 	// contains no timestamp, so aligned windows never shared an entry.
 	to := time.Now().UTC()
@@ -450,7 +468,7 @@ type cachedAssetMeta struct {
 	Created  int64   `json:"created,omitempty"`
 	Funded   *int64  `json:"funded,omitempty"`
 	// NotFound marks an authoritative "upstream does not know this asset".
-	// Caching it follows §6.2's reasoning for empty series: a 404 asset is
+	// Caching it follows the emptySeriesCacheTTL reasoning: a 404 asset is
 	// the common case for unpriced SEP-41 tokens, and without this every
 	// history and stats request for one hits the paid GetAsset endpoint.
 	NotFound bool `json:"notFound,omitempty"`
@@ -562,7 +580,7 @@ func (s *priceHistoryService) getAssetMeta(ctx context.Context, network, cacheNe
 			// Not-found/malformed are upstream's authoritative answer, and
 			// they are the common case for unpriced SEP-41 tokens — without
 			// caching them, every open of one pays for a GetAsset call.
-			// §6.2's empty-series rationale, at the same short TTL.
+			// The emptySeriesCacheTTL rationale, at that same short TTL.
 			if errors.Is(err, ErrAssetNotFound) || errors.Is(err, ErrAssetMalformed) {
 				s.cacheAssetMeta(fctx, key, cachedAssetMeta{NotFound: true}, emptySeriesCacheTTL)
 			}
@@ -632,7 +650,7 @@ func isCallerCancellation(ctx context.Context, err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
-// computeChange is the §4.2 spot-anchored delta: absolute = spot −
+// computeChange is the D8 spot-anchored delta: absolute = spot −
 // first plotted close, percent = the same, relative, ×100 (rounded to two
 // decimals exactly like percentagePriceChange24h — D8). It is computed per
 // request from the cached series plus the 30s-cached spot and never cached

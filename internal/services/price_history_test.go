@@ -212,7 +212,7 @@ func TestPriceHistory_TransientCandlesErrorIsError(t *testing.T) {
 	assert.Equal(t, time.Duration(0), cache.TTL("pricehistory:v2:public:XLM:1D"), "transient failure must not be cached")
 }
 
-// Series cache TTLs are per range (§6.2).
+// Series cache TTLs are per range.
 func TestPriceHistory_SeriesCachedAtPerRangeTTL(t *testing.T) {
 	t.Parallel()
 

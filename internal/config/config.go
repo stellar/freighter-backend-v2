@@ -165,8 +165,10 @@ type PricesConfig struct {
 // endpoints. All values are env-var backed (flag-name upper-snake) and
 // fail-fast validated in the serve command's PersistentPreRunE.
 type PriceHistoryConfig struct {
-	// Per-range Redis TTLs (seconds) for pricehistory:v2 series entries
-	// (§6.2 defaults: 1H=5m, 1D=15m, 1W=1h, 1M=6h, 1Y=24h, ALL=7d).
+	// Per-range Redis TTLs (seconds) for pricehistory:v2 series entries.
+	// The defaults come from services.DefaultRangeCacheTTLSeconds rather
+	// than being restated here, and are pinned by the serve flag-default
+	// test; that function's doc comment carries the design-doc rationale.
 	CacheTTL1HSeconds  int
 	CacheTTL1DSeconds  int
 	CacheTTL1WSeconds  int
