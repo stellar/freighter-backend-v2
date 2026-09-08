@@ -252,7 +252,7 @@ type Prices struct {
 	// the response with a null price) instead of failing the batch; 400 is
 	// returned only when nothing in the batch parses. Labeled by network.
 	SkippedTokens *prometheus.CounterVec
-	// HistoryCacheOutcomes counts pricehistory:v1 series-cache outcomes.
+	// HistoryCacheOutcomes counts pricehistory:v2 series-cache outcomes.
 	// range is the closed 1H|1D|1W|1M|1Y|ALL enum (cardinality-safe: the
 	// handler 400s anything else before the service runs).
 	HistoryCacheOutcomes *prometheus.CounterVec

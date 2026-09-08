@@ -141,7 +141,7 @@ type PriceHistoryServiceConfig struct {
 	// enabling the guard is a config change, never a code change. A failed
 	// asset lookup is still reported as null, never false, regardless.
 	Volume7dConversionDivisor float64
-	// TokenStatsCacheTTL is the TTL of the tokenstats:v1 asset-payload cache
+	// TokenStatsCacheTTL is the TTL of the tokenstats:v2 asset-payload cache
 	// entry shared by the volume verdict, the ALL-range from, and the
 	// token-stats endpoint.
 	TokenStatsCacheTTL time.Duration
@@ -437,7 +437,7 @@ func (s *priceHistoryService) cacheSeries(ctx context.Context, key string, value
 	}
 }
 
-// cachedAssetMeta is the on-disk shape of one tokenstats:v1 entry — the
+// cachedAssetMeta is the on-disk shape of one tokenstats:v2 entry — the
 // asset-payload subset shared by the volume verdict, the ALL-range `from`,
 // and the token-stats endpoint. Supply is kept as a string because real
 // supplies exceed float64's exact-integer range (and an empty json.Number

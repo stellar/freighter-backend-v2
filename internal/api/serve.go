@@ -140,7 +140,7 @@ func (s *ApiServer) initServices() error {
 	}, s.appMetrics.Service, s.appMetrics.Prices)
 
 	// One implementation serves both the history and stats endpoints: they
-	// share the tokenstats:v1-cached asset payload, and the history delta
+	// share the tokenstats:v2-cached asset payload, and the history delta
 	// anchors on the prices service's 30s-cached spot.
 	historyAndStats := services.NewPriceHistoryService(stellarExpert, s.redis, s.pricesService, services.PriceHistoryServiceConfig{
 		CacheTTLs: map[string]time.Duration{

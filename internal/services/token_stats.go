@@ -25,7 +25,7 @@ const maxSupplyDecimals = 30
 
 // PriceHistoryAndStatsService is what NewPriceHistoryService returns: one
 // implementation serves both the history and stats endpoints because they
-// share the tokenstats:v1-cached asset payload — one upstream asset call
+// share the tokenstats:v2-cached asset payload — one upstream asset call
 // feeds the volume verdict, the ALL-range `from`, and the stats rows.
 type PriceHistoryAndStatsService interface {
 	types.PriceHistoryService

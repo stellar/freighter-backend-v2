@@ -165,7 +165,7 @@ type PricesConfig struct {
 // endpoints. All values are env-var backed (flag-name upper-snake) and
 // fail-fast validated in the serve command's PersistentPreRunE.
 type PriceHistoryConfig struct {
-	// Per-range Redis TTLs (seconds) for pricehistory:v1 series entries
+	// Per-range Redis TTLs (seconds) for pricehistory:v2 series entries
 	// (§6.2 defaults: 1H=5m, 1D=15m, 1W=1h, 1M=6h, 1Y=24h, ALL=7d).
 	CacheTTL1HSeconds  int
 	CacheTTL1DSeconds  int
@@ -184,7 +184,7 @@ type PriceHistoryConfig struct {
 	// false; enabling the guard once units are confirmed is a config
 	// change, not a code change.
 	Volume7dConversionDivisor float64
-	// TokenStatsCacheTTLSeconds is the tokenstats:v1 asset-payload cache TTL.
+	// TokenStatsCacheTTLSeconds is the tokenstats:v2 asset-payload cache TTL.
 	TokenStatsCacheTTLSeconds int
 }
 
