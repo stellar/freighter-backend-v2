@@ -200,6 +200,23 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().Float64Var(&s.Cfg.PriceHistoryConfig.MinVolume7dUSD, "price-history-min-volume-7d-usd", 7000, "Low-volume warning threshold in USD 7-day volume; 0 disables the guard. The verdict stays false until --price-history-volume-7d-conversion-divisor is also set")
 	cmd.Flags().Float64Var(&s.Cfg.PriceHistoryConfig.Volume7dConversionDivisor, "price-history-volume-7d-conversion-divisor", 0, "Divisor converting the raw upstream volume7d into USD (raw ÷ divisor). The raw units are unconfirmed, so the default 0 disables the conversion and the lowVolume verdict evaluates false; set once units are confirmed (a config change, not a code change)")
 	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds, "token-stats-cache-ttl-seconds", 3600, "Redis TTL for the cached token-stats asset payload (seconds), shared with the history service's volume verdict")
+
+	// --price-change-24h-resolution-seconds is an incident lever, not a
+	// tunable, so it is hidden rather than listed beside the cache TTLs in
+	// --help. Its own usage text says every value other than the default
+	// re-splits the two delta formulas and makes the detail header visibly
+	// disagree with the list row — a setting whose documented effect is
+	// "the product becomes inconsistent" should not read as a supported
+	// configuration knob that invites tuning.
+	//
+	// It stays settable, because the reason it exists is real: the default
+	// fetches ~97 upstream rows per token where the previous value fetched
+	// ~25, on the hottest path in the service, and shedding that 4x without
+	// a deploy is worth having during an upstream incident. Discovery is
+	// via the runbook, which documents both the lever and the two ways a
+	// wrong value silently nulls the 24h change.
+	_ = cmd.Flags().MarkHidden("price-change-24h-resolution-seconds")
+
 	return cmd
 }
 

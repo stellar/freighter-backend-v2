@@ -44,11 +44,18 @@ PRICE_FETCH_TIMEOUT_SECONDS = "not-set"
 # across pods — so this is the blast radius of an upstream blip. 120 still
 # dedupes four 30s client poll cycles.
 PRICE_NEGATIVE_CACHE_TTL_SECONDS = "120"
+# INCIDENT LEVER — not a normal tunable. Leave at the default unless an
+# upstream incident requires shedding row volume, and expect a visible
+# product regression when you move it. The flag is hidden from --help for
+# this reason; the runbook documents when to pull it.
+#
 # Candle bucket size for the /token-prices 24h change. 900 aligns the number
-# with the chart's 1D range (D8) and is the supported value. 3600 is an
-# incident lever only: it quarters the rows fetched per token but re-splits
-# the two delta formulas, so the detail header visibly disagrees with the
-# list row again. Must be a Stellar Expert resolution enum member.
+# with the chart's 1D range (D8) and is the ONLY supported value. 3600
+# quarters the rows fetched per token but re-splits the two delta formulas,
+# so the detail header visibly disagrees with the list row again. Must be a
+# Stellar Expert resolution enum member — and note membership alone is not
+# sufficient: an enum member that does not divide 24h (259200, 604800,
+# 1209600) makes the 24h change null for every token, with no upstream error.
 PRICE_CHANGE_24H_RESOLUTION_SECONDS = "900"
 MAX_TOKENS_PER_REQUEST = "not-set"
 MAX_CONCURRENT_PRICE_FETCHES = "not-set"
