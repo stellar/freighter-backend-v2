@@ -475,62 +475,57 @@ func TestPriceHistory_VolumeVerdictNullNotCountedForClientCancellation(t *testin
 		"a client leaving is not upstream degradation")
 }
 
-// ALL's `from` is max(asset.created, the 2015-09-01 floor); an asset-call
-// failure falls back to the floor rather than failing the chart.
+// ALL always requests from the 2015-09-01 floor. It used to refine this to
+// max(asset.created, floor) by waiting on the asset payload, but the API
+// returns only buckets that exist, so both windows produce the identical
+// series — the refinement narrowed the request and changed nothing else,
+// while making the asset call a blocking dependency of the chart.
 func TestPriceHistory_ALLRangeFrom(t *testing.T) {
 	t.Parallel()
 
-	t.Run("uses asset.created when later than the floor", func(t *testing.T) {
-		t.Parallel()
-		expert := newFakeStellarExpert()
-		expert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 1.0, Created: 1611161688, Volume7d: xlmRawVolume7d})
-		expert.SetCandles("USDC-"+testIssuer+"-1", historyCandles(time.Now().UTC(), 60*24*time.Hour, 1209600, 0.99, 1.0))
+	// The asset payload's `created` is deliberately irrelevant now: a date
+	// after the floor, XLM's created=0, and an outright asset failure must
+	// all produce the same `from`.
+	for _, tc := range []struct {
+		name  string
+		asset *types.StellarExpertAsset
+		err   error
+	}{
+		{name: "created after the floor", asset: &types.StellarExpertAsset{Price: 1.0, Created: 1611161688, Volume7d: xlmRawVolume7d}},
+		{name: "created=0 as XLM reports", asset: &types.StellarExpertAsset{Price: 1.0, Created: 0, Volume7d: xlmRawVolume7d}},
+		{name: "asset call fails outright", err: errors.New("asset endpoint boom")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			expert := newFakeStellarExpert()
+			if tc.err != nil {
+				expert.SetErr("XLM", tc.err)
+			} else {
+				expert.Set("XLM", tc.asset)
+			}
+			expert.SetCandles("XLM", historyCandles(time.Now().UTC(), 60*24*time.Hour, 1209600, 0.15, 0.16))
 
-		svc := newHistoryService(expert, nil, spotPrices("1"), PriceHistoryServiceConfig{}, nil)
-		_, err := svc.GetPriceHistory(context.Background(), "USDC:"+testIssuer, types.PUBLIC, "ALL")
-		require.NoError(t, err)
-		assert.Equal(t, int64(1611161688), expert.LastCandleFrom("USDC-"+testIssuer+"-1").Unix())
-	})
+			svc := newHistoryService(expert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
+			got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, allRange)
+			require.NoError(t, err)
+			assert.Len(t, got.Points, 2, "the series returns regardless of the asset payload")
+			assert.Equal(t, int64(allRangeFromFloor), expert.LastCandleFrom("XLM").Unix())
+		})
+	}
 
-	t.Run("XLM's created=0 clamps to the floor", func(t *testing.T) {
-		t.Parallel()
-		expert := newFakeStellarExpert()
-		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Created: 0, Volume7d: xlmRawVolume7d})
-		expert.SetCandles("XLM", historyCandles(time.Now().UTC(), 60*24*time.Hour, 1209600, 0.15, 0.16))
-
-		svc := newHistoryService(expert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
-		_, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "ALL")
-		require.NoError(t, err)
-		assert.Equal(t, int64(1441065600), expert.LastCandleFrom("XLM").Unix())
-	})
-
-	t.Run("asset-call failure falls back to the floor", func(t *testing.T) {
-		t.Parallel()
-		expert := newFakeStellarExpert()
-		expert.SetErr("XLM", errors.New("asset endpoint boom"))
-		expert.SetCandles("XLM", historyCandles(time.Now().UTC(), 60*24*time.Hour, 1209600, 0.15, 0.16))
-
-		svc := newHistoryService(expert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
-		got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "ALL")
-		require.NoError(t, err)
-		assert.Len(t, got.Points, 2)
-		assert.Equal(t, int64(1441065600), expert.LastCandleFrom("XLM").Unix())
-	})
-
-	// §9 documents "asset payload fails, candles succeed → ALL falls back to
-	// the 2015-09-01 floor". A HANGING /asset endpoint is that failure mode's
-	// most likely shape, and it must not starve the candles call: the two
-	// share one fetch budget, so an unbounded meta wait burns the whole
-	// budget before GetAssetCandles is even issued and the fallback dies at
-	// exactly the moment it should save the request.
-	t.Run("a hanging asset call still leaves budget for candles", func(t *testing.T) {
+	// §9 documents "asset payload fails, candles succeed → ALL still
+	// returns". A HANGING /asset is that failure mode's most likely shape.
+	// It used to be able to starve the candles call, because the `from`
+	// refinement waited on it inside the shared fetch budget — which is why
+	// that wait was sub-budgeted to half the budget. With the refinement
+	// gone the candles call has no upstream call ahead of it at all, so the
+	// guarantee is now structural rather than a timing bound: candles are
+	// issued immediately, not merely within half the budget.
+	t.Run("a hanging asset call does not delay the candles call", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
 		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Created: 1611161688, Volume7d: xlmRawVolume7d})
 		expert.assetDelay = time.Minute // /asset hangs; candles are healthy
-		// A non-zero candles delay makes the fake honour ctx, so a candles
-		// call issued on an already-spent budget fails the way a real one
-		// would rather than quietly succeeding.
 		expert.delay = 50 * time.Millisecond
 		expert.SetCandles("XLM", historyCandles(time.Now().UTC(), 60*24*time.Hour, 1209600, 0.15, 0.16))
 
@@ -542,13 +537,12 @@ func TestPriceHistory_ALLRangeFrom(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Len(t, got.Points, 2, "candles must still be fetched")
-		assert.Equal(t, int64(allRangeFromFloor), expert.LastCandleFrom("XLM").Unix(),
-			"the meta wait times out into the documented floor fallback")
+		assert.Equal(t, int64(allRangeFromFloor), expert.LastCandleFrom("XLM").Unix())
 		// LastCandleTo is the wall clock at which the candles call was
-		// issued: it must land around the half-budget mark, not after the
-		// whole 2s budget has been spent waiting on /asset.
-		assert.Less(t, expert.LastCandleTo("XLM").Sub(start), 1500*time.Millisecond,
-			"the meta wait must consume at most half the shared budget, leaving the rest for candles")
+		// issued. Under the old sub-budget it landed near the half-budget
+		// mark (~1s of a 2s budget); it must now be immediate.
+		assert.Less(t, expert.LastCandleTo("XLM").Sub(start), 200*time.Millisecond,
+			"candles no longer wait on the asset payload at all")
 	})
 }
 
@@ -748,11 +742,13 @@ func TestPriceHistory_CacheOutcomeMetrics(t *testing.T) {
 	assert.Equal(t, float64(1), testutil.ToFloat64(pm.HistoryCacheOutcomes.WithLabelValues(types.PUBLIC, "1D", "hit")))
 }
 
-// On the ALL range the asset payload is needed twice in one request — once
-// for the lowVolume verdict, once for the `from` floor — but it is ONE fact
-// about ONE asset. Resolving it twice double-counts every tokenstats cache
-// outcome for ALL requests, so the metric that is supposed to show how well
-// that cache is working reports a hit rate computed over phantom lookups.
+// The asset payload has exactly ONE consumer per request: the lowVolume
+// verdict. It used to have a second on the ALL range — the `from` refinement
+// — and resolving it twice double-counted every tokenstats cache outcome, so
+// the metric meant to show how well that cache works reported a hit rate
+// computed over phantom lookups. The refinement is gone, which makes single
+// resolution structural; this guards against a second consumer creeping back
+// in without the memoization that would then be needed again.
 func TestPriceHistory_ALLResolvesAssetMetaExactlyOnce(t *testing.T) {
 	t.Parallel()
 
@@ -764,15 +760,17 @@ func TestPriceHistory_ALLResolvesAssetMetaExactlyOnce(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	pm := metrics.NewPrices(reg)
 	// The conversion is enabled so the verdict is a real value: a nil here
-	// would prove nothing about whether the payload was resolved.
+	// would prove nothing about whether the payload was resolved at all.
 	cfg := PriceHistoryServiceConfig{MinVolume7dUSD: 7000, Volume7dConversionDivisor: stroopDivisor}
 	svc := newHistoryService(expert, newFakeJSONCache(), spotPrices("0.16"), cfg, pm)
 
 	got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, allRange)
 	require.NoError(t, err)
-	require.NotNil(t, got.LowVolume, "the verdict still resolves off the shared payload")
-	assert.Equal(t, int64(1611161688), expert.LastCandleFrom("XLM").Unix(),
-		"the `from` floor still refines off the shared payload")
+	require.NotNil(t, got.LowVolume, "the verdict resolves off the payload")
+	// Created=1611161688 is deliberately later than the floor: the series
+	// request must ignore it rather than resolve the payload to narrow `from`.
+	assert.Equal(t, int64(allRangeFromFloor), expert.LastCandleFrom("XLM").Unix(),
+		"the series path must not consult the asset payload")
 
 	outcomes := testutil.ToFloat64(pm.TokenStatsCacheOutcomes.WithLabelValues(types.PUBLIC, "miss")) +
 		testutil.ToFloat64(pm.TokenStatsCacheOutcomes.WithLabelValues(types.PUBLIC, "hit"))
