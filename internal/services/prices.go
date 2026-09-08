@@ -325,7 +325,9 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 	// Truncate to the candle resolution so `from` and `to` align to bucket
 	// boundaries; otherwise upstream may return a window 23–25h wide with
 	// no consistent rule. The current price is still as-of-now via
-	// /asset/{id}, so the actual price comparison is at most ~1h off 24h.
+	// /asset/{id}, so the actual price comparison is at most one bucket off
+	// 24h — ~15m at the 900s default, and wider only if an operator raises
+	// the resolution.
 	resolutionSec := p.cfg.CandlesResolutionSec
 	resolution := time.Duration(resolutionSec) * time.Second
 	to := time.Now().UTC().Truncate(resolution)
@@ -378,7 +380,7 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 		return nil, true
 	}
 
-	// The 24h change comes only from the hourly candles window, which can pin
+	// The 24h change comes only from the candles window, which can pin
 	// a true trailing 24h (±1h). When candles are unavailable or can't cover
 	// ~24h we return null rather than a mislabeled day-over-day delta from the
 	// daily price7d series.
