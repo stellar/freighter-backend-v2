@@ -45,6 +45,8 @@ type ApiServer struct {
 	rpcService           types.RPCService
 	walletBackendService types.WalletBackendService
 	pricesService        types.PricesService
+	priceHistoryService  types.PriceHistoryService
+	tokenStatsService    types.TokenStatsService
 	registry             *prometheus.Registry
 	appMetrics           *metrics.Metrics
 	authMode             auth.Mode
@@ -130,10 +132,32 @@ func (s *ApiServer) initServices() error {
 		s.appMetrics.Service,
 	)
 	s.pricesService = services.NewPricesService(stellarExpert, s.redis, services.PricesServiceConfig{
-		CacheTTL:         time.Duration(s.cfg.PricesConfig.PriceCacheTTLSeconds) * time.Second,
-		MissFetchTimeout: time.Duration(s.cfg.PricesConfig.PriceFetchTimeoutSeconds) * time.Second,
-		MaxConcurrent:    s.cfg.PricesConfig.MaxConcurrentPriceFetches,
+		CacheTTL:             time.Duration(s.cfg.PricesConfig.PriceCacheTTLSeconds) * time.Second,
+		MissFetchTimeout:     time.Duration(s.cfg.PricesConfig.PriceFetchTimeoutSeconds) * time.Second,
+		MaxConcurrent:        s.cfg.PricesConfig.MaxConcurrentPriceFetches,
+		NegativeCacheTTL:     time.Duration(s.cfg.PricesConfig.PriceNegativeCacheTTLSeconds) * time.Second,
+		CandlesResolutionSec: s.cfg.PricesConfig.PriceChange24hResolutionSeconds,
 	}, s.appMetrics.Service, s.appMetrics.Prices)
+
+	// One implementation serves both the history and stats endpoints: they
+	// share the tokenstats:v2-cached asset payload, and the history delta
+	// anchors on the prices service's 30s-cached spot.
+	historyAndStats := services.NewPriceHistoryService(stellarExpert, s.redis, s.pricesService, services.PriceHistoryServiceConfig{
+		CacheTTLs: map[string]time.Duration{
+			"1H":  time.Duration(s.cfg.PriceHistoryConfig.CacheTTL1HSeconds) * time.Second,
+			"1D":  time.Duration(s.cfg.PriceHistoryConfig.CacheTTL1DSeconds) * time.Second,
+			"1W":  time.Duration(s.cfg.PriceHistoryConfig.CacheTTL1WSeconds) * time.Second,
+			"1M":  time.Duration(s.cfg.PriceHistoryConfig.CacheTTL1MSeconds) * time.Second,
+			"1Y":  time.Duration(s.cfg.PriceHistoryConfig.CacheTTL1YSeconds) * time.Second,
+			"ALL": time.Duration(s.cfg.PriceHistoryConfig.CacheTTLALLSeconds) * time.Second,
+		},
+		FetchTimeout:              time.Duration(s.cfg.PriceHistoryConfig.FetchTimeoutSeconds) * time.Second,
+		MinVolume7dUSD:            s.cfg.PriceHistoryConfig.MinVolume7dUSD,
+		Volume7dConversionDivisor: s.cfg.PriceHistoryConfig.Volume7dConversionDivisor,
+		TokenStatsCacheTTL:        time.Duration(s.cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds) * time.Second,
+	}, s.appMetrics.Service, s.appMetrics.Prices)
+	s.priceHistoryService = historyAndStats
+	s.tokenStatsService = historyAndStats
 
 	return nil
 }
@@ -217,7 +241,9 @@ func (s *ApiServer) routes() ([]route, error) {
 	ledgerKeyAccountsHandler := handlers.NewLedgerKeyAccountHandler(s.rpcService, s.cfg.AppConfig.MaxLedgerKeyAddresses)
 	featureFlagsHandler := handlers.NewFeatureFlagsHandler()
 	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
-	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest)
+	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest, s.appMetrics.Prices)
+	tokenPriceHistoryHandler := handlers.NewTokenPriceHistoryHandler(s.priceHistoryService)
+	tokenStatsHandler := handlers.NewTokenStatsHandler(s.tokenStatsService)
 	accountHistoryHandler, err := handlers.NewAccountHistoryHandler(
 		s.walletBackendService,
 		s.cfg.AppConfig.AccountHistoryDefaultLimit,
@@ -262,6 +288,8 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
 
 		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true, true},
+		{http.MethodGet, "/api/v1/token-price-history", handlers.CustomHandler(tokenPriceHistoryHandler.GetTokenPriceHistory), true, true},
+		{http.MethodGet, "/api/v1/token-stats", handlers.CustomHandler(tokenStatsHandler.GetTokenStats), true, true},
 		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, true},
 	}, nil
 }

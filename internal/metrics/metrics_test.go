@@ -292,3 +292,30 @@ func TestClassifyError(t *testing.T) {
 		})
 	}
 }
+
+// Pins the wire names of the price-history/token-stats metric families (B.4)
+// — runbooks and alerts reference these strings.
+func TestNewPrices_PriceHistoryMetricNames(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	p := NewPrices(reg)
+
+	p.HistoryCacheOutcomes.WithLabelValues("PUBLIC", "1D", "miss").Inc()
+	p.TokenStatsCacheOutcomes.WithLabelValues("PUBLIC", "hit").Inc()
+	p.VolumeVerdictNull.WithLabelValues("PUBLIC").Inc()
+	p.SkippedTokens.WithLabelValues("PUBLIC").Inc()
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	names := make(map[string]bool, len(families))
+	for _, f := range families {
+		names[f.GetName()] = true
+	}
+	for _, want := range []string{
+		"freighter_price_history_cache_outcomes_total",
+		"freighter_token_stats_cache_outcomes_total",
+		"freighter_price_history_volume_verdict_null_total",
+		"freighter_prices_skipped_tokens_total",
+	} {
+		assert.True(t, names[want], "expected metric family %s to be registered", want)
+	}
+}

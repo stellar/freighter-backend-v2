@@ -37,6 +37,19 @@ var (
 	// (HTTP 400). Treated like ErrAssetNotFound at the response layer.
 	ErrAssetMalformed = errors.New("asset id rejected by Stellar Expert")
 
+	// ErrUpstreamAuth is returned when Stellar Expert rejects our
+	// CREDENTIALS rather than the asset: 401, 403, or 402 (verified as "no
+	// API key", §8.4). It is split out of the transient catch-all because it
+	// is categorically different from a blip — a rotated, expired, or
+	// misconfigured key fails EVERY request for EVERY asset until someone
+	// changes config, so it never self-heals and must never be mistaken for
+	// an authoritative answer about an asset.
+	//
+	// It stays wrapped in a *metrics.UpstreamError, so the service-error
+	// metric still labels it http_error:401 / :402 / :403 and the exact code
+	// remains visible on the dependency panels.
+	ErrUpstreamAuth = errors.New("stellar expert rejected our credentials")
+
 	// ErrNetworkNotConfigured indicates we have no base URL for the
 	// requested Stellar network.
 	ErrNetworkNotConfigured = errors.New("stellar expert URL not configured for network")
@@ -166,6 +179,16 @@ func (s *stellarExpertService) doJSON(ctx context.Context, reqURL, label string,
 	case http.StatusBadRequest:
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return ErrAssetMalformed
+	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden:
+		// Our credentials, not this asset. Wrapped so errors.Is finds the
+		// sentinel (UpstreamError implements Unwrap) while the metric keeps
+		// the precise http_error:<code> label.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return &metrics.UpstreamError{
+			Kind: "http_error",
+			Code: resp.StatusCode,
+			Err:  fmt.Errorf("%w: stellar expert %s status %d", ErrUpstreamAuth, label, resp.StatusCode),
+		}
 	default:
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return &metrics.UpstreamError{Kind: "http_error", Code: resp.StatusCode, Err: fmt.Errorf("stellar expert %s status %d", label, resp.StatusCode)}

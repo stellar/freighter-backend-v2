@@ -11,6 +11,7 @@ import (
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils/assetid"
 )
@@ -18,10 +19,12 @@ import (
 type TokenPricesHandler struct {
 	PricesService types.PricesService
 	MaxTokens     int
+	// PricesMetrics may be nil (tests); counters become no-ops in that case.
+	PricesMetrics *metrics.Prices
 }
 
-func NewTokenPricesHandler(svc types.PricesService, maxTokens int) *TokenPricesHandler {
-	return &TokenPricesHandler{PricesService: svc, MaxTokens: maxTokens}
+func NewTokenPricesHandler(svc types.PricesService, maxTokens int, pricesMetrics *metrics.Prices) *TokenPricesHandler {
+	return &TokenPricesHandler{PricesService: svc, MaxTokens: maxTokens, PricesMetrics: pricesMetrics}
 }
 
 type TokenPricesRequest struct {
@@ -32,8 +35,14 @@ type validatedTokenPricesRequest struct {
 	originalInputs []string
 	canonicalIDs   []string
 	// canonicalByOriginal maps each raw client input to its canonical id so the
-	// response loop can echo the original key without re-normalizing.
+	// response loop can echo the original key without re-normalizing. Inputs
+	// that failed to parse are absent from this map — they are skipped-and-
+	// nulled in the response rather than failing the batch.
 	canonicalByOriginal map[string]string
+	// skipped counts inputs that failed to parse (LP-share ids, format
+	// mistakes). Each appears in the response with a null price; the caller
+	// bumps the per-skip metric with this count.
+	skipped int
 }
 
 func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedTokenPricesRequest, *httperror.HttpError) {
@@ -52,16 +61,25 @@ func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedToken
 	canonicalIDs := make([]string, 0, len(req.Tokens))
 	canonicalByOriginal := make(map[string]string, len(req.Tokens))
 	seen := make(map[string]struct{}, len(req.Tokens))
+	skipped := 0
 	for _, t := range req.Tokens {
 		canonical, err := assetid.Normalize(t)
 		if err != nil {
-			return nil, httperror.BadRequest("invalid token id", err)
+			// Skip-and-null: one unparseable id (an LP-share id, a client
+			// format mistake) degrades to one null entry, never a batch-wide
+			// failure that would blank every price on the home screen.
+			skipped++
+			continue
 		}
 		canonicalByOriginal[t] = canonical
 		if _, dup := seen[canonical]; !dup {
 			seen[canonical] = struct{}{}
 			canonicalIDs = append(canonicalIDs, canonical)
 		}
+	}
+	if len(canonicalIDs) == 0 {
+		errStr := "no parseable token ids in request"
+		return nil, httperror.BadRequest(errStr, errors.New(errStr))
 	}
 
 	// Apply the cap on the deduped canonical set, not raw input — a request
@@ -77,6 +95,7 @@ func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedToken
 		originalInputs:      req.Tokens,
 		canonicalIDs:        canonicalIDs,
 		canonicalByOriginal: canonicalByOriginal,
+		skipped:             skipped,
 	}, nil
 }
 
@@ -94,6 +113,9 @@ func (h *TokenPricesHandler) GetPrices(w http.ResponseWriter, r *http.Request) e
 	if validationErr != nil {
 		return validationErr
 	}
+	if req.skipped > 0 && h.PricesMetrics != nil {
+		h.PricesMetrics.SkippedTokens.WithLabelValues(network).Add(float64(req.skipped))
+	}
 
 	prices, err := h.PricesService.GetPrices(r.Context(), req.canonicalIDs, network)
 	if err != nil {
@@ -106,10 +128,15 @@ func (h *TokenPricesHandler) GetPrices(w http.ResponseWriter, r *http.Request) e
 
 	// Build response keyed by the *original* client input, preserving v1's
 	// echo behavior (so a request for "native" returns "native": ...). The
-	// canonical id was already resolved during validation.
+	// canonical id was already resolved during validation; skipped inputs are
+	// absent from canonicalByOriginal and fall out as explicit nulls.
 	out := make(map[string]*types.PriceEntry, len(req.originalInputs))
 	for _, original := range req.originalInputs {
-		out[original] = prices[req.canonicalByOriginal[original]]
+		if canonical, ok := req.canonicalByOriginal[original]; ok {
+			out[original] = prices[canonical]
+		} else {
+			out[original] = nil
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

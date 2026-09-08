@@ -42,6 +42,47 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.PricesConfig.PriceFetchTimeoutSeconds; n < 0 {
 				return fmt.Errorf("--price-fetch-timeout-seconds=%d must be >= 0", n)
 			}
+			// A zero/negative negative-cache TTL would silently fall back to
+			// the package default rather than doing what the operator asked.
+			if n := s.Cfg.PricesConfig.PriceNegativeCacheTTLSeconds; n <= 0 {
+				return fmt.Errorf("--price-negative-cache-ttl-seconds=%d must be positive", n)
+			}
+			// Two separate failure modes, both fleet-wide and both caught
+			// here. Outside upstream's closed, irregular enum (A.1), every
+			// candles call 400s. Inside the enum but not a divisor of the
+			// 24h window, every candles call SUCCEEDS and the change is
+			// nulled anyway, because the misaligned window fails the 23-25h
+			// coverage guard — no upstream error, no 4xx/5xx, nothing to
+			// alert on. That silent mode is why membership alone is not a
+			// sufficient check.
+			if n := s.Cfg.PricesConfig.PriceChange24hResolutionSeconds; !services.IsValid24hChangeResolutionSec(n) {
+				return fmt.Errorf("--price-change-24h-resolution-seconds=%d must be a Stellar Expert resolution enum member %v that also divides the 24h change window evenly (259200, 604800 and 1209600 are members but do not, and would null the change for every token)", n, services.ValidCandleResolutionsSec)
+			}
+			// Price-history config: TTLs and budgets must be positive (a zero
+			// TTL would silently disable caching against a paid upstream);
+			// the volume threshold and conversion divisor are magnitudes
+			// where 0 is meaningful ("guard disabled" / "conversion not
+			// enabled") but negatives are operator error.
+			for flag, v := range map[string]int{
+				"price-history-cache-ttl-1h-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1HSeconds,
+				"price-history-cache-ttl-1d-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1DSeconds,
+				"price-history-cache-ttl-1w-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1WSeconds,
+				"price-history-cache-ttl-1m-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1MSeconds,
+				"price-history-cache-ttl-1y-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1YSeconds,
+				"price-history-cache-ttl-all-seconds": s.Cfg.PriceHistoryConfig.CacheTTLALLSeconds,
+				"price-history-fetch-timeout-seconds": s.Cfg.PriceHistoryConfig.FetchTimeoutSeconds,
+				"token-stats-cache-ttl-seconds":       s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds,
+			} {
+				if v <= 0 {
+					return fmt.Errorf("--%s=%d must be positive", flag, v)
+				}
+			}
+			if v := s.Cfg.PriceHistoryConfig.MinVolume7dUSD; v < 0 {
+				return fmt.Errorf("--price-history-min-volume-7d-usd=%v must be >= 0", v)
+			}
+			if v := s.Cfg.PriceHistoryConfig.Volume7dConversionDivisor; v < 0 {
+				return fmt.Errorf("--price-history-volume-7d-conversion-divisor=%v must be >= 0", v)
+			}
 			if d, m := s.Cfg.AppConfig.AccountHistoryDefaultLimit, s.Cfg.AppConfig.AccountHistoryMaxLimit; d <= 0 || m <= 0 || d > m || m > handlers.AccountHistoryUpstreamMaxLimit {
 				return fmt.Errorf("--account-history-default-limit=%d / --account-history-max-limit=%d must be positive, default <= max, and max <= %d", d, m, handlers.AccountHistoryUpstreamMaxLimit)
 			}
@@ -147,9 +188,40 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertAPIKey, "stellar-expert-api-key", "", "Bearer token for the Stellar Expert API (required)")
 	cmd.Flags().StringVar(&s.Cfg.PricesConfig.StellarExpertOrigin, "stellar-expert-origin", "https://stellar.expert", "Origin header sent on Stellar Expert requests; Stellar Expert associates the API key with this origin (e.g. https://api.freighter.app in production)")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceCacheTTLSeconds, "price-cache-ttl-seconds", 30, "TTL for cached token prices in Redis (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceChange24hResolutionSeconds, "price-change-24h-resolution-seconds", 900, "Candle bucket size (seconds) for the /token-prices 24h change. 900 aligns the number with the chart's 1D range (D8) and is the supported value; 3600 is an incident lever that quarters the rows fetched per token and re-splits the two formulas, so the header will disagree with the list row. Must be a member of Stellar Expert's resolution enum AND divide 24h evenly")
+	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceNegativeCacheTTLSeconds, "price-negative-cache-ttl-seconds", 120, "TTL for cached unpriceable token entries in Redis (seconds). Separate from --price-cache-ttl-seconds because a degraded upstream 200 (price omitted) or a transient 404 also lands here, so this is the blast radius of an upstream blip; 120 still dedupes four 30s poll cycles")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceFetchTimeoutSeconds, "price-fetch-timeout-seconds", 9, "Budget for uncached token price fetches before returning best-effort results (seconds)")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxTokensPerRequest, "max-tokens-per-request", 1000, "Maximum tokens accepted in a single token-prices request")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxConcurrentPriceFetches, "max-concurrent-price-fetches", 25, "Per-request token-in-flight cap; each token issues GetAsset and GetAssetCandles in parallel, so the upstream HTTP-call ceiling is up to 2× this value")
+
+	// Token Price History + Token Stats Config
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.CacheTTL1HSeconds, "price-history-cache-ttl-1h-seconds", services.DefaultRangeCacheTTLSeconds("1H"), "Redis TTL for cached 1H price-history series (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.CacheTTL1DSeconds, "price-history-cache-ttl-1d-seconds", services.DefaultRangeCacheTTLSeconds("1D"), "Redis TTL for cached 1D price-history series (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.CacheTTL1WSeconds, "price-history-cache-ttl-1w-seconds", services.DefaultRangeCacheTTLSeconds("1W"), "Redis TTL for cached 1W price-history series (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.CacheTTL1MSeconds, "price-history-cache-ttl-1m-seconds", services.DefaultRangeCacheTTLSeconds("1M"), "Redis TTL for cached 1M price-history series (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.CacheTTL1YSeconds, "price-history-cache-ttl-1y-seconds", services.DefaultRangeCacheTTLSeconds("1Y"), "Redis TTL for cached 1Y price-history series (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.CacheTTLALLSeconds, "price-history-cache-ttl-all-seconds", services.DefaultRangeCacheTTLSeconds("ALL"), "Redis TTL for cached ALL price-history series (seconds)")
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.FetchTimeoutSeconds, "price-history-fetch-timeout-seconds", 9, "Budget for each uncached price-history/token-stats upstream fetch (seconds)")
+	cmd.Flags().Float64Var(&s.Cfg.PriceHistoryConfig.MinVolume7dUSD, "price-history-min-volume-7d-usd", 7000, "Low-volume warning threshold in USD 7-day volume; 0 disables the guard and the verdict reads false (the check ran, nothing is flagged). The verdict stays null until --price-history-volume-7d-conversion-divisor is also set")
+	cmd.Flags().Float64Var(&s.Cfg.PriceHistoryConfig.Volume7dConversionDivisor, "price-history-volume-7d-conversion-divisor", 0, "Divisor converting the raw upstream volume7d into USD (raw ÷ divisor). The raw units are unconfirmed, so the default 0 disables the conversion and the lowVolume verdict is reported null — unknown rather than a false that would assert a check that never ran; set once units are confirmed (a config change, not a code change)")
+	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds, "token-stats-cache-ttl-seconds", 3600, "Redis TTL for the cached token-stats asset payload (seconds), shared with the history service's volume verdict")
+
+	// --price-change-24h-resolution-seconds is an incident lever, not a
+	// tunable, so it is hidden rather than listed beside the cache TTLs in
+	// --help. Its own usage text says every value other than the default
+	// re-splits the two delta formulas and makes the detail header visibly
+	// disagree with the list row — a setting whose documented effect is
+	// "the product becomes inconsistent" should not read as a supported
+	// configuration knob that invites tuning.
+	//
+	// It stays settable, because the reason it exists is real: the default
+	// fetches ~97 upstream rows per token where the previous value fetched
+	// ~25, on the hottest path in the service, and shedding that 4x without
+	// a deploy is worth having during an upstream incident. Discovery is
+	// via the runbook, which documents both the lever and the two ways a
+	// wrong value silently nulls the 24h change.
+	_ = cmd.Flags().MarkHidden("price-change-24h-resolution-seconds")
+
 	return cmd
 }
 

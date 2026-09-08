@@ -341,3 +341,172 @@ func TestServeCmd_AcceptsAuthClockSkewLeewayBoundaries(t *testing.T) {
 		require.NoErrorf(t, cmd.Execute(), "leeway %s should be accepted", leeway)
 	}
 }
+
+// The defaults: 1H=5m, 1D=15m, 1W=1h, 1M=6h, 1Y=24h, ALL=7d; fetch
+// budget 9s (matching prices); $7k volume threshold with the unit conversion
+// shipped DISABLED (divisor 0 → verdict null); stats TTL 1h.
+func TestServeCmd_PriceHistoryFlagDefaults(t *testing.T) {
+	t.Parallel()
+
+	cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
+
+	intDefaults := map[string]int{
+		"price-history-cache-ttl-1h-seconds":  300,
+		"price-history-cache-ttl-1d-seconds":  900,
+		"price-history-cache-ttl-1w-seconds":  3600,
+		"price-history-cache-ttl-1m-seconds":  21600,
+		"price-history-cache-ttl-1y-seconds":  86400,
+		"price-history-cache-ttl-all-seconds": 604800,
+		"price-history-fetch-timeout-seconds": 9,
+		"token-stats-cache-ttl-seconds":       3600,
+	}
+	for flag, want := range intDefaults {
+		got, err := cmd.Flags().GetInt(flag)
+		require.NoError(t, err, flag)
+		assert.Equal(t, want, got, flag)
+	}
+
+	minVolume, err := cmd.Flags().GetFloat64("price-history-min-volume-7d-usd")
+	require.NoError(t, err)
+	assert.Equal(t, float64(7000), minVolume)
+
+	divisor, err := cmd.Flags().GetFloat64("price-history-volume-7d-conversion-divisor")
+	require.NoError(t, err)
+	assert.Equal(t, float64(0), divisor, "the volume7d unit conversion ships disabled — enabling it is a config change")
+}
+
+// The negative-price cache TTL is its own knob (default 120s), separate from
+// the 30s positive TTL: a degraded upstream 200 or a transient 404 also lands
+// in the negative cache, so this value is the blast radius of a blip.
+func TestServeCmd_PriceNegativeCacheTTLFlag(t *testing.T) {
+	t.Parallel()
+
+	cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
+	got, err := cmd.Flags().GetInt("price-negative-cache-ttl-seconds")
+	require.NoError(t, err)
+	assert.Equal(t, 120, got)
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	bad := serveCmd.Command()
+	bad.RunE = func(*cobra.Command, []string) error { return nil }
+	bad.SetOut(io.Discard)
+	bad.SetErr(io.Discard)
+	bad.SetArgs([]string{"--price-negative-cache-ttl-seconds", "0"})
+	err = bad.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--price-negative-cache-ttl-seconds=0 must be positive")
+}
+
+// The 24h-change resolution defaults to the D8-aligned 900 and is validated
+// against Stellar Expert's closed, irregular resolution enum — anything
+// outside it 400s every candles call in production.
+func TestServeCmd_PriceChange24hResolutionFlag(t *testing.T) {
+	t.Parallel()
+
+	cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
+	got, err := cmd.Flags().GetInt("price-change-24h-resolution-seconds")
+	require.NoError(t, err)
+	assert.Equal(t, 900, got, "D8 requires the chart's 1D resolution")
+
+	for _, tc := range []struct {
+		value   string
+		wantErr bool
+	}{
+		{"3600", false}, // the documented incident lever
+		{"1800", false},
+		{"600", true},   // measured-invalid upstream
+		{"21600", true}, // 6h: not in the enum despite 4h and 12h being
+		{"0", true},
+		// Enum MEMBERS that do not divide the 24h window. Upstream accepts
+		// them, so the candles call succeeds and the coverage guard nulls
+		// the change for every token with nothing logged upstream — the
+		// silent mode, which is why membership alone is not enough.
+		{"259200", true},  // 3d
+		{"604800", true},  // 1w
+		{"1209600", true}, // 2w
+		// Members that DO divide 24h stay accepted.
+		{"300", false},
+		{"7200", false},
+		{"43200", false},
+		{"86400", false},
+	} {
+		tc := tc
+		t.Run(tc.value, func(t *testing.T) {
+			t.Parallel()
+			serveCmd := &ServeCmd{Cfg: &config.Config{}}
+			c := serveCmd.Command()
+			c.RunE = func(*cobra.Command, []string) error { return nil }
+			c.SetOut(io.Discard)
+			c.SetErr(io.Discard)
+			c.SetArgs([]string{
+				"--price-change-24h-resolution-seconds", tc.value,
+				"--database-url", "postgres://localhost/test",
+			})
+			err := c.Execute()
+			if tc.wantErr {
+				require.Error(t, err)
+				// The message must name BOTH conditions: an operator who set
+				// an enum member that simply does not divide 24h would
+				// otherwise be told only that it is not a member.
+				assert.Contains(t, err.Error(), "must be a Stellar Expert resolution enum member")
+				assert.Contains(t, err.Error(), "divides the 24h change window evenly")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestServeCmd_PriceHistoryValidation(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{"zero range TTL", []string{"--price-history-cache-ttl-1d-seconds", "0"}, "--price-history-cache-ttl-1d-seconds=0 must be positive"},
+		{"negative range TTL", []string{"--price-history-cache-ttl-all-seconds", "-1"}, "--price-history-cache-ttl-all-seconds=-1 must be positive"},
+		{"zero fetch timeout", []string{"--price-history-fetch-timeout-seconds", "0"}, "--price-history-fetch-timeout-seconds=0 must be positive"},
+		{"negative volume threshold", []string{"--price-history-min-volume-7d-usd", "-5"}, "--price-history-min-volume-7d-usd=-5 must be >= 0"},
+		{"negative conversion divisor", []string{"--price-history-volume-7d-conversion-divisor", "-1"}, "--price-history-volume-7d-conversion-divisor=-1 must be >= 0"},
+		{"zero token stats TTL", []string{"--token-stats-cache-ttl-seconds", "0"}, "--token-stats-cache-ttl-seconds=0 must be positive"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			serveCmd := &ServeCmd{Cfg: &config.Config{}}
+			cmd := serveCmd.Command()
+			cmd.RunE = func(*cobra.Command, []string) error { return nil }
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(tc.args)
+
+			err := cmd.Execute()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+func TestServeCmd_PriceHistoryAcceptsValidConfig(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"--price-history-cache-ttl-1h-seconds", "60",
+		"--price-history-min-volume-7d-usd", "0", // 0 disables the guard — valid
+		"--price-history-volume-7d-conversion-divisor", "10000000",
+		"--database-url", "postgres://localhost/test",
+	})
+
+	require.NoError(t, cmd.Execute())
+	assert.Equal(t, 60, serveCmd.Cfg.PriceHistoryConfig.CacheTTL1HSeconds)
+	assert.Equal(t, float64(0), serveCmd.Cfg.PriceHistoryConfig.MinVolume7dUSD)
+	assert.Equal(t, float64(10000000), serveCmd.Cfg.PriceHistoryConfig.Volume7dConversionDivisor)
+}

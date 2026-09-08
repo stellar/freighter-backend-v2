@@ -229,9 +229,15 @@ func NewService(reg prometheus.Registerer) *Service {
 // degraded-mode signals (miss-budget exhaustion), and
 // Redis-from-this-service-POV errors.
 type Prices struct {
-	// CacheOutcomes counts per-token cache outcomes by network and outcome:
-	// "hit" (live entry within --price-cache-ttl-seconds) or "miss" (no
-	// entry, expired, or upstream-only path).
+	// CacheOutcomes counts per-token cache outcomes by network and outcome.
+	// The outcome label is a closed enum:
+	//   "hit"          — live priced entry within --price-cache-ttl-seconds
+	//   "negative_hit" — live cached null within
+	//                    --price-negative-cache-ttl-seconds; we served an
+	//                    unpriceable token from cache. Counted separately so
+	//                    a mass negative-caching incident does not read as
+	//                    an improving hit rate.
+	//   "miss"         — no entry, expired, or upstream-only path
 	CacheOutcomes *prometheus.CounterVec
 	// MissBudgetExhausted counts requests whose miss-fetch budget
 	// (--price-fetch-timeout-seconds) tripped before all misses resolved.
@@ -241,6 +247,26 @@ type Prices struct {
 	// failed (and were silently fallen-through). Labeled by op: "mget" or
 	// "set".
 	RedisErrors *prometheus.CounterVec
+	// SkippedTokens counts token-prices request entries that failed to parse
+	// into a canonical asset id and were skipped-and-nulled (entry present in
+	// the response with a null price) instead of failing the batch; 400 is
+	// returned only when nothing in the batch parses. Labeled by network.
+	SkippedTokens *prometheus.CounterVec
+	// HistoryCacheOutcomes counts pricehistory:v2 series-cache outcomes.
+	// range is the closed 1H|1D|1W|1M|1Y|ALL enum (cardinality-safe: the
+	// handler 400s anything else before the service runs).
+	HistoryCacheOutcomes *prometheus.CounterVec
+	// TokenStatsCacheOutcomes counts tokenstats:v2 asset-payload cache
+	// outcomes (the cache entry shared by the history service's volume
+	// verdict / ALL-range floor and the token-stats endpoint). The outcome
+	// label is the same closed enum as CacheOutcomes: "hit",
+	// "negative_hit" (a cached authoritative asset-not-found), "miss".
+	TokenStatsCacheOutcomes *prometheus.CounterVec
+	// VolumeVerdictNull counts history responses whose lowVolume verdict was
+	// null — the candles call succeeded but the asset-payload call (the
+	// verdict's input) failed. A failed lookup is never reported as false,
+	// so this metric is how operators see that quadrant. Labeled by network.
+	VolumeVerdictNull *prometheus.CounterVec
 }
 
 // NewPrices creates and registers prices-service metrics with the given registerer.
@@ -248,7 +274,7 @@ func NewPrices(reg prometheus.Registerer) *Prices {
 	p := &Prices{
 		CacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_cache_outcomes_total",
-			Help: "Per-token cache outcomes for the token-prices endpoint.",
+			Help: "Per-token cache outcomes for the token-prices endpoint (hit, negative_hit, miss).",
 		}, []string{"network", "outcome"}),
 		MissBudgetExhausted: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_miss_budget_exhausted_total",
@@ -258,8 +284,25 @@ func NewPrices(reg prometheus.Registerer) *Prices {
 			Name: "freighter_prices_redis_errors_total",
 			Help: "Redis operation failures observed by the prices service.",
 		}, []string{"op"}),
+		SkippedTokens: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_prices_skipped_tokens_total",
+			Help: "Unparseable token-prices request entries skipped-and-nulled instead of failing the batch.",
+		}, []string{"network"}),
+		HistoryCacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_price_history_cache_outcomes_total",
+			Help: "Series-cache outcomes for the token-price-history endpoint.",
+		}, []string{"network", "range", "outcome"}),
+		TokenStatsCacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_token_stats_cache_outcomes_total",
+			Help: "Asset-payload cache outcomes for the token-stats path (shared with the history service's volume verdict).",
+		}, []string{"network", "outcome"}),
+		VolumeVerdictNull: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_price_history_volume_verdict_null_total",
+			Help: "History responses whose lowVolume verdict was null because the asset-payload call failed while candles succeeded.",
+		}, []string{"network"}),
 	}
-	reg.MustRegister(p.CacheOutcomes, p.MissBudgetExhausted, p.RedisErrors)
+	reg.MustRegister(p.CacheOutcomes, p.MissBudgetExhausted, p.RedisErrors, p.SkippedTokens,
+		p.HistoryCacheOutcomes, p.TokenStatsCacheOutcomes, p.VolumeVerdictNull)
 	return p
 }
 

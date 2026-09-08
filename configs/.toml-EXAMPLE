@@ -38,8 +38,51 @@ STELLAR_EXPERT_TESTNET_URL = "not-set"
 STELLAR_EXPERT_API_KEY = "not-set"
 PRICE_CACHE_TTL_SECONDS = "not-set"
 PRICE_FETCH_TIMEOUT_SECONDS = "not-set"
+# TTL of cached unpriceable ("null") token entries. Separate from
+# PRICE_CACHE_TTL_SECONDS: a degraded upstream 200 (price omitted) or a
+# transient 404 also lands in the negative cache, and the entry is shared
+# across pods — so this is the blast radius of an upstream blip. 120 still
+# dedupes four 30s client poll cycles.
+PRICE_NEGATIVE_CACHE_TTL_SECONDS = "120"
+# INCIDENT LEVER — not a normal tunable. Leave at the default unless an
+# upstream incident requires shedding row volume, and expect a visible
+# product regression when you move it. The flag is hidden from --help for
+# this reason; the runbook documents when to pull it.
+#
+# Candle bucket size for the /token-prices 24h change. 900 aligns the number
+# with the chart's 1D range (D8) and is the ONLY supported value. 3600
+# quarters the rows fetched per token but re-splits the two delta formulas,
+# so the detail header visibly disagrees with the list row again. Must be a
+# Stellar Expert resolution enum member that also divides 24h evenly. Both
+# halves are enforced at boot: a non-member 400s every candles call, and a
+# member that does not divide 24h (259200, 604800, 1209600) would null the
+# change for every token with no upstream error at all. The service refuses
+# to start rather than serve either.
+PRICE_CHANGE_24H_RESOLUTION_SECONDS = "900"
 MAX_TOKENS_PER_REQUEST = "not-set"
 MAX_CONCURRENT_PRICE_FETCHES = "not-set"
+
+# Token Price History + Token Stats
+# Per-range series cache TTLs (seconds); defaults: 1H=300, 1D=900, 1W=3600,
+# 1M=21600, 1Y=86400, ALL=604800.
+PRICE_HISTORY_CACHE_TTL_1H_SECONDS = "300"
+PRICE_HISTORY_CACHE_TTL_1D_SECONDS = "900"
+PRICE_HISTORY_CACHE_TTL_1W_SECONDS = "3600"
+PRICE_HISTORY_CACHE_TTL_1M_SECONDS = "21600"
+PRICE_HISTORY_CACHE_TTL_1Y_SECONDS = "86400"
+PRICE_HISTORY_CACHE_TTL_ALL_SECONDS = "604800"
+# Budget for each uncached history/stats upstream fetch (default 9, matching prices).
+PRICE_HISTORY_FETCH_TIMEOUT_SECONDS = "9"
+# Low-volume warning threshold in USD 7-day volume; 0 disables the guard.
+PRICE_HISTORY_MIN_VOLUME_7D_USD = "7000"
+# Raw-volume7d → USD conversion divisor. Units are UNCONFIRMED upstream, so
+# this ships 0, which disables the conversion and makes the lowVolume
+# verdict null — with no conversion there is no check, and a false would
+# claim every token passed one.
+# Enabling the guard once units are confirmed is this one config change.
+PRICE_HISTORY_VOLUME_7D_CONVERSION_DIVISOR = "0"
+# TTL of the cached token-stats asset payload (shared with the volume verdict).
+TOKEN_STATS_CACHE_TTL_SECONDS = "3600"
 
 # Meridian Pay
 MERIDIAN_PAY_TREASURE_HUNT_ADDRESS = "not-set"
