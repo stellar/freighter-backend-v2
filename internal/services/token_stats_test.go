@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -158,7 +159,10 @@ func TestTokenStats_KeySchemaRotatedForNotFoundMarker(t *testing.T) {
 	assert.NotEqual(t, time.Duration(0), cache.TTL("tokenstats:v2:public:XLM"))
 }
 
-func TestTokenStats_TransientErrorIsError(t *testing.T) {
+// An UNCLASSIFIED error is not an upstream verdict — it is a decode failure
+// or a bug on our side. Those must stay errors: laundering them into an empty
+// 200 would report "this token has no stats" for what is actually our defect.
+func TestTokenStats_UnclassifiedErrorIsStillAnError(t *testing.T) {
 	t.Parallel()
 
 	expert := newFakeStellarExpert()
@@ -166,6 +170,79 @@ func TestTokenStats_TransientErrorIsError(t *testing.T) {
 	svc := newStatsService(expert, nil, PriceHistoryServiceConfig{})
 	_, err := svc.GetTokenStats(context.Background(), "XLM", types.PUBLIC)
 	require.Error(t, err)
+}
+
+// A transient upstream failure degrades to the same empty 200 as an unknown
+// asset, instead of 500ing. Returning our own 5xx for an upstream blip spent
+// our error budget on someone else's outage and paged
+// FreighterBackendV2High5xxRate as though Freighter were failing user
+// traffic — and 503 would have tripped the same alert. Detection belongs on
+// the dependency metric, which is what the StellarExpert* alerts watch.
+func TestTokenStats_TransientUpstreamFailureDegradesToEmpty(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []int{500, 502, 503, 504, 429} {
+		t.Run(fmt.Sprintf("http_%d", code), func(t *testing.T) {
+			t.Parallel()
+			expert := newFakeStellarExpert()
+			expert.SetErr("XLM", &metrics.UpstreamError{
+				Kind: "http_error", Code: code,
+				Err: fmt.Errorf("stellar expert asset status %d", code),
+			})
+			cache := newFakeJSONCache()
+			svc := newStatsService(expert, cache, PriceHistoryServiceConfig{})
+
+			got, err := svc.GetTokenStats(context.Background(), "XLM", types.PUBLIC)
+			require.NoError(t, err, "an upstream blip must not become our 5xx")
+			require.NotNil(t, got)
+			assert.Nil(t, got.SupplyOnStellar, "no rows, same as an unknown asset")
+			assert.Nil(t, got.Holders)
+
+			// Crucially NOT cached: caching a blip would keep the section
+			// empty for the TTL after upstream recovered.
+			assert.Equal(t, time.Duration(0), cache.TTL("tokenstats:v2:public:XLM"))
+			_, err = svc.GetTokenStats(context.Background(), "XLM", types.PUBLIC)
+			require.NoError(t, err)
+			assert.Equal(t, 2, expert.CallCount("XLM"), "must retry upstream, not serve a cached empty")
+		})
+	}
+}
+
+// A transport failure (no status code) is still upstream, so it degrades too.
+func TestTokenStats_TransportFailureDegradesToEmpty(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	expert.SetErr("XLM", &metrics.UpstreamError{Kind: "http_error", Err: errors.New("dial tcp: connection refused")})
+	svc := newStatsService(expert, newFakeJSONCache(), PriceHistoryServiceConfig{})
+
+	got, err := svc.GetTokenStats(context.Background(), "XLM", types.PUBLIC)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Nil(t, got.SupplyOnStellar)
+}
+
+// A credential rejection is OUR misconfiguration, fails every asset, and never
+// self-heals. It must NOT be absorbed into an empty section — that would hide a
+// total outage behind a UI state meaning "this token has no data".
+func TestTokenStats_CredentialFailureStaysAnError(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []int{401, 402, 403} {
+		t.Run(fmt.Sprintf("http_%d", code), func(t *testing.T) {
+			t.Parallel()
+			expert := newFakeStellarExpert()
+			expert.SetErr("XLM", &metrics.UpstreamError{
+				Kind: "http_error", Code: code,
+				Err: fmt.Errorf("%w: stellar expert asset status %d", ErrUpstreamAuth, code),
+			})
+			svc := newStatsService(expert, newFakeJSONCache(), PriceHistoryServiceConfig{})
+
+			_, err := svc.GetTokenStats(context.Background(), "XLM", types.PUBLIC)
+			require.Error(t, err, "a bad key must not look like a token with no stats")
+			assert.True(t, errors.Is(err, ErrUpstreamAuth))
+		})
+	}
 }
 
 // The asset payload caches under tokenstats:v2 at the configured TTL, and

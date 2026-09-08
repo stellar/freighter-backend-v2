@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
@@ -49,11 +50,56 @@ func (s *priceHistoryService) GetTokenStats(ctx context.Context, canonical, netw
 
 	meta, err := s.getAssetMeta(ctx, network, cacheNet, canonical)
 	if err != nil {
-		if errors.Is(err, ErrAssetNotFound) || errors.Is(err, ErrAssetMalformed) {
+		switch {
+		case errors.Is(err, ErrAssetNotFound), errors.Is(err, ErrAssetMalformed):
 			// No rows — clients hide the section. 200, never 404.
 			return &types.TokenStats{}, nil
+
+		case errors.Is(err, ErrUpstreamAuth):
+			// OUR misconfiguration, not a data gap. It fails every asset
+			// until config changes, so it must stay loud and land in our
+			// error budget rather than being absorbed into an empty section.
+			// FreighterBackendV2StellarExpertCredentialsRejected pages on
+			// the same condition from the dependency metric.
+			return nil, err
+
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+			// A budget problem, not an answer about the asset. The handler
+			// maps these to 503, which correctly tells the client to retry;
+			// an empty 200 would claim the token has no stats.
+			return nil, err
+
+		default:
+			// A transient UPSTREAM failure — 5xx, a rate limit, a dropped
+			// connection — is the only remaining case that degrades.
+			// Previously it 500'd, which converted an upstream blip into our
+			// own 5xx and paged FreighterBackendV2High5xxRate as though
+			// Freighter were failing user traffic. Switching to 503 would not
+			// have helped; that alert fires on any 5xx.
+			//
+			// The route already has a documented way to say "I have nothing
+			// for this asset" — the empty 200 above, which clients render by
+			// hiding the section — and an unreachable upstream is exactly
+			// that state. Detection moves to
+			// FreighterBackendV2StellarExpertDependencyErrors, which watches
+			// the dependency metric where the signal belongs.
+			//
+			// The cost is real and accepted: an empty 200 here is
+			// indistinguishable from an asset that genuinely has no stats.
+			// The response shape could not express that difference anyway —
+			// an unknown asset already returns the same empty body.
+			var upErr *metrics.UpstreamError
+			if errors.As(err, &upErr) {
+				logger.Warn("token-stats: upstream unavailable; returning empty stats",
+					"asset", canonical, "network", network, "error", err)
+				return &types.TokenStats{}, nil
+			}
+
+			// Anything left is OURS, not upstream's: a response we could not
+			// decode, or an unexpected wrapper failure. Those are bugs and
+			// must not be laundered into "this token has no stats".
+			return nil, err
 		}
-		return nil, err
 	}
 
 	stats := &types.TokenStats{}
