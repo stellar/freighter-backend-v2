@@ -115,6 +115,56 @@ func TestStellarExpert_GetAsset_Malformed(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrAssetMalformed))
 }
 
+// 401/402/403 are our credentials failing, not an answer about the asset.
+// They must be distinguishable from both the asset sentinels (which are
+// authoritative and get negatively cached) and the transient catch-all
+// (which self-heals) — a rotated key fails every asset until config changes.
+func TestStellarExpert_CredentialFailuresAreTheirOwnSentinel(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []int{http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			t.Parallel()
+			svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, `nope`, code)
+			}))
+
+			_, err := svc.GetAsset(context.Background(), types.PUBLIC, "XLM")
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrUpstreamAuth), "must match the credential sentinel")
+
+			// Never confusable with an authoritative answer about the asset:
+			// those two are what trigger negative caching.
+			assert.False(t, errors.Is(err, ErrAssetNotFound))
+			assert.False(t, errors.Is(err, ErrAssetMalformed))
+
+			// Still an UpstreamError carrying the exact code, so the
+			// dependency panels keep labelling it http_error:<code>.
+			var upErr *metrics.UpstreamError
+			require.True(t, errors.As(err, &upErr), "must stay wrapped for the metric")
+			assert.Equal(t, "http_error", upErr.Kind)
+			assert.Equal(t, code, upErr.Code)
+		})
+	}
+}
+
+// A transient 5xx must NOT match the credential sentinel — the whole point of
+// the split is that one self-heals and the other does not.
+func TestStellarExpert_ServerErrorIsNotACredentialFailure(t *testing.T) {
+	t.Parallel()
+
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `boom`, http.StatusBadGateway)
+	}))
+
+	_, err := svc.GetAsset(context.Background(), types.PUBLIC, "XLM")
+	require.Error(t, err)
+	assert.False(t, errors.Is(err, ErrUpstreamAuth))
+	var upErr *metrics.UpstreamError
+	require.True(t, errors.As(err, &upErr))
+	assert.Equal(t, http.StatusBadGateway, upErr.Code)
+}
+
 func TestStellarExpert_GetAsset_ServerError(t *testing.T) {
 	t.Parallel()
 

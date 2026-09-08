@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -311,6 +312,35 @@ func TestPrices_CandlesResolutionIsConfigurable(t *testing.T) {
 // token WITHOUT any upstream error, which is strictly harder to notice than
 // a rejected value. The three non-divisors stay valid for the history
 // ranges, whose windows are not 24h — so the two predicates must disagree.
+// A credential failure is NOT an authoritative answer about the asset, so it
+// must never be negatively cached: doing so would pin "unpriced" into Redis
+// fleet-wide for the negative TTL and keep serving nulls after the key is
+// fixed. Only ErrAssetNotFound / ErrAssetMalformed may cache.
+func TestPrices_CredentialFailureIsNotNegativelyCached(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	expert.SetErr("XLM", &metrics.UpstreamError{
+		Kind: "http_error", Code: 401,
+		Err: fmt.Errorf("%w: stellar expert asset status 401", ErrUpstreamAuth),
+	})
+	cache := newFakeJSONCache()
+
+	svc := NewPricesService(expert, cache, PricesServiceConfig{}, nil, nil)
+	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err, "the batch still succeeds; the entry is null")
+	require.Nil(t, got["XLM"])
+
+	assert.Equal(t, time.Duration(0), cache.TTL("prices:v2:public:XLM"),
+		"nothing may be cached for a credential failure")
+
+	// A second request must re-attempt upstream rather than serve a cached
+	// null, so recovery is immediate once the key is corrected.
+	_, err = svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+	assert.Equal(t, 2, expert.CallCount("XLM"), "must retry, not serve a cached negative")
+}
+
 func TestIsValid24hChangeResolutionSec(t *testing.T) {
 	t.Parallel()
 

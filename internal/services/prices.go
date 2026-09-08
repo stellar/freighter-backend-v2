@@ -370,6 +370,14 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 		if errors.Is(assetErr, context.DeadlineExceeded) || errors.Is(assetErr, context.Canceled) {
 			return nil, false
 		}
+		if errors.Is(assetErr, ErrUpstreamAuth) {
+			// Not a blip: this fails every asset on every network until
+			// someone changes config. At Warn it would be indistinguishable
+			// from ordinary per-token transient noise, which is exactly the
+			// wrong signal for a total, non-self-healing outage.
+			logger.Error("prices: stellar expert rejected our credentials; every price will be null until this is fixed — check STELLAR_EXPERT_API_KEY and --stellar-expert-origin", "asset", canonical, "error", assetErr)
+			return nil, false
+		}
 		logger.Warn("prices: upstream fetch failed", "asset", canonical, "error", assetErr)
 		return nil, false
 	}
@@ -390,8 +398,11 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 	// daily price7d series.
 	var change24h *string
 	if candlesErr != nil {
-		if !errors.Is(candlesErr, context.DeadlineExceeded) && !errors.Is(candlesErr, context.Canceled) &&
-			!errors.Is(candlesErr, ErrAssetNotFound) && !errors.Is(candlesErr, ErrAssetMalformed) {
+		switch {
+		case errors.Is(candlesErr, ErrUpstreamAuth):
+			logger.Error("prices: stellar expert rejected our credentials on candles; every 24h change will be null until this is fixed — check STELLAR_EXPERT_API_KEY and --stellar-expert-origin", "asset", stellarExpertID, "error", candlesErr)
+		case !errors.Is(candlesErr, context.DeadlineExceeded) && !errors.Is(candlesErr, context.Canceled) &&
+			!errors.Is(candlesErr, ErrAssetNotFound) && !errors.Is(candlesErr, ErrAssetMalformed):
 			logger.Warn("prices: candles fetch failed; 24h change unavailable", "asset", stellarExpertID, "error", candlesErr)
 		}
 	} else {
