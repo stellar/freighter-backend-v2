@@ -169,7 +169,7 @@ func TestPriceHistory_EmptySeriesNegativelyCached(t *testing.T) {
 	assert.Nil(t, got.Change)
 	assert.Equal(t, 1, expert.CandleCallCount(unpricedContract))
 
-	assert.Equal(t, 15*time.Minute, cache.TTL("pricehistory:v2:public:"+unpricedContract+":1D"),
+	assert.Equal(t, 15*time.Minute, cache.TTL("pricehistory:v1:public:"+unpricedContract+":1D"),
 		"empty series cache at the flat negative TTL")
 
 	got, err = svc.GetPriceHistory(context.Background(), unpricedContract, types.PUBLIC, "1D")
@@ -209,7 +209,7 @@ func TestPriceHistory_TransientCandlesErrorIsError(t *testing.T) {
 	svc := newHistoryService(expert, cache, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
 	_, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
 	require.Error(t, err)
-	assert.Equal(t, time.Duration(0), cache.TTL("pricehistory:v2:public:XLM:1D"), "transient failure must not be cached")
+	assert.Equal(t, time.Duration(0), cache.TTL("pricehistory:v1:public:XLM:1D"), "transient failure must not be cached")
 }
 
 // Series cache TTLs are per range.
@@ -225,7 +225,7 @@ func TestPriceHistory_SeriesCachedAtPerRangeTTL(t *testing.T) {
 	svc := newHistoryService(expert, cache, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
 	_, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1W")
 	require.NoError(t, err)
-	assert.Equal(t, time.Hour, cache.TTL("pricehistory:v2:public:XLM:1W"), "1W default TTL is 1h")
+	assert.Equal(t, time.Hour, cache.TTL("pricehistory:v1:public:XLM:1W"), "1W default TTL is 1h")
 
 	_, err = svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1W")
 	require.NoError(t, err)
@@ -294,7 +294,7 @@ func TestPriceHistory_CoverageGuard(t *testing.T) {
 	t.Run("ALL is exempt from the guard", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
-		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Created: 1611161688, Volume7d: xlmRawVolume7d})
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
 		expert.SetCandles("XLM", historyCandles(now, 60*24*time.Hour, 1209600, 0.10, 0.12))
 
 		svc := newHistoryService(expert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
@@ -449,7 +449,7 @@ func TestPriceHistory_VolumeVerdictNullNotCountedForClientCancellation(t *testin
 
 	fetchedAt := time.Now().UTC()
 	cache := newFakeJSONCache()
-	require.NoError(t, cache.SetJSON(context.Background(), "pricehistory:v2:public:XLM:1D", cachedSeries{
+	require.NoError(t, cache.SetJSON(context.Background(), "pricehistory:v1:public:XLM:1D", cachedSeries{
 		Points: []types.PricePoint{
 			{T: fetchedAt.Add(-24 * time.Hour).Unix(), P: "0.15"},
 			{T: fetchedAt.Add(-time.Hour).Unix(), P: "0.16"},
@@ -483,16 +483,14 @@ func TestPriceHistory_VolumeVerdictNullNotCountedForClientCancellation(t *testin
 func TestPriceHistory_ALLRangeFrom(t *testing.T) {
 	t.Parallel()
 
-	// The asset payload's `created` is deliberately irrelevant now: a date
-	// after the floor, XLM's created=0, and an outright asset failure must
-	// all produce the same `from`.
+	// The asset payload cannot influence the `from` at all now, so the only
+	// distinction left worth covering is whether there is one.
 	for _, tc := range []struct {
 		name  string
 		asset *types.StellarExpertAsset
 		err   error
 	}{
-		{name: "created after the floor", asset: &types.StellarExpertAsset{Price: 1.0, Created: 1611161688, Volume7d: xlmRawVolume7d}},
-		{name: "created=0 as XLM reports", asset: &types.StellarExpertAsset{Price: 1.0, Created: 0, Volume7d: xlmRawVolume7d}},
+		{name: "asset payload resolves", asset: &types.StellarExpertAsset{Price: 1.0, Volume7d: xlmRawVolume7d}},
 		{name: "asset call fails outright", err: errors.New("asset endpoint boom")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -524,7 +522,7 @@ func TestPriceHistory_ALLRangeFrom(t *testing.T) {
 	t.Run("a hanging asset call does not delay the candles call", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
-		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Created: 1611161688, Volume7d: xlmRawVolume7d})
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
 		expert.assetDelay = time.Minute // /asset hangs; candles are healthy
 		expert.delay = 50 * time.Millisecond
 		expert.SetCandles("XLM", historyCandles(time.Now().UTC(), 60*24*time.Hour, 1209600, 0.15, 0.16))
@@ -675,7 +673,7 @@ func TestPriceHistory_CoverageEvaluatedAgainstFetchTimeNotCacheAge(t *testing.T)
 
 	fetchedAt := time.Now().UTC().Add(-2 * time.Hour)
 	cache := newFakeJSONCache()
-	key := "pricehistory:v2:public:XLM:1D"
+	key := "pricehistory:v1:public:XLM:1D"
 	require.NoError(t, cache.SetJSON(context.Background(), key, cachedSeries{
 		Points: []types.PricePoint{
 			{T: fetchedAt.Add(-24 * time.Hour).Unix(), P: "0.15"},
@@ -694,30 +692,6 @@ func TestPriceHistory_CoverageEvaluatedAgainstFetchTimeNotCacheAge(t *testing.T)
 	require.NotNil(t, got.Change,
 		"a cached 1D series is still a 24h series two hours later; cache age is not sparse data")
 	assert.Equal(t, "0.02", got.Change.Absolute)
-}
-
-// The cached-series schema gained the fetch-time `to`, so the key-schema
-// segment rotates with it: a v1 entry carries no `to` and would be evaluated
-// against a zero timestamp.
-func TestPriceHistory_KeySchemaRotatedForStoredFetchTime(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
-	expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
-	cache := newFakeJSONCache()
-
-	require.NoError(t, cache.SetJSON(context.Background(), "pricehistory:v1:public:XLM:1D",
-		cachedSeries{Points: []types.PricePoint{{T: now.Unix(), P: "999"}}}, time.Hour))
-
-	svc := newHistoryService(expert, cache, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
-	got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
-	require.NoError(t, err)
-
-	assert.Equal(t, 1, expert.CandleCallCount("XLM"), "a v1 entry must not satisfy a v2 read")
-	require.Len(t, got.Points, 2)
-	assert.NotEqual(t, time.Duration(0), cache.TTL("pricehistory:v2:public:XLM:1D"))
 }
 
 func TestPriceHistory_CacheOutcomeMetrics(t *testing.T) {
@@ -754,7 +728,7 @@ func TestPriceHistory_ALLResolvesAssetMetaExactlyOnce(t *testing.T) {
 
 	now := time.Now().UTC()
 	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Created: 1611161688, Volume7d: xlmRawVolume7d})
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
 	expert.SetCandles("XLM", historyCandles(now, 60*24*time.Hour, 1209600, 0.15, 0.16))
 
 	reg := prometheus.NewRegistry()
@@ -767,8 +741,9 @@ func TestPriceHistory_ALLResolvesAssetMetaExactlyOnce(t *testing.T) {
 	got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, allRange)
 	require.NoError(t, err)
 	require.NotNil(t, got.LowVolume, "the verdict resolves off the payload")
-	// Created=1611161688 is deliberately later than the floor: the series
-	// request must ignore it rather than resolve the payload to narrow `from`.
+	// ALL asks upstream from the fixed floor. The asset payload carries no
+	// creation date to narrow it with any more — that field is gone — so
+	// this pins that the series path never reaches for the payload at all.
 	assert.Equal(t, int64(allRangeFromFloor), expert.LastCandleFrom("XLM").Unix(),
 		"the series path must not consult the asset payload")
 
@@ -893,4 +868,200 @@ func TestPriceHistory_D8EqualityWhenUpstreamHonorsTheWindow(t *testing.T) {
 
 	assert.Equal(t, *prices["XLM"].PercentagePriceChange24h, hist.Change.Percent,
 		"the 1D header delta and percentagePriceChange24h must be one formula")
+}
+
+// A cached series written before `cachedSeries` gained `to` decodes with
+// To == 0. Trusting that value makes coverageOK measure `oldestAge` from the
+// Unix epoch — a ~55-year NEGATIVE duration that fails the 1D 23-25h band and
+// the ratio guard on every other range alike, nulling `change` for the whole
+// remaining TTL of the entry (up to 7 days on ALL). The detail header then
+// shows no delta while the home-screen row still shows one, which is the D8
+// split the coverage guard exists to prevent.
+//
+// These keys ship at v1 rather than rotating, so the old shape is reachable
+// from a sandbox built off an earlier commit of this branch. The reader must
+// treat it as a miss and refetch.
+func TestPriceHistory_PreToCacheEntryIsRefetchedNotTrusted(t *testing.T) {
+	t.Parallel()
+
+	for _, historyRange := range []string{oneDay, "1W", allRange} {
+		t.Run(historyRange, func(t *testing.T) {
+			t.Parallel()
+
+			now := time.Now().UTC()
+			expert := newFakeStellarExpert()
+			expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+			expert.SetCandles("XLM", historyCandles(now, 26*time.Hour, 900, 0.15, 0.16))
+
+			cache := newFakeJSONCache()
+			key := historyCacheKey("public", "XLM", historyRange)
+			// The pre-`to` shape: points, no To. Written by an earlier build
+			// of this branch under this exact key.
+			require.NoError(t, cache.SetJSON(context.Background(), key,
+				cachedSeries{Points: []types.PricePoint{{T: now.Add(-24 * time.Hour).Unix(), P: "0.15"}}},
+				time.Hour))
+
+			svc := newHistoryService(expert, cache, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
+			got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, historyRange)
+			require.NoError(t, err)
+
+			assert.Equal(t, 1, expert.CandleCallCount("XLM"),
+				"an entry with no stored `to` is unusable and must be refetched, not served")
+			require.NotEmpty(t, got.Points, "the refetched series must be served")
+		})
+	}
+}
+
+// freighter_price_history_volume_verdict_null_total means "upstream
+// degraded". An authoritative asset-not-found is the opposite of that: it is
+// upstream answering correctly, and for an unpriced SEP-41 contract token it
+// is the DESIGNED common case — this branch negatively caches it precisely
+// because every chart open for one would otherwise hit upstream.
+//
+// Counting it makes the metric climb steadily with zero upstream degradation
+// on ordinary traffic, which is the same reasoning volumeVerdict already
+// applies to the divisor-disabled null: an upstream-health signal must not be
+// swamped by a constant. The second request is the sharper case — it is
+// served from the tokenstats negative cache with no upstream call at all.
+func TestPriceHistory_VolumeVerdictNullNotCountedForAuthoritativeNotFound(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	expert := newFakeStellarExpert() // unknown asset → ErrAssetNotFound
+	expert.SetCandles("SEP41:"+testIssuer, historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
+
+	reg := prometheus.NewRegistry()
+	pm := metrics.NewPrices(reg)
+	svc := newHistoryService(expert, newFakeJSONCache(), spotPrices("0.16"),
+		PriceHistoryServiceConfig{MinVolume7dUSD: 7000, Volume7dConversionDivisor: stroopDivisor}, pm)
+
+	got, err := svc.GetPriceHistory(context.Background(), "SEP41:"+testIssuer, types.PUBLIC, "1D")
+	require.NoError(t, err, "the series is the payload; the asset call is advisory")
+	assert.Nil(t, got.LowVolume, "an unknown asset still yields an unknown verdict")
+	assert.Equal(t, float64(0), testutil.ToFloat64(pm.VolumeVerdictNull.WithLabelValues(types.PUBLIC)),
+		"an authoritative not-found is upstream answering, not upstream degrading")
+
+	// Served from the negative cache: no upstream call happens at all, so
+	// counting this would be indefensible.
+	_, err = svc.GetPriceHistory(context.Background(), "SEP41:"+testIssuer, types.PUBLIC, "1D")
+	require.NoError(t, err)
+	assert.Equal(t, float64(0), testutil.ToFloat64(pm.VolumeVerdictNull.WithLabelValues(types.PUBLIC)),
+		"a cached not-found makes no upstream call and must never touch an upstream-health metric")
+}
+
+// The mirror of the client-cancellation case, and the one the counter exists
+// for. The handler wraps every request in a 9s cap
+// (handlers.TokenPriceHistoryContextTimeout). When a cached series is served
+// while /asset/{id} hangs upstream, that cap — not the client — is what ends
+// the meta wait, and ctx.Err() is DeadlineExceeded rather than Canceled.
+//
+// Suppressing the counter there blanks the metric in exactly the quadrant it
+// is meant to cover: upstream degraded, we served a 200 with lowVolume null,
+// and nothing recorded it. Only a caller actually walking away (Canceled)
+// may be excluded.
+func TestPriceHistory_VolumeVerdictNullCountedWhenOurOwnBudgetExpires(t *testing.T) {
+	t.Parallel()
+
+	fetchedAt := time.Now().UTC()
+	cache := newFakeJSONCache()
+	require.NoError(t, cache.SetJSON(context.Background(), "pricehistory:v1:public:XLM:1D", cachedSeries{
+		Points: []types.PricePoint{
+			{T: fetchedAt.Add(-24 * time.Hour).Unix(), P: "0.15"},
+			{T: fetchedAt.Add(-time.Hour).Unix(), P: "0.16"},
+		},
+		To: fetchedAt.Unix(),
+	}, time.Hour))
+
+	expert := newFakeStellarExpert()
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	expert.assetDelay = time.Minute // upstream is hanging
+
+	reg := prometheus.NewRegistry()
+	pm := metrics.NewPrices(reg)
+	svc := newHistoryService(expert, cache, spotPrices("0.16"), PriceHistoryServiceConfig{}, pm)
+
+	// Stands in for the handler's cap: OUR deadline, with the caller still
+	// very much present.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	got, err := svc.GetPriceHistory(ctx, "XLM", types.PUBLIC, "1D")
+	require.NoError(t, err, "the series was cached, so the request still completes")
+	assert.Nil(t, got.LowVolume, "the verdict is genuinely unknown")
+	assert.Equal(t, float64(1), testutil.ToFloat64(pm.VolumeVerdictNull.WithLabelValues(types.PUBLIC)),
+		"our budget expiring because upstream hung IS upstream degradation and must be counted")
+}
+
+// The empty-series TTL is a CAP on the range's own TTL, not a replacement.
+// 1H caches for 5m; assigning the flat 15m unconditionally kept an empty 1H
+// chart blank for three times the range's TTL after the token started
+// trading, and made --price-history-cache-ttl-1h-seconds inert for the very
+// case an operator would shorten it for. Ranges whose TTL already exceeds
+// 15m must still be shortened — that is the SEP-41 negative-caching benefit.
+func TestPriceHistory_EmptySeriesTTLCapsRatherThanOverrides(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		historyRange string
+		want         time.Duration
+	}{
+		{"1H", 5 * time.Minute},         // shorter than 15m — keep the range's own
+		{oneDay, 15 * time.Minute},      // equal
+		{"1W", emptySeriesCacheTTL},     // 1h default, shortened to 15m
+		{allRange, emptySeriesCacheTTL}, // 7d default, shortened to 15m
+	} {
+		t.Run(tc.historyRange, func(t *testing.T) {
+			t.Parallel()
+			expert := newFakeStellarExpert()
+			expert.Set("THIN:"+testIssuer, &types.StellarExpertAsset{Price: 0.01})
+			expert.SetCandles("THIN:"+testIssuer, nil) // no trades → empty series
+
+			cache := newFakeJSONCache()
+			svc := newHistoryService(expert, cache, spotPrices("0.01"), PriceHistoryServiceConfig{}, nil)
+
+			got, err := svc.GetPriceHistory(context.Background(), "THIN:"+testIssuer, types.PUBLIC, tc.historyRange)
+			require.NoError(t, err)
+			require.Empty(t, got.Points, "the fixture has no trades")
+
+			key := historyCacheKey("public", "THIN:"+testIssuer, tc.historyRange)
+			assert.Equal(t, tc.want, cache.TTL(key),
+				"an empty series must never cache LONGER than the range's own TTL")
+		})
+	}
+}
+
+// The OTHER way a series comes back empty: upstream answers not-found or
+// malformed for the candles call, which fetchSeries maps to an empty series.
+// That is the MORE common path — an unpriced SEP-41 token 404s by design —
+// and it must obey the same cap. Caching it at a flat 15m left an empty 1H
+// chart blank for three times 1H's own 5m TTL.
+func TestPriceHistory_NotFoundEmptySeriesObeysTheSameTTLCap(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		historyRange string
+		want         time.Duration
+	}{
+		{"1H", 5 * time.Minute},
+		{oneDay, 15 * time.Minute},
+		{"1W", emptySeriesCacheTTL},
+	} {
+		t.Run(tc.historyRange, func(t *testing.T) {
+			t.Parallel()
+			expert := newFakeStellarExpert()
+			expert.Set("GONE:"+testIssuer, &types.StellarExpertAsset{Price: 0.01})
+			expert.SetCandleErr("GONE-"+testIssuer+"-1", ErrAssetNotFound)
+
+			cache := newFakeJSONCache()
+			svc := newHistoryService(expert, cache, spotPrices("0.01"), PriceHistoryServiceConfig{}, nil)
+
+			got, err := svc.GetPriceHistory(context.Background(), "GONE:"+testIssuer, types.PUBLIC, tc.historyRange)
+			require.NoError(t, err, "an unknown asset is an empty series, not an error")
+			require.Empty(t, got.Points)
+
+			key := historyCacheKey("public", "GONE:"+testIssuer, tc.historyRange)
+			assert.Equal(t, tc.want, cache.TTL(key),
+				"a not-found empty series must cap at the range TTL just like a zero-point one")
+		})
+	}
 }

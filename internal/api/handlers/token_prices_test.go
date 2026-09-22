@@ -288,3 +288,30 @@ func unwrapHttpStatus(t *testing.T, err error) int {
 	require.True(t, errors.As(err, &hs), "expected HttpError-typed error, got %T", err)
 	return hs.HttpStatus()
 }
+
+// The all-unparseable batch is the loudest version of the failure
+// SkippedTokens exists to detect — a client that has started sending only ids
+// we cannot parse (an LP-share-only balance list, a format regression). It is
+// also the only skip path that 400s, so counting skips solely on the success
+// path left this case reporting zero, with an unattributed 400 as the only
+// signal.
+func TestTokenPrices_AllUnparseableStillCountsSkippedTokens(t *testing.T) {
+	t.Parallel()
+
+	const lpShareID = "3067bea70ea62b3cd2cf9e97e8ea2b52cbb18fe0c6b426d2c68a3f43e01d0633"
+	const otherLPShareID = "0000bea70ea62b3cd2cf9e97e8ea2b52cbb18fe0c6b426d2c68a3f43e01d0000"
+
+	reg := prometheus.NewRegistry()
+	pm := metrics.NewPrices(reg)
+	handler := NewTokenPricesHandler(&utils.MockPricesService{}, 1000, pm)
+
+	body := `{"tokens":["` + lpShareID + `","` + otherLPShareID + `"]}`
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/token-prices?network=PUBLIC", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	err := handler.GetPrices(rr, req)
+	require.Error(t, err, "a batch with nothing parseable is still a 400")
+
+	assert.Equal(t, float64(2), testutil.ToFloat64(pm.SkippedTokens.WithLabelValues("PUBLIC")),
+		"both skipped ids must be counted even though the batch 400s")
+}

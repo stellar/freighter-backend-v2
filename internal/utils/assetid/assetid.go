@@ -16,8 +16,14 @@ const (
 )
 
 var (
-	ErrEmpty     = errors.New("token id is empty")
-	ErrMalformed = errors.New("token id is malformed: expected \"XLM\" or \"CODE:ISSUER\"")
+	ErrEmpty = errors.New("token id is empty")
+	// NOT client-visible: handlers wrap it as
+	// httperror.BadRequest("invalid token id", err) and HttpError.Err is
+	// tagged `json:"-"`, so a caller sees only {"message":"invalid token
+	// id"}. This text reaches logs and errors.Is chains, so it still has to
+	// name every accepted form — including the two contract forms this
+	// service added for SEP-41 — or it misleads whoever is reading the log.
+	ErrMalformed = errors.New("token id is malformed: expected \"XLM\", \"CODE:ISSUER\", a contract id, or \"SYMBOL:CONTRACTID\"")
 )
 
 // Normalize accepts a client-side token identifier and returns its canonical

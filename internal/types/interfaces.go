@@ -71,8 +71,6 @@ type StellarExpertAsset struct {
 	// compared against a USD threshold without an explicit, config-enabled
 	// conversion.
 	Volume7d float64 `json:"volume7d"`
-	// Created is the asset's creation time (unix seconds); XLM reports 0.
-	Created int64 `json:"created"`
 	// Trustlines.Funded is the funded-trustline count ("Holders"); nil when
 	// upstream omits it.
 	Trustlines struct {
@@ -81,14 +79,18 @@ type StellarExpertAsset struct {
 }
 
 // stellarExpertAssetCore is the part of /asset/{id} the service depends on:
-// `price`, which /token-prices exists to serve, and `created`, which the
-// price-history meta carries. Both decode strictly — a shape change in
-// either is a real failure that must surface as an error so the result goes
-// uncached and is retried, not be flattened to a zero and negative-cached
-// as unpriceable.
+// `price`, which /token-prices exists to serve. It decodes strictly — a
+// shape change there is a real failure that must surface as an error so the
+// result goes uncached and is retried, not be flattened to a zero and
+// negative-cached as unpriceable.
+//
+// Nothing else belongs here. A field decoded strictly but never read has the
+// blast radius of `price` and none of its value: `created` used to sit here
+// for the ALL range's `from`, that refinement was dropped, and the field
+// stayed — so an upstream reshape of a field nobody consults would have
+// nulled every price on the home screen.
 type stellarExpertAssetCore struct {
-	Price   float64 `json:"price"`
-	Created int64   `json:"created"`
+	Price float64 `json:"price"`
 }
 
 // UnmarshalJSON decodes the core fields strictly and each stats field
@@ -127,7 +129,7 @@ func (a *StellarExpertAsset) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	*a = StellarExpertAsset{Price: core.Price, Created: core.Created}
+	*a = StellarExpertAsset{Price: core.Price}
 	// Errors are dropped by design (see the doc comment); an unparseable
 	// field is left at its zero value, which means "upstream omitted it".
 	decodeOptional(raw.Supply, &a.Supply)
@@ -161,7 +163,13 @@ func decodeOptional[T any](raw json.RawMessage, dst *T) {
 // docs.
 type StellarExpertCandle [8]float64
 
-func (c StellarExpertCandle) TS() int64      { return int64(c[0]) }
+func (c StellarExpertCandle) TS() int64 { return int64(c[0]) }
+
+// Open is not read by the service — the change formula uses Close at both
+// ends. It is kept because the decode tests assert through it, and what they
+// are pinning is the column order above, which is the one thing here that is
+// easy to get wrong and contradicts upstream's own documentation. Indexing
+// the array directly in those tests would assert the same fact less legibly.
 func (c StellarExpertCandle) Open() float64  { return c[1] }
 func (c StellarExpertCandle) Close() float64 { return c[4] }
 

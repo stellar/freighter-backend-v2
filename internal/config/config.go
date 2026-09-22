@@ -146,26 +146,13 @@ type PricesConfig struct {
 	PriceFetchTimeoutSeconds  int
 	MaxTokensPerRequest       int
 	MaxConcurrentPriceFetches int
-	// PriceNegativeCacheTTLSeconds is the TTL of cached unpriceable ("null")
-	// token entries. It is separate from PriceCacheTTLSeconds because the
-	// negative path is reached by degraded upstream states as well as
-	// authoritative ones (a 200 with `price` omitted decodes to 0; a
-	// transient 404/400 maps to not-found/malformed), and the entry is
-	// shared across pods — so this value is the blast radius of an upstream
-	// blip.
-	PriceNegativeCacheTTLSeconds int
-	// PriceChange24hResolutionSeconds is the candle bucket size the
-	// 24h-change window is requested at. 900 is the D8-required alignment
-	// with the chart's 1D range; it is configurable only so the 4x row
-	// volume that alignment costs can be backed out without a deploy.
-	PriceChange24hResolutionSeconds int
 }
 
 // PriceHistoryConfig tunes the token-price-history and token-stats
 // endpoints. All values are env-var backed (flag-name upper-snake) and
 // fail-fast validated in the serve command's PersistentPreRunE.
 type PriceHistoryConfig struct {
-	// Per-range Redis TTLs (seconds) for pricehistory:v2 series entries.
+	// Per-range Redis TTLs (seconds) for pricehistory:v1 series entries.
 	// The defaults come from services.DefaultRangeCacheTTLSeconds rather
 	// than being restated here, and are pinned by the serve flag-default
 	// test; that function's doc comment carries the design-doc rationale.
@@ -187,7 +174,7 @@ type PriceHistoryConfig struct {
 	// would assert one that never ran. Enabling the guard once units are
 	// confirmed is a config change, not a code change.
 	Volume7dConversionDivisor float64
-	// TokenStatsCacheTTLSeconds is the tokenstats:v2 asset-payload cache TTL.
+	// TokenStatsCacheTTLSeconds is the tokenstats:v1 asset-payload cache TTL.
 	TokenStatsCacheTTLSeconds int
 }
 

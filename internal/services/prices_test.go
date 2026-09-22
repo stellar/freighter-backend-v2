@@ -269,111 +269,32 @@ func TestPrices_Change24h_AnchorsOnFirstCloseAt15mResolution(t *testing.T) {
 		"24h candles must be requested at the chart's 1D resolution (900s)")
 }
 
-// 900 is the D8-required alignment, but it fetches ~97 records per token
-// where the previous 3600 fetched ~25 — a 4x row increase on the hottest path
-// in the service, against a paid upstream. The resolution is therefore an
-// operator knob so that cost can be backed out without a deploy, at the
-// documented price of re-splitting the two delta formulas.
-func TestPrices_CandlesResolutionIsConfigurable(t *testing.T) {
+// The 24h change is requested at a fixed 900s bucket, which is what aligns
+// the header number with the chart's 1D range. It was briefly an operator
+// flag; the only thing a non-default bought was a header that disagreed with
+// the list row, and a redeploy reverts the formula anyway.
+func TestPrices_Change24hUsesTheD8AlignedResolution(t *testing.T) {
 	t.Parallel()
 
-	t.Run("defaults to the D8-aligned 900", func(t *testing.T) {
-		t.Parallel()
-		stellarExpert := newFakeStellarExpert()
-		stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
 
-		svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
-		_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
-		require.NoError(t, err)
-		assert.Equal(t, defaultCandlesResolutionSec, stellarExpert.LastCandleResolution("XLM"))
-	})
-
-	t.Run("an operator can coarsen it", func(t *testing.T) {
-		t.Parallel()
-		now := time.Now().UTC()
-		stellarExpert := newFakeStellarExpert()
-		stellarExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
-		stellarExpert.SetCandles("XLM", candlesAged(now, 24*time.Hour, 0.158, 0.159))
-
-		svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{CandlesResolutionSec: 3600}, nil, nil)
-		got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
-		require.NoError(t, err)
-		assert.Equal(t, 3600, stellarExpert.LastCandleResolution("XLM"))
-		require.NotNil(t, got["XLM"])
-		require.NotNil(t, got["XLM"].PercentagePriceChange24h,
-			"the 23-25h guard still passes at the coarser bucket")
-	})
-}
-
-// A resolution outside upstream's closed enum 400s every candles call, so it
-// must be caught at boot, not in production.
-// Enum membership is necessary but not sufficient for the 24h change: a
-// member that does not divide the 24h window nulls the change for every
-// token WITHOUT any upstream error, which is strictly harder to notice than
-// a rejected value. The three non-divisors stay valid for the history
-// ranges, whose windows are not 24h — so the two predicates must disagree.
-// A credential failure is NOT an authoritative answer about the asset, so it
-// must never be negatively cached: doing so would pin "unpriced" into Redis
-// fleet-wide for the negative TTL and keep serving nulls after the key is
-// fixed. Only ErrAssetNotFound / ErrAssetMalformed may cache.
-func TestPrices_CredentialFailureIsNotNegativelyCached(t *testing.T) {
-	t.Parallel()
-
-	expert := newFakeStellarExpert()
-	expert.SetErr("XLM", &metrics.UpstreamError{
-		Kind: "http_error", Code: 401,
-		Err: fmt.Errorf("%w: stellar expert asset status 401", ErrUpstreamAuth),
-	})
-	cache := newFakeJSONCache()
-
-	svc := NewPricesService(expert, cache, PricesServiceConfig{}, nil, nil)
-	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
-	require.NoError(t, err, "the batch still succeeds; the entry is null")
-	require.Nil(t, got["XLM"])
-
-	assert.Equal(t, time.Duration(0), cache.TTL("prices:v2:public:XLM"),
-		"nothing may be cached for a credential failure")
-
-	// A second request must re-attempt upstream rather than serve a cached
-	// null, so recovery is immediate once the key is corrected.
-	_, err = svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
+	_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
 	require.NoError(t, err)
-	assert.Equal(t, 2, expert.CallCount("XLM"), "must retry, not serve a cached negative")
-}
-
-func TestIsValid24hChangeResolutionSec(t *testing.T) {
-	t.Parallel()
-
-	// Divides 86400 and in the enum.
-	for _, sec := range []int{300, 900, 1800, 3600, 7200, 14400, 43200, 86400} {
-		assert.True(t, IsValid24hChangeResolutionSec(sec), sec)
-	}
-	// In the enum, does NOT divide 86400 — the silent-null values.
-	for _, sec := range []int{259200, 604800, 1209600} {
-		assert.False(t, IsValid24hChangeResolutionSec(sec), sec)
-		assert.True(t, IsValidCandleResolutionSec(sec),
-			"still a valid upstream resolution for the non-24h history ranges")
-	}
-	// Not in the enum at all; 0 must not reach the modulo.
-	for _, sec := range []int{0, -1, 600, 10800, 21600, 28800, 172800} {
-		assert.False(t, IsValid24hChangeResolutionSec(sec), sec)
-	}
-	// Every resolution the history range table actually requests must be a
-	// valid upstream member, even where it is not 24h-divisible.
-	for _, spec := range priceHistoryRanges {
-		assert.True(t, IsValidCandleResolutionSec(int(spec.resolutionSec)), spec.resolutionSec)
-	}
+	assert.Equal(t, 900, stellarExpert.LastCandleResolution("XLM"))
+	assert.Equal(t, candlesResolutionSec, stellarExpert.LastCandleResolution("XLM"))
 }
 
 func TestIsValidCandleResolutionSec(t *testing.T) {
 	t.Parallel()
 
-	for _, sec := range ValidCandleResolutionsSec {
-		assert.True(t, IsValidCandleResolutionSec(sec), sec)
+	for _, sec := range validCandleResolutionsSec {
+		assert.True(t, isValidCandleResolutionSec(sec), sec)
 	}
 	// The enum is irregular: these neighbours are all measured-invalid (A.1).
 	for _, sec := range []int{0, 60, 120, 600, 10800, 21600, 172800, 2592000} {
-		assert.False(t, IsValidCandleResolutionSec(sec), sec)
+		assert.False(t, isValidCandleResolutionSec(sec), sec)
 	}
 }
 
@@ -785,7 +706,7 @@ func TestPrices_NullEntryNegativelyCached(t *testing.T) {
 
 	// The null entry is cached at the flat negative TTL, not the 30s
 	// positive TTL.
-	assert.Equal(t, defaultNegativeCacheTTL, cache.TTL("prices:v2:public:BOGUS:"+testIssuer))
+	assert.Equal(t, negativeCacheTTL, cache.TTL("prices:v2:public:BOGUS:"+testIssuer))
 
 	got, err = svc.GetPrices(context.Background(), []string{"BOGUS:" + testIssuer}, types.PUBLIC)
 	require.NoError(t, err)
@@ -845,45 +766,62 @@ func TestPrices_TransientErrorNotNegativelyCached(t *testing.T) {
 	assert.Equal(t, 2, stellarExpert.CallCount("XLM"), "transient failures must retry upstream")
 }
 
-// The negative-cache TTL is its own knob, separate from the 30s positive TTL.
-// It exists because the negative path is entered by *degraded* upstream
-// states as well as authoritative ones — a 200 with `price` omitted decodes
-// to 0, and a transient 404/400 maps to ErrAssetNotFound/Malformed. Those
-// blips self-heal upstream in ~30s, so the flat 15m the negative cache
+// A credential failure is NOT an authoritative answer about the asset, so it
+// must never be negatively cached: doing so would pin "unpriced" into Redis
+// fleet-wide for the negative TTL and keep serving nulls after the key is
+// fixed. Only ErrAssetNotFound / ErrAssetMalformed may cache.
+//
+// This covers the WRAPPED-error branch specifically. The auth sentinel ships
+// inside a *metrics.UpstreamError, which the bare errors.New in
+// TestPrices_TransientErrorNotNegativelyCached does not exercise.
+func TestPrices_CredentialFailureIsNotNegativelyCached(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert()
+	expert.SetErr("XLM", &metrics.UpstreamError{
+		Kind: "http_error", Code: 401,
+		Err: fmt.Errorf("%w: stellar expert asset status 401", ErrUpstreamAuth),
+	})
+	cache := newFakeJSONCache()
+
+	svc := NewPricesService(expert, cache, PricesServiceConfig{}, nil, nil)
+	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err, "the batch still succeeds; the entry is null")
+	require.Nil(t, got["XLM"])
+
+	assert.Equal(t, time.Duration(0), cache.TTL("prices:v2:public:XLM"),
+		"nothing may be cached for a credential failure")
+
+	// A second request must re-attempt upstream rather than serve a cached
+	// null, so recovery is immediate once the key is corrected.
+	_, err = svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+	assert.Equal(t, 2, expert.CallCount("XLM"), "must retry, not serve a cached negative")
+}
+
+// The negative-cache TTL is its own value, separate from the 30s positive
+// TTL. It is separate because the negative path is entered by *degraded*
+// upstream states as well as authoritative ones — a 200 with `price` omitted
+// decodes to 0, and a transient 404/400 maps to ErrAssetNotFound/Malformed.
+// Those blips self-heal upstream in ~30s, so the flat 15m the negative cache
 // originally used turned a blip into a 15-minute price blackout across every
 // pod sharing Redis. 120s still dedupes four 30s poll cycles per blip while
 // bounding the blast radius.
-func TestPrices_NegativeCacheTTLIsConfigurable(t *testing.T) {
+func TestPrices_DegradedResponseCachesAtTheNegativeTTL(t *testing.T) {
 	t.Parallel()
 
-	t.Run("degraded 200 with price omitted caches at the negative TTL", func(t *testing.T) {
-		t.Parallel()
-		stellarExpert := newFakeStellarExpert()
-		// `price` absent from the JSON decodes to 0 — the degraded-200 shape.
-		stellarExpert.Set("XLM", &types.StellarExpertAsset{})
-		cache := newFakeJSONCache()
-		svc := NewPricesService(stellarExpert, cache, PricesServiceConfig{}, nil, nil)
+	stellarExpert := newFakeStellarExpert()
+	// `price` absent from the JSON decodes to 0 — the degraded-200 shape.
+	stellarExpert.Set("XLM", &types.StellarExpertAsset{})
+	cache := newFakeJSONCache()
+	svc := NewPricesService(stellarExpert, cache, PricesServiceConfig{}, nil, nil)
 
-		got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
-		require.NoError(t, err)
-		assert.Nil(t, got["XLM"])
-		assert.Equal(t, defaultNegativeCacheTTL, cache.TTL("prices:v2:public:XLM"))
-		assert.Equal(t, 2*time.Minute, defaultNegativeCacheTTL,
-			"the default bounds a blip to ~2 minutes, not 15")
-	})
-
-	t.Run("operators can override it", func(t *testing.T) {
-		t.Parallel()
-		stellarExpert := newFakeStellarExpert() // unknown → ErrAssetNotFound
-		cache := newFakeJSONCache()
-		svc := NewPricesService(stellarExpert, cache, PricesServiceConfig{
-			NegativeCacheTTL: 45 * time.Second,
-		}, nil, nil)
-
-		_, err := svc.GetPrices(context.Background(), []string{"BOGUS:" + testIssuer}, types.PUBLIC)
-		require.NoError(t, err)
-		assert.Equal(t, 45*time.Second, cache.TTL("prices:v2:public:BOGUS:"+testIssuer))
-	})
+	got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+	assert.Nil(t, got["XLM"])
+	assert.Equal(t, negativeCacheTTL, cache.TTL("prices:v2:public:XLM"))
+	assert.Equal(t, 2*time.Minute, negativeCacheTTL,
+		"bounds a blip to ~2 minutes, not 15")
 }
 
 // Positive entries keep the configured (30s default) TTL and round-trip
@@ -1010,3 +948,148 @@ func TestPrices_NilMetrics_NoOps(t *testing.T) {
 	_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
 	require.NoError(t, err)
 }
+
+// Resolutions are chosen in code now, not config, so nothing validates them
+// at boot. These are the only two places a resolution is picked, and a
+// non-member silently 400s every candles call for that range in production.
+// 172800 (2d) is the trap: it reads as plausible between the valid 1d and 3d.
+func TestCandleResolutionsAreUpstreamMembers(t *testing.T) {
+	t.Parallel()
+
+	for r, spec := range priceHistoryRanges {
+		assert.True(t, isValidCandleResolutionSec(int(spec.resolutionSec)),
+			"range %s requests resolution %d, which upstream would 400", r, spec.resolutionSec)
+	}
+
+	assert.True(t, isValidCandleResolutionSec(candlesResolutionSec),
+		"the 24h-change resolution must be an upstream enum member")
+	assert.Equal(t, 0, int(candlesWindow.Seconds())%candlesResolutionSec,
+		"the 24h-change resolution must divide the 24h window evenly, or the coverage guard nulls the change for every token with no upstream error")
+}
+
+// doJSON wraps the 404/400 sentinels in a *metrics.UpstreamError so the
+// dependency metric gets http_error:404 instead of "internal". That is only
+// safe because every caller matches with errors.Is rather than ==, and the
+// rest of the suite cannot prove it: the fakes hand back BARE sentinels, so a
+// == comparison anywhere on these paths would still pass everything.
+//
+// This feeds the wrapped form end-to-end through the two behaviours that
+// depend on the match — negative caching, and the per-token null.
+func TestPrices_WrappedNotFoundStillNegativelyCaches(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		sentinel error
+		code     int
+	}{
+		{"wrapped 404", ErrAssetNotFound, 404},
+		{"wrapped 400", ErrAssetMalformed, 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			expert := newFakeStellarExpert()
+			expert.SetErr("XLM", &metrics.UpstreamError{
+				Kind: "http_error", Code: tc.code,
+				Err: fmt.Errorf("%w: stellar expert asset status %d", tc.sentinel, tc.code),
+			})
+			cache := newFakeJSONCache()
+			svc := NewPricesService(expert, cache, PricesServiceConfig{}, nil, nil)
+
+			got, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+			require.NoError(t, err)
+			assert.Nil(t, got["XLM"], "an authoritative answer is a per-token null, not a batch failure")
+			assert.Equal(t, negativeCacheTTL, cache.TTL("prices:v2:public:XLM"),
+				"the wrapped sentinel must still reach cacheNegative")
+
+			_, err = svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+			require.NoError(t, err)
+			assert.Equal(t, 1, expert.CallCount("XLM"),
+				"and the second request must be served from that negative entry")
+		})
+	}
+}
+
+// MissBudgetExhausted must distinguish OUR budget running out from the caller
+// walking away, and the test for that is errors.Is(ctx.Err(),
+// context.Canceled) — not ctx.Err() == nil.
+//
+// The difference only shows when the CALLER's deadline expires before the
+// miss budget does, which is what any handler request cap produces once some
+// of the budget has already been spent. /token-prices passes r.Context()
+// today so the two agree, but /token-price-history already has a 9s cap and
+// this metric would go silent the moment /token-prices gains one — the same
+// defect isCallerCancellation carried on the history side.
+func TestPrices_MissBudgetCountedWhenTheCallerDeadlineExpiresFirst(t *testing.T) {
+	t.Parallel()
+
+	newSvc := func(pm *metrics.Prices) types.PricesService {
+		expert := newFakeStellarExpert()
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
+		expert.assetDelay = time.Minute // upstream hangs
+		return NewPricesService(expert, nil, PricesServiceConfig{MissFetchTimeout: 500 * time.Millisecond}, nil, pm)
+	}
+
+	t.Run("our cap expiring first is upstream degradation and is counted", func(t *testing.T) {
+		t.Parallel()
+		pm := metrics.NewPrices(prometheus.NewRegistry())
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+
+		_, _ = newSvc(pm).GetPrices(ctx, []string{"XLM"}, types.PUBLIC)
+		assert.Equal(t, float64(1), testutil.ToFloat64(pm.MissBudgetExhausted.WithLabelValues(types.PUBLIC)),
+			"a request cap expiring because upstream hung must still count as budget exhaustion")
+	})
+
+	t.Run("a client that left is still not counted", func(t *testing.T) {
+		t.Parallel()
+		pm := metrics.NewPrices(prometheus.NewRegistry())
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // the client is already gone
+
+		_, _ = newSvc(pm).GetPrices(ctx, []string{"XLM"}, types.PUBLIC)
+		assert.Equal(t, float64(0), testutil.ToFloat64(pm.MissBudgetExhausted.WithLabelValues(types.PUBLIC)),
+			"a caller walking away is not upstream degradation")
+	})
+}
+
+// Both services share ONE *metrics.Prices (api/serve.go wires the same object
+// into each), so RedisErrors{op="mget"} is a single series. Guarding the
+// history service's MGet against client cancellation while leaving this one
+// unguarded would make that series mean "Redis health" from one endpoint and
+// "Redis health plus however often clients close the tab" from the other.
+func TestPrices_CancelledMGetIsNotARedisFault(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a cancelled caller is not counted", func(t *testing.T) {
+		t.Parallel()
+		pm := metrics.NewPrices(prometheus.NewRegistry())
+		svc := NewPricesService(newFakeStellarExpert(), &cancelCache{err: context.Canceled}, PricesServiceConfig{}, nil, pm)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, _ = svc.GetPrices(ctx, []string{"XLM"}, types.PUBLIC)
+
+		assert.Equal(t, float64(0), testutil.ToFloat64(pm.RedisErrors.WithLabelValues("mget")),
+			"a client closing the tab is not Redis degrading")
+	})
+
+	t.Run("a genuine Redis fault still is", func(t *testing.T) {
+		t.Parallel()
+		pm := metrics.NewPrices(prometheus.NewRegistry())
+		svc := NewPricesService(newFakeStellarExpert(), &cancelCache{err: errors.New("connection refused")}, PricesServiceConfig{}, nil, pm)
+
+		_, _ = svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+
+		assert.Equal(t, float64(1), testutil.ToFloat64(pm.RedisErrors.WithLabelValues("mget")),
+			"a real Redis failure must still be counted")
+	})
+}
+
+// cancelCache is a JSONCache whose MGet always fails with a chosen error.
+type cancelCache struct{ err error }
+
+func (c *cancelCache) MGetJSON(context.Context, []string, func() any) (map[string]any, error) {
+	return nil, fmt.Errorf("redis MGET: %w", c.err)
+}
+func (c *cancelCache) SetJSON(context.Context, string, any, time.Duration) error { return nil }

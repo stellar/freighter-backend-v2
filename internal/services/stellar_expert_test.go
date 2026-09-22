@@ -296,3 +296,42 @@ func TestStellarExpert_GetAsset_StatsDriftStillYieldsAPrice(t *testing.T) {
 	assert.Equal(t, 0.15968, asset.Price)
 	assert.Nil(t, asset.Trustlines.Funded, "the drifted field is reported as absent")
 }
+
+// error_type="internal" is reserved for OUR defects — encoding, decoding,
+// validation. A 404 or 400 from upstream is neither, and on this service they
+// are not even rare: an unpriced SEP-41 contract token 404s by design, which
+// is why /token-price-history and /token-stats negatively cache the answer.
+//
+// Leaving them unwrapped classified every one of them as "internal", which
+// both slanders our own code and puts routine traffic onto
+// freighter_service_errors_total — the series
+// FreighterBackendV2StellarExpertDependencyErrors watches, and the only
+// outage signal /token-stats has left now that it degrades to an empty 200.
+// The 401/403 case already wraps for exactly this reason.
+func TestStellarExpert_NotFoundAndMalformedCarryTheirHTTPStatus(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		status    int
+		sentinel  error
+		wantLabel string
+	}{
+		{"404 is not-found", http.StatusNotFound, ErrAssetNotFound, "http_error:404"},
+		{"400 is malformed", http.StatusBadRequest, ErrAssetMalformed, "http_error:400"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, `nope`, tc.status)
+			}))
+
+			_, err := svc.GetAsset(context.Background(), types.PUBLIC, "BOGUS-G...-1")
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, tc.sentinel),
+				"the sentinel must still match through the wrapper — every caller branches on it")
+			assert.Equal(t, tc.wantLabel, metrics.ClassifyError(err),
+				"an upstream status must never be labelled as our own internal failure")
+		})
+	}
+}

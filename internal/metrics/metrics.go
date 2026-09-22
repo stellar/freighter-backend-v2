@@ -230,18 +230,25 @@ func NewService(reg prometheus.Registerer) *Service {
 // Redis-from-this-service-POV errors.
 type Prices struct {
 	// CacheOutcomes counts per-token cache outcomes by network and outcome.
+	//
+	// NOT only /token-prices any more: every /token-price-history request
+	// resolves its spot anchor through this service, so token-detail-view
+	// traffic lands in these series too. A hit-rate panel built from them
+	// mixes the two endpoints; use the route label on the HTTP metrics to
+	// separate them.
+	//
 	// The outcome label is a closed enum:
 	//   "hit"          — live priced entry within --price-cache-ttl-seconds
-	//   "negative_hit" — live cached null within
-	//                    --price-negative-cache-ttl-seconds; we served an
-	//                    unpriceable token from cache. Counted separately so
-	//                    a mass negative-caching incident does not read as
-	//                    an improving hit rate.
+	//   "negative_hit" — live cached null within negativeCacheTTL; we
+	//                    served an unpriceable token from cache. Counted
+	//                    separately so a mass negative-caching incident does
+	//                    not read as an improving hit rate.
 	//   "miss"         — no entry, expired, or upstream-only path
 	CacheOutcomes *prometheus.CounterVec
 	// MissBudgetExhausted counts requests whose miss-fetch budget
 	// (--price-fetch-timeout-seconds) tripped before all misses resolved.
-	// Labeled by network.
+	// Also driven by /token-price-history's spot lookup, not just
+	// /token-prices — see CacheOutcomes. Labeled by network.
 	MissBudgetExhausted *prometheus.CounterVec
 	// RedisErrors counts Redis operations from the prices service that
 	// failed (and were silently fallen-through). Labeled by op: "mget" or
@@ -250,22 +257,43 @@ type Prices struct {
 	// SkippedTokens counts token-prices request entries that failed to parse
 	// into a canonical asset id and were skipped-and-nulled (entry present in
 	// the response with a null price) instead of failing the batch; 400 is
-	// returned only when nothing in the batch parses. Labeled by network.
+	// returned only when nothing in the batch parses. Skips are counted
+	// before any 400 is returned, so they are recorded on the rejected
+	// batches too — both the nothing-parsed 400 (the loudest instance of
+	// skipping) and the too-many-tokens 400, where some inputs had already
+	// been skipped before the size check ran. Labeled by network.
 	SkippedTokens *prometheus.CounterVec
-	// HistoryCacheOutcomes counts pricehistory:v2 series-cache outcomes.
+	// HistoryCacheOutcomes counts pricehistory:v1 series-cache outcomes.
 	// range is the closed 1H|1D|1W|1M|1Y|ALL enum (cardinality-safe: the
 	// handler 400s anything else before the service runs).
 	HistoryCacheOutcomes *prometheus.CounterVec
-	// TokenStatsCacheOutcomes counts tokenstats:v2 asset-payload cache
+	// TokenStatsCacheOutcomes counts tokenstats:v1 asset-payload cache
 	// outcomes (the cache entry shared by the history service's volume
-	// verdict / ALL-range floor and the token-stats endpoint). The outcome
+	// verdict and the token-stats endpoint). The outcome
 	// label is the same closed enum as CacheOutcomes: "hit",
 	// "negative_hit" (a cached authoritative asset-not-found), "miss".
 	TokenStatsCacheOutcomes *prometheus.CounterVec
 	// VolumeVerdictNull counts history responses whose lowVolume verdict was
-	// null — the candles call succeeded but the asset-payload call (the
-	// verdict's input) failed. A failed lookup is never reported as false,
-	// so this metric is how operators see that quadrant. Labeled by network.
+	// null BECAUSE UPSTREAM DEGRADED: the candles call succeeded but the
+	// asset-payload call (the verdict's input) failed. A failed lookup is
+	// never reported as false, so this metric is how operators see that
+	// quadrant.
+	//
+	// It deliberately does NOT count every null verdict. Four other
+	// conditions produce one without upstream having failed, and folding
+	// them in would bury the signal under traffic-shaped noise:
+	//
+	//   - an authoritative asset-not-found (404) — the designed common case
+	//     for unpriced SEP-41 tokens, and served from cache on repeat with
+	//     no upstream call at all;
+	//   - an authoritative malformed-id (400) — upstream rejecting an id,
+	//     which is likewise an answer rather than a failure;
+	//   - a caller that cancelled mid-request;
+	//   - the shipped divisor-disabled config, which every response shares.
+	//
+	// A fleet-wide 404/400 storm is a real outage, and it stays visible on
+	// freighter_service_errors_total{error_type="http_error:404"} rather
+	// than here. Labeled by network.
 	VolumeVerdictNull *prometheus.CounterVec
 }
 

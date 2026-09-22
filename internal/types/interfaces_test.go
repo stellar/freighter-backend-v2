@@ -22,6 +22,8 @@ func TestStellarExpertAsset_DecodesStatsFields(t *testing.T) {
 		"trustlines": {"total": 10000000, "funded": 9926520},
 		"created": 0
 	}`
+	// `created` and `total` are deliberately left in the fixture: the decode
+	// has to tolerate keys it does not model, which is most of this payload.
 	var asset types.StellarExpertAsset
 	require.NoError(t, json.Unmarshal([]byte(payload), &asset))
 
@@ -31,7 +33,6 @@ func TestStellarExpertAsset_DecodesStatsFields(t *testing.T) {
 	assert.Equal(t, float64(103319258398384), asset.Volume7d)
 	require.NotNil(t, asset.Trustlines.Funded)
 	assert.Equal(t, int64(9926520), *asset.Trustlines.Funded)
-	assert.Equal(t, int64(0), asset.Created)
 }
 
 // USDC-shaped: explicit decimals, absent trustlines.funded stays nil.

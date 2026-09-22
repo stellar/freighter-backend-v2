@@ -132,15 +132,13 @@ func (s *ApiServer) initServices() error {
 		s.appMetrics.Service,
 	)
 	s.pricesService = services.NewPricesService(stellarExpert, s.redis, services.PricesServiceConfig{
-		CacheTTL:             time.Duration(s.cfg.PricesConfig.PriceCacheTTLSeconds) * time.Second,
-		MissFetchTimeout:     time.Duration(s.cfg.PricesConfig.PriceFetchTimeoutSeconds) * time.Second,
-		MaxConcurrent:        s.cfg.PricesConfig.MaxConcurrentPriceFetches,
-		NegativeCacheTTL:     time.Duration(s.cfg.PricesConfig.PriceNegativeCacheTTLSeconds) * time.Second,
-		CandlesResolutionSec: s.cfg.PricesConfig.PriceChange24hResolutionSeconds,
+		CacheTTL:         time.Duration(s.cfg.PricesConfig.PriceCacheTTLSeconds) * time.Second,
+		MissFetchTimeout: time.Duration(s.cfg.PricesConfig.PriceFetchTimeoutSeconds) * time.Second,
+		MaxConcurrent:    s.cfg.PricesConfig.MaxConcurrentPriceFetches,
 	}, s.appMetrics.Service, s.appMetrics.Prices)
 
 	// One implementation serves both the history and stats endpoints: they
-	// share the tokenstats:v2-cached asset payload, and the history delta
+	// share the tokenstats:v1-cached asset payload, and the history delta
 	// anchors on the prices service's 30s-cached spot.
 	historyAndStats := services.NewPriceHistoryService(stellarExpert, s.redis, s.pricesService, services.PriceHistoryServiceConfig{
 		CacheTTLs: map[string]time.Duration{

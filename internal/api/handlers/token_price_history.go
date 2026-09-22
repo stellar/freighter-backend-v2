@@ -21,6 +21,12 @@ import (
 // sees a dropped connection rather than the 503 the error mapping below
 // produces. The service fans its upstream fetches out concurrently, so this
 // is one fetch budget, not the sum of them.
+//
+// It is also the default for --price-history-fetch-timeout-seconds, which
+// the serve command derives from this constant. That flag bounds the
+// service's detached singleflight fetch, so the two are not the same
+// deadline: past this cap the caller has its 503 and the fetch is only
+// still running to warm the cache.
 const TokenPriceHistoryContextTimeout = 9 * time.Second
 
 type TokenPriceHistoryHandler struct {

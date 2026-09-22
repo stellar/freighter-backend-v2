@@ -1,10 +1,12 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -15,12 +17,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
-func newStatsService(expert types.StellarExpertService, cache JSONCache, cfg PriceHistoryServiceConfig) PriceHistoryAndStatsService {
+func newStatsService(expert types.StellarExpertService, cache JSONCache, cfg PriceHistoryServiceConfig) *priceHistoryService {
 	return NewPriceHistoryService(expert, cache, &utils.MockPricesService{}, cfg, nil, nil)
 }
 
@@ -125,7 +128,7 @@ func TestTokenStats_AuthoritativeNotFoundIsNegativelyCached(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, got.SupplyOnStellar)
 	assert.Equal(t, 1, expert.CallCount(upstreamID))
-	assert.Equal(t, emptySeriesCacheTTL, cache.TTL("tokenstats:v2:public:"+token),
+	assert.Equal(t, emptySeriesCacheTTL, cache.TTL("tokenstats:v1:public:"+token),
 		"not-found meta caches at the same short negative TTL as empty series")
 
 	got, err = svc.GetTokenStats(context.Background(), token, types.PUBLIC)
@@ -136,27 +139,6 @@ func TestTokenStats_AuthoritativeNotFoundIsNegativelyCached(t *testing.T) {
 
 	assert.Equal(t, float64(1), testutil.ToFloat64(pm.TokenStatsCacheOutcomes.WithLabelValues(types.PUBLIC, "negative_hit")))
 	assert.Equal(t, float64(0), testutil.ToFloat64(pm.TokenStatsCacheOutcomes.WithLabelValues(types.PUBLIC, "hit")))
-}
-
-// The cached asset-payload schema gained the not-found marker, so its key
-// segment rotates: an old binary would decode {"notFound":true} as a payload
-// with every field zeroed.
-func TestTokenStats_KeySchemaRotatedForNotFoundMarker(t *testing.T) {
-	t.Parallel()
-
-	expert := newFakeStellarExpert()
-	expert.Set("XLM", assetWithStats(0.16, "1054439020873472865", nil, int64Ptr(9926520)))
-	cache := newFakeJSONCache()
-	require.NoError(t, cache.SetJSON(context.Background(), "tokenstats:v1:public:XLM",
-		cachedAssetMeta{Price: 999}, time.Hour))
-
-	svc := newStatsService(expert, cache, PriceHistoryServiceConfig{})
-	got, err := svc.GetTokenStats(context.Background(), "XLM", types.PUBLIC)
-	require.NoError(t, err)
-
-	assert.Equal(t, 1, expert.CallCount("XLM"), "a v1 entry must not satisfy a v2 read")
-	require.NotNil(t, got.SupplyOnStellar)
-	assert.NotEqual(t, time.Duration(0), cache.TTL("tokenstats:v2:public:XLM"))
 }
 
 // An UNCLASSIFIED error is not an upstream verdict — it is a decode failure
@@ -200,7 +182,7 @@ func TestTokenStats_TransientUpstreamFailureDegradesToEmpty(t *testing.T) {
 
 			// Crucially NOT cached: caching a blip would keep the section
 			// empty for the TTL after upstream recovered.
-			assert.Equal(t, time.Duration(0), cache.TTL("tokenstats:v2:public:XLM"))
+			assert.Equal(t, time.Duration(0), cache.TTL("tokenstats:v1:public:XLM"))
 			_, err = svc.GetTokenStats(context.Background(), "XLM", types.PUBLIC)
 			require.NoError(t, err)
 			assert.Equal(t, 2, expert.CallCount("XLM"), "must retry upstream, not serve a cached empty")
@@ -245,7 +227,7 @@ func TestTokenStats_CredentialFailureStaysAnError(t *testing.T) {
 	}
 }
 
-// The asset payload caches under tokenstats:v2 at the configured TTL, and
+// The asset payload caches under tokenstats:v1 at the configured TTL, and
 // the history service reads the SAME entry — one upstream asset call serves
 // both endpoints.
 func TestTokenStats_SharesCachedAssetPayloadWithHistory(t *testing.T) {
@@ -262,7 +244,7 @@ func TestTokenStats_SharesCachedAssetPayloadWithHistory(t *testing.T) {
 	_, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
 	require.NoError(t, err)
 	assert.Equal(t, 1, expert.CallCount("XLM"))
-	assert.Equal(t, 30*time.Minute, cache.TTL("tokenstats:v2:public:XLM"))
+	assert.Equal(t, 30*time.Minute, cache.TTL("tokenstats:v1:public:XLM"))
 
 	got, err := svc.GetTokenStats(context.Background(), "XLM", types.PUBLIC)
 	require.NoError(t, err)
@@ -348,6 +330,110 @@ func TestScaleSupplyByDecimals(t *testing.T) {
 			got, ok := scaleSupplyByDecimals(tc.raw, tc.decimals)
 			assert.Equal(t, tc.ok, ok)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// The other half of why tokenstats ships at v1 rather than rotating: an entry
+// written before cachedAssetMeta gained `notFound` must still read back as a
+// HIT with every field it carries intact. That holds because `notFound` was
+// only ever written for an ABSENT asset, so an old entry is by construction a
+// found one and the zero value false is the right answer — and because the
+// surviving fields never changed name or type on this branch. The `price` and
+// `created` such an entry also carries are simply ignored.
+//
+// This is the guard for a future field whose zero value is NOT the right
+// answer for an old entry: add one and this test must be what fails.
+func TestTokenStats_PreNotFoundCacheEntryReadsAsAHit(t *testing.T) {
+	t.Parallel()
+
+	expert := newFakeStellarExpert() // unknown → any upstream call would 404
+	cache := newFakeJSONCache()
+	key := tokenStatsCacheKey("public", "USDC:"+testIssuer)
+
+	// The original shape, written by an earlier commit of this branch: the
+	// now-dropped price/created are present, notFound is absent entirely.
+	require.NoError(t, cache.SetJSON(context.Background(), key, map[string]any{
+		"price":    0.9998,
+		"supply":   "1054439020873472865",
+		"decimals": 7,
+		"volume7d": float64(xlmRawVolume7d),
+		"created":  1611161688,
+		"funded":   9926520,
+	}, time.Hour))
+
+	svc := newStatsService(expert, cache, PriceHistoryServiceConfig{})
+	stats, err := svc.GetTokenStats(context.Background(), "USDC:"+testIssuer, types.PUBLIC)
+	require.NoError(t, err, "an old entry is a found asset, not a cached not-found")
+	assert.Equal(t, 0, expert.CallCount("USDC-"+testIssuer+"-1"),
+		"the old shape is readable, so it must be served from cache without an upstream call")
+
+	require.NotNil(t, stats.SupplyOnStellar, "supply must survive the shape change")
+	assert.Equal(t, "105443902087.3472865", *stats.SupplyOnStellar)
+	require.NotNil(t, stats.Holders)
+	assert.Equal(t, int64(9926520), *stats.Holders)
+}
+
+// The stats-side half of the same guarantee. Both the not-found case and the
+// UpstreamError default arm return an empty 200, so the RESPONSE cannot tell
+// them apart — asserting only on the return value would pass even with the
+// sentinel match broken. The log line is what separates them: the degraded
+// arm warns "upstream unavailable", and an authoritative 404 must not, or
+// every unpriced SEP-41 token spams a warning reserved for real outages.
+//
+// Not parallel: it swaps the process-global logger.
+func TestTokenStats_WrappedNotFoundStillYieldsEmptyStats(t *testing.T) {
+	var logs bytes.Buffer
+	logger.SetOutput(&logs)
+	t.Cleanup(func() { logger.SetOutput(os.Stdout) })
+
+	expert := newFakeStellarExpert()
+	expert.SetErr("BOGUS-"+testIssuer+"-2", &metrics.UpstreamError{
+		Kind: "http_error", Code: 404,
+		Err: fmt.Errorf("%w: stellar expert asset status 404", ErrAssetNotFound),
+	})
+
+	svc := newStatsService(expert, newFakeJSONCache(), PriceHistoryServiceConfig{})
+	stats, err := svc.GetTokenStats(context.Background(), "BOGUS:"+testIssuer, types.PUBLIC)
+	require.NoError(t, err, "an unknown asset is an empty 200, never an error")
+	require.NotNil(t, stats)
+	assert.Nil(t, stats.SupplyOnStellar)
+	assert.Nil(t, stats.Holders)
+
+	assert.NotContains(t, logs.String(), "upstream unavailable",
+		"a wrapped 404 must match the not-found case, not fall through to the degraded-upstream arm")
+}
+
+// The negative marker must never outlive the positive payloads sharing its
+// keyspace. Both services write tokenstats:v1, and an operator who shortens
+// --token-stats-cache-ttl-seconds during an upstream incident is doing it to
+// drain poisoned state — a marker pinned at a flat 15m would keep serving the
+// bad answer for 15m after positive entries had already refreshed, making the
+// lever inert for the case it exists for.
+func TestTokenStats_NotFoundMarkerCapsAtTheConfiguredStatsTTL(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		statsTTL time.Duration
+		want     time.Duration
+	}{
+		{"operator shortens below the flat 15m", 5 * time.Minute, 5 * time.Minute},
+		{"default 1h is capped to 15m", time.Hour, emptySeriesCacheTTL},
+		{"unset falls back to the cap", 0, emptySeriesCacheTTL},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			expert := newFakeStellarExpert() // unknown asset → ErrAssetNotFound
+			cache := newFakeJSONCache()
+			svc := newStatsService(expert, cache, PriceHistoryServiceConfig{TokenStatsCacheTTL: tc.statsTTL})
+
+			_, err := svc.GetTokenStats(context.Background(), "BOGUS:"+testIssuer, types.PUBLIC)
+			require.NoError(t, err, "an unknown asset is an empty 200")
+
+			key := tokenStatsCacheKey("public", "BOGUS:"+testIssuer)
+			assert.Equal(t, tc.want, cache.TTL(key),
+				"the not-found marker must cap at the configured stats TTL, never exceed it")
 		})
 	}
 }

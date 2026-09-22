@@ -41,17 +41,45 @@ import (
 const (
 	priceHistoryServiceName = "price-history"
 
-	// historyCacheKeyPrefix carries the cached-entry SCHEMA version. It
-	// rotated v1→v2 when cachedSeries gained the fetch-time `to` the
-	// coverage guard is evaluated against: a v1 entry has no `to`, so a
-	// mixed-fleet read of one would measure coverage against the zero
-	// timestamp. A cold cache on deploy is what the segment is for.
-	historyCacheKeyPrefix = "pricehistory:v2"
-	// tokenStatsCacheKeyPrefix rotated v1→v2 when cachedAssetMeta gained the
-	// not-found marker: a v1 reader decodes {"notFound":true} as a payload
-	// with every field zeroed rather than as "upstream doesn't know this
-	// asset".
-	tokenStatsCacheKeyPrefix = "tokenstats:v2"
+	// These carry the cached-entry SCHEMA version, so a shape change can
+	// cold-start its own keys instead of being read as the old shape by a
+	// pod that has not rolled yet.
+	//
+	// Both ship at v1. These keys are introduced by this branch and no
+	// SHARED environment has ever run it — dev, stg and prd all run commits
+	// from main — so there is no deployed predecessor to rotate away from.
+	// What that does NOT rule out is a personal sandbox built from an
+	// earlier commit of this branch. Both later shape changes rotated to v2
+	// in the SAME commit that made them (1b91c29 added `to`, 7c22137 added
+	// `notFound`), so the only PRE-EXISTING entries under these v1 keys are
+	// each shape's original. Neither needs a rotation to read:
+	//
+	//   - cachedSeries without `to` is UNUSABLE — see loadCachedSeries,
+	//     which rejects it as a miss so it refetches.
+	//   - cachedAssetMeta without `notFound` is correctly readable: that
+	//     field was only ever written for an ABSENT asset, so an old entry
+	//     is by construction a found one and the zero value `false` is the
+	//     right answer. The `price` and `created` fields such an entry also
+	//     carries are simply ignored.
+	//
+	// Two costs of coming back to v1, both sandbox-only:
+	//
+	//   - A sandbox that ran an intermediate commit is left with orphaned
+	//     `pricehistory:v2` / `tokenstats:v2` keys. Never read again; they
+	//     expire on their own TTL, 7 days at the longest on ALL.
+	//   - Going BACKWARDS in time now shares a keyspace it did not before.
+	//     This build writes the current shapes under v1, so checking out a
+	//     pre-7c22137 commit to bisect gives a reader with no `notFound`
+	//     field an entry that has one: `{"notFound":true}` decodes as a
+	//     FOUND asset with every value zeroed. Flush the sandbox Redis when
+	//     bisecting across those commits.
+	//
+	// Bump when the on-disk shape changes in a way an older reader would
+	// misread AND the old shape can be in a shared environment —
+	// `prices:v2` is the worked example, where a v1 reader takes an
+	// unpriced entry for a real price.
+	historyCacheKeyPrefix    = "pricehistory:v1"
+	tokenStatsCacheKeyPrefix = "tokenstats:v1"
 
 	historyCurrency = "USD"
 
@@ -104,32 +132,33 @@ func IsValidPriceHistoryRange(r string) bool {
 	return ok
 }
 
-// DefaultRangeCacheTTL returns the §6.2 default series cache TTL for one
-// range enum member (0 for a non-member). The serve command's flag defaults
-// read it rather than repeating the numbers, so the config surface and the
-// service cannot drift apart on what "the default" is.
-func DefaultRangeCacheTTL(r string) time.Duration {
-	return priceHistoryRanges[r].defaultCacheTTL
-}
-
-// DefaultRangeCacheTTLSeconds is DefaultRangeCacheTTL in whole seconds, the
-// unit the *_SECONDS config surface uses.
+// DefaultRangeCacheTTLSeconds returns the §6.2 default series cache TTL for
+// one range enum member, in the whole seconds the *_SECONDS config surface
+// uses (0 for a non-member). The serve command's flag defaults read it
+// rather than repeating the numbers, so the config surface and the service
+// cannot drift apart on what "the default" is.
 func DefaultRangeCacheTTLSeconds(r string) int {
-	return int(DefaultRangeCacheTTL(r) / time.Second)
+	return int(priceHistoryRanges[r].defaultCacheTTL / time.Second)
 }
 
-// ValidCandleResolutionsSec is upstream's closed `resolution` enum, measured
+// validCandleResolutionsSec is upstream's closed `resolution` enum, measured
 // in Appendix A.1 — everything outside it returns 400. The set is irregular
 // (4h and 12h are valid, 3h/6h/8h are not; 1d and 3d are valid, 2d is not),
 // so it cannot be derived from a rule and is hard-coded from that sweep.
-// Config that feeds a resolution upstream is validated against this at boot,
-// because the alternative is every candles call 400ing in production.
-var ValidCandleResolutionsSec = []int{300, 900, 1800, 3600, 7200, 14400, 43200, 86400, 259200, 604800, 1209600}
+//
+// Nothing is validated against it at boot any more — no resolution is
+// configurable, so there is no operator input left to check. Its job now is
+// to pin the two places resolutions are chosen IN CODE: the priceHistoryRanges
+// table and candlesResolutionSec. TestCandleResolutionsAreUpstreamMembers
+// asserts both, because a plausible-looking edit to the table (2d = 172800
+// sits right between the valid 1d and 3d) would otherwise 400 every candles
+// call for that range in production with nothing to catch it first.
+var validCandleResolutionsSec = []int{300, 900, 1800, 3600, 7200, 14400, 43200, 86400, 259200, 604800, 1209600}
 
-// IsValidCandleResolutionSec reports whether sec is a member of upstream's
+// isValidCandleResolutionSec reports whether sec is a member of upstream's
 // resolution enum.
-func IsValidCandleResolutionSec(sec int) bool {
-	for _, v := range ValidCandleResolutionsSec {
+func isValidCandleResolutionSec(sec int) bool {
+	for _, v := range validCandleResolutionsSec {
 		if v == sec {
 			return true
 		}
@@ -142,7 +171,7 @@ func IsValidCandleResolutionSec(sec int) bool {
 // PriceHistoryServiceConfig{}.
 type PriceHistoryServiceConfig struct {
 	// CacheTTLs overrides the per-range series cache TTLs, keyed by range
-	// enum member. Zero/absent entries keep DefaultRangeCacheTTL.
+	// enum member. Zero/absent entries keep the range's default TTL.
 	CacheTTLs map[string]time.Duration
 	// FetchTimeout bounds each upstream fetch (shared singleflight budget).
 	FetchTimeout time.Duration
@@ -155,10 +184,19 @@ type PriceHistoryServiceConfig struct {
 	// conversion there is no check to pass. Enabling the guard is a config
 	// change, never a code change. A failed asset lookup is null too.
 	Volume7dConversionDivisor float64
-	// TokenStatsCacheTTL is the TTL of the tokenstats:v2 asset-payload cache
+	// TokenStatsCacheTTL is the TTL of the tokenstats:v1 asset-payload cache
 	// entry shared by the volume verdict and the token-stats endpoint.
 	TokenStatsCacheTTL time.Duration
 }
+
+// The one implementation satisfies both endpoint interfaces. Asserted here
+// so a drift fails in this package rather than only at the api package's
+// assignment, which is where the now-removed combined interface used to be
+// checked.
+var (
+	_ types.PriceHistoryService = (*priceHistoryService)(nil)
+	_ types.TokenStatsService   = (*priceHistoryService)(nil)
+)
 
 type priceHistoryService struct {
 	stellarExpert types.StellarExpertService
@@ -175,7 +213,13 @@ type priceHistoryService struct {
 // NewPriceHistoryService wires the history/stats orchestrator. redis may be
 // nil (every request then hits upstream); prices supplies the 30s-cached spot
 // the delta anchors on; pricesMetrics may be nil for tests.
-func NewPriceHistoryService(stellarExpert types.StellarExpertService, redis JSONCache, prices types.PricesService, cfg PriceHistoryServiceConfig, metricsService *metrics.Service, pricesMetrics *metrics.Prices) PriceHistoryAndStatsService {
+//
+// The single return value satisfies both types.PriceHistoryService and
+// types.TokenStatsService: one implementation serves both endpoints because
+// they share the tokenstats:v1-cached asset payload — one upstream asset
+// call feeds the volume verdict and the stats rows. Callers assign it to
+// whichever of the two interfaces they need.
+func NewPriceHistoryService(stellarExpert types.StellarExpertService, redis JSONCache, prices types.PricesService, cfg PriceHistoryServiceConfig, metricsService *metrics.Service, pricesMetrics *metrics.Prices) *priceHistoryService {
 	if cfg.FetchTimeout <= 0 {
 		cfg.FetchTimeout = defaultMissFetchTTL
 	}
@@ -232,6 +276,13 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 		defer wg.Done()
 		got, seriesErr = s.getSeries(ctx, network, cacheNet, canonical, historyRange, spec)
 	}()
+	// Fetched unconditionally even though the shipped config leaves the
+	// volume verdict disabled (divisor 0), so volumeVerdict discards this.
+	// It is not wasted: getAssetMeta reads and writes the SAME
+	// tokenstats:v1 entry /token-stats reads, and the token detail view
+	// calls both endpoints. Gating this on the divisor would only move the
+	// cold fetch onto the stats call a moment later, off the concurrent
+	// path and onto a serial one.
 	go func() {
 		defer wg.Done()
 		meta, metaErr = s.getAssetMeta(ctx, network, cacheNet, canonical)
@@ -241,9 +292,26 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 	// the prices service — and each carries its own multi-second fetch
 	// budget, so serially they stack to roughly twice the http.Server
 	// WriteTimeout and the connection dies before any status line is
-	// written. Fetching it unconditionally costs one extra prices lookup on
-	// series-less tokens, which the prices service's 30s positive and
-	// negative caches absorb.
+	// written.
+	//
+	// KNOWN COST, measured not estimated: on a COLD token this request
+	// issues 2x GetAsset and 2x GetAssetCandles upstream, not 1x each. The
+	// prices service resolves its own asset+candles under prices:v2 and its
+	// own singleflight group, while getAssetMeta above resolves the asset
+	// under tokenstats:v1 and this service's group — different keys,
+	// different groups, so nothing coalesces them. Warm, the caches absorb
+	// it: a request where only the 30s spot has expired issues ONE of each
+	// (measured), because getSeries and getAssetMeta are still served from
+	// pricehistory:v1 and tokenstats:v1. The duplication recurs at THOSE
+	// boundaries instead — the series TTL (15m on 1D) and the stats TTL
+	// (1h), not the spot's 30s.
+	//
+	// Not fixed here because the obvious fix — having the history service
+	// derive spot from the asset payload it already fetched — re-couples
+	// the two formulas D8 exists to keep identical, and the inverse (prices
+	// reading the history cache) is the dependency cycle this design
+	// deliberately avoids. Flagged for a maintainer call rather than
+	// silently restructured.
 	go func() {
 		defer wg.Done()
 		spot, spotOK = s.spotPrice(ctx, canonical, network)
@@ -267,7 +335,7 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 	}, nil
 }
 
-// cachedSeries is the on-disk shape of one pricehistory:v2 entry. Redis
+// cachedSeries is the on-disk shape of one pricehistory:v1 entry. Redis
 // expiry alone governs freshness. Empty series are cached too (negative
 // caching, emptySeriesCacheTTL).
 type cachedSeries struct {
@@ -320,9 +388,15 @@ func (s *priceHistoryService) loadCachedSeries(ctx context.Context, key string) 
 	}
 	cached, err := s.redis.MGetJSON(ctx, []string{key}, func() any { return new(cachedSeries) })
 	if err != nil {
-		logger.Warn("price-history: redis MGet failed; bypassing cache", "error", err)
-		if s.pricesMetrics != nil {
-			s.pricesMetrics.RedisErrors.WithLabelValues("mget").Inc()
+		// A caller who navigated away cancels this ctx, and the Redis client
+		// surfaces that verbatim. Counting it would move a Redis-health
+		// signal with client behaviour — the same line isCallerCancellation
+		// and VolumeVerdictNull draw. The cache is simply bypassed either way.
+		if !errors.Is(err, context.Canceled) {
+			logger.Warn("price-history: redis MGet failed; bypassing cache", "error", err)
+			if s.pricesMetrics != nil {
+				s.pricesMetrics.RedisErrors.WithLabelValues("mget").Inc()
+			}
 		}
 		return series{}, false
 	}
@@ -330,31 +404,26 @@ func (s *priceHistoryService) loadCachedSeries(ctx context.Context, key string) 
 	if entry == nil {
 		return series{}, false
 	}
+	// A non-positive `To` means the entry predates this field. Treat it as
+	// a MISS rather than trusting it: time.Unix(0, 0) is 1970, so a
+	// reconstructed `to` would make coverageOK measure a ~55-year NEGATIVE
+	// oldestAge, fail every band, and null `change` for the rest of the
+	// entry's TTL — up to 7 days on ALL. A miss refetches and rewrites the
+	// entry in the current shape, so the condition self-heals on first read.
+	//
+	// This is reachable because these keys ship at v1 rather than rotating:
+	// no shared environment ever ran this branch (dev runs a main commit),
+	// but a personal sandbox built from an earlier commit of it would have
+	// written entries with no `to` at all.
+	if entry.To <= 0 {
+		return series{}, false
+	}
 	out := series{points: entry.Points}
 	if out.points == nil {
 		out.points = make([]types.PricePoint, 0)
 	}
-	if entry.To > 0 {
-		out.to = time.Unix(entry.To, 0).UTC()
-	} else {
-		// Defensive: an entry written without a fetch time (only reachable
-		// if the schema segment above is ever reused). Treat it as fetched
-		// now, which is the pre-fix behavior.
-		out.to = time.Now().UTC()
-	}
+	out.to = time.Unix(entry.To, 0).UTC()
 	return out, true
-}
-
-// floorMod is Euclidean modulo: unlike Go's %, it never returns a negative
-// remainder, so truncation still rounds DOWN for pre-1970 timestamps. The
-// ALL range's floor is 2015, but nothing stops a future range from being
-// older, and a negative remainder would round such a `from` up.
-func floorMod(a, b int64) int64 {
-	m := a % b
-	if m < 0 {
-		m += b
-	}
-	return m
 }
 
 // fetchSeries performs one upstream candles fetch and writes the result —
@@ -388,13 +457,18 @@ func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet
 		// reproduces the prices path's boundary without also rounding `to`
 		// back and losing the live bucket.
 		//
+		// Plain `%` rather than a Euclidean modulo: `to` is always now and
+		// the widest truncated window is a year, so `fromUnix` cannot be
+		// negative — and ALL, the only range whose floor is fixed, takes the
+		// branch below without truncating at all.
+		//
 		// Truncated on the Unix timestamp, NOT via time.Time.Truncate:
 		// that rounds relative to the zero time (Jan 1, year 1), which is a
 		// whole number of days from the epoch but not a whole number of 3d
 		// or 2w periods — so it would misalign 1Y and ALL against upstream's
 		// epoch-anchored grid while looking correct for the sub-day ranges.
 		fromUnix := to.Add(-spec.window).Unix()
-		from = time.Unix(fromUnix-floorMod(fromUnix, spec.resolutionSec), 0).UTC()
+		from = time.Unix(fromUnix-fromUnix%spec.resolutionSec, 0).UTC()
 	} else {
 		// ALL: start at the floor. It previously refined this to
 		// max(asset.created, floor) by waiting on the asset payload, which
@@ -413,7 +487,7 @@ func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet
 	if err != nil {
 		if errors.Is(err, ErrAssetNotFound) || errors.Is(err, ErrAssetMalformed) {
 			empty := series{points: make([]types.PricePoint, 0), to: to}
-			s.cacheSeries(ctx, key, empty, emptySeriesCacheTTL)
+			s.cacheSeries(ctx, key, empty, s.seriesTTL(historyRange, spec, empty.points))
 			return empty, nil
 		}
 		return series{}, err
@@ -424,16 +498,34 @@ func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet
 		points = append(points, types.PricePoint{T: c.TS(), P: formatPrice(c.Close())})
 	}
 
+	fetched := series{points: points, to: to}
+	s.cacheSeries(ctx, key, fetched, s.seriesTTL(historyRange, spec, points))
+	return fetched, nil
+}
+
+// seriesTTL resolves the cache TTL for one fetched series: the range's TTL
+// (operator override, else the §6.2 default), with emptySeriesCacheTTL
+// applied as a CAP when the series came back empty.
+//
+// A cap, not an override. 1H's TTL is 5m, so assigning a flat 15m kept an
+// empty 1H chart blank for three times the range's own TTL and made
+// --price-history-cache-ttl-1h-seconds inert for exactly the case an
+// operator would shorten it for. Ranges longer than 15m still shorten, which
+// is the SEP-41 negative-caching benefit this constant exists for.
+//
+// Both empty-series paths go through here — a 200 with zero points, and the
+// not-found/malformed answer that fetchSeries maps to an empty series — so
+// they cannot drift apart. The second is the more common one: an unpriced
+// SEP-41 token 404s by design.
+func (s *priceHistoryService) seriesTTL(historyRange string, spec rangeSpec, points []types.PricePoint) time.Duration {
 	ttl := spec.defaultCacheTTL
 	if override, ok := s.cfg.CacheTTLs[historyRange]; ok && override > 0 {
 		ttl = override
 	}
-	if len(points) == 0 {
+	if len(points) == 0 && ttl > emptySeriesCacheTTL {
 		ttl = emptySeriesCacheTTL
 	}
-	fetched := series{points: points, to: to}
-	s.cacheSeries(ctx, key, fetched, ttl)
-	return fetched, nil
+	return ttl
 }
 
 func (s *priceHistoryService) cacheSeries(ctx context.Context, key string, value series, ttl time.Duration) {
@@ -448,17 +540,19 @@ func (s *priceHistoryService) cacheSeries(ctx context.Context, key string, value
 	}
 }
 
-// cachedAssetMeta is the on-disk shape of one tokenstats:v2 entry — the
-// asset-payload subset shared by the volume verdict, the ALL-range `from`,
-// and the token-stats endpoint. Supply is kept as a string because real
-// supplies exceed float64's exact-integer range (and an empty json.Number
-// does not marshal).
+// cachedAssetMeta is the on-disk shape of one tokenstats:v1 entry — the
+// asset-payload subset its two readers actually consult: the volume verdict
+// (Volume7d) and the token-stats endpoint (Supply, Decimals, Funded).
+// Supply is kept as a string because real supplies exceed float64's
+// exact-integer range (and an empty json.Number does not marshal).
+//
+// Deliberately not the whole asset. `price` and `created` were carried here
+// once and read by nobody after the ALL-range `from` refinement was dropped,
+// which is a cache entry storing fields it cannot answer questions about.
 type cachedAssetMeta struct {
-	Price    float64 `json:"price,omitempty"`
 	Supply   string  `json:"supply,omitempty"`
 	Decimals *int    `json:"decimals,omitempty"`
 	Volume7d float64 `json:"volume7d,omitempty"`
-	Created  int64   `json:"created,omitempty"`
 	Funded   *int64  `json:"funded,omitempty"`
 	// NotFound marks an authoritative "upstream does not know this asset".
 	// Caching it follows the emptySeriesCacheTTL reasoning: a 404 asset is
@@ -469,10 +563,8 @@ type cachedAssetMeta struct {
 
 func (m *cachedAssetMeta) toAsset() *types.StellarExpertAsset {
 	asset := &types.StellarExpertAsset{
-		Price:    m.Price,
 		Decimals: m.Decimals,
 		Volume7d: m.Volume7d,
-		Created:  m.Created,
 	}
 	asset.Supply = json.Number(m.Supply)
 	asset.Trustlines.Funded = m.Funded
@@ -481,11 +573,9 @@ func (m *cachedAssetMeta) toAsset() *types.StellarExpertAsset {
 
 func assetToCachedMeta(a *types.StellarExpertAsset) cachedAssetMeta {
 	return cachedAssetMeta{
-		Price:    a.Price,
 		Supply:   a.Supply.String(),
 		Decimals: a.Decimals,
 		Volume7d: a.Volume7d,
-		Created:  a.Created,
 		Funded:   a.Trustlines.Funded,
 	}
 }
@@ -499,9 +589,12 @@ func (s *priceHistoryService) getAssetMeta(ctx context.Context, network, cacheNe
 	if s.redis != nil {
 		cached, err := s.redis.MGetJSON(ctx, []string{key}, func() any { return new(cachedAssetMeta) })
 		if err != nil {
-			logger.Warn("price-history: redis MGet failed; bypassing asset cache", "error", err)
-			if s.pricesMetrics != nil {
-				s.pricesMetrics.RedisErrors.WithLabelValues("mget").Inc()
+			// Caller cancellation is not a Redis fault; see loadCachedSeries.
+			if !errors.Is(err, context.Canceled) {
+				logger.Warn("price-history: redis MGet failed; bypassing asset cache", "error", err)
+				if s.pricesMetrics != nil {
+					s.pricesMetrics.RedisErrors.WithLabelValues("mget").Inc()
+				}
 			}
 		} else if entry, _ := cached[key].(*cachedAssetMeta); entry != nil {
 			if entry.NotFound {
@@ -525,9 +618,15 @@ func (s *priceHistoryService) getAssetMeta(ctx context.Context, network, cacheNe
 			// Not-found/malformed are upstream's authoritative answer, and
 			// they are the common case for unpriced SEP-41 tokens — without
 			// caching them, every open of one pays for a GetAsset call.
-			// The emptySeriesCacheTTL rationale, at that same short TTL.
+			// The emptySeriesCacheTTL rationale, applied as a CAP for the
+			// same reason seriesTTL applies it as one: pinning 15m flat
+			// would let a negative marker outlive the positive payloads
+			// around it whenever an operator shortens
+			// --token-stats-cache-ttl-seconds — which is exactly the lever
+			// they would reach for to drain poisoned state during an
+			// upstream incident.
 			if errors.Is(err, ErrAssetNotFound) || errors.Is(err, ErrAssetMalformed) {
-				s.cacheAssetMeta(fctx, key, cachedAssetMeta{NotFound: true}, emptySeriesCacheTTL)
+				s.cacheAssetMeta(fctx, key, cachedAssetMeta{NotFound: true}, s.negativeMetaTTL())
 			}
 			return nil, err
 		}
@@ -544,6 +643,16 @@ func (s *priceHistoryService) getAssetMeta(ctx context.Context, network, cacheNe
 		asset, _ := res.Val.(*types.StellarExpertAsset)
 		return asset, nil
 	}
+}
+
+// negativeMetaTTL is the TTL for a cached authoritative asset-not-found.
+// emptySeriesCacheTTL capped by the configured stats TTL, so the marker can
+// never outlive the positive payloads sharing its keyspace.
+func (s *priceHistoryService) negativeMetaTTL() time.Duration {
+	if s.cfg.TokenStatsCacheTTL > 0 && s.cfg.TokenStatsCacheTTL < emptySeriesCacheTTL {
+		return s.cfg.TokenStatsCacheTTL
+	}
+	return emptySeriesCacheTTL
 }
 
 func (s *priceHistoryService) cacheAssetMeta(ctx context.Context, key string, value cachedAssetMeta, ttl time.Duration) {
@@ -589,12 +698,29 @@ func (s *priceHistoryService) cacheAssetMeta(ctx context.Context, key string, va
 // flagged.
 func (s *priceHistoryService) volumeVerdict(ctx context.Context, meta *types.StellarExpertAsset, metaErr error, network string) *bool {
 	if metaErr != nil || meta == nil {
-		// The metric means "upstream degraded". A caller that walked away
-		// mid-request also aborts the meta wait, with a context error, but
-		// nothing upstream failed — counting it would make an
-		// upstream-health signal track client behaviour instead. The
-		// verdict is null either way; only the counter is withheld.
-		if !isCallerCancellation(ctx, metaErr) && s.pricesMetrics != nil {
+		// The metric means "upstream degraded". Two ways to reach this
+		// branch are not that, and the verdict is null for all of them —
+		// only the counter is withheld:
+		//
+		//   - A caller that walked away mid-request aborts the meta wait
+		//     with a context error. Nothing upstream failed; counting it
+		//     would make an upstream-health signal track client behaviour.
+		//   - An authoritative not-found/malformed is upstream ANSWERING,
+		//     not failing. For an unpriced SEP-41 token it is the designed
+		//     common case — common enough that this service negatively
+		//     caches it — so counting it would climb steadily on ordinary
+		//     traffic, and a second request serves it from that cache with
+		//     no upstream call at all. Same reasoning as the divisor case
+		//     below: an upstream-health signal must not be swamped by a
+		//     constant.
+		//
+		// The fleet-wide-404 failure mode (a changed upstream route prefix,
+		// a misconfigured base URL) is therefore NOT this counter's job.
+		// It surfaces as freighter_service_errors_total volume on
+		// error_type="http_error:404", which doJSON labels these with
+		// precisely so that signal has somewhere honest to live.
+		authoritative := errors.Is(metaErr, ErrAssetNotFound) || errors.Is(metaErr, ErrAssetMalformed)
+		if !authoritative && !isCallerCancellation(ctx, metaErr) && s.pricesMetrics != nil {
 			s.pricesMetrics.VolumeVerdictNull.WithLabelValues(network).Inc()
 		}
 		return nil
@@ -613,12 +739,21 @@ func (s *priceHistoryService) volumeVerdict(ctx context.Context, meta *types.Ste
 	return &verdict
 }
 
-// isCallerCancellation reports whether err is this request's own context
-// ending rather than something upstream failing. Both surface as
-// context.Canceled/DeadlineExceeded, so the caller's ctx state is what
-// distinguishes them.
+// isCallerCancellation reports whether err is the CALLER walking away rather
+// than something upstream failing. Both surface as
+// context.Canceled/DeadlineExceeded on the error, so the request ctx's own
+// state is what distinguishes them — and only context.Canceled counts.
+//
+// The distinction is not cosmetic. Every request runs under the handler's 9s
+// cap (handlers.TokenPriceHistoryContextTimeout), so when a cached series is
+// served while /asset/{id} hangs upstream, it is OUR budget that ends the
+// meta wait and ctx.Err() is DeadlineExceeded. That is upstream degradation
+// with a client still waiting, and it is precisely what VolumeVerdictNull
+// exists to show. Treating it as caller cancellation blanked the metric in
+// its own quadrant. The prices service draws the same line in its
+// miss-budget check.
 func isCallerCancellation(ctx context.Context, err error) bool {
-	if ctx.Err() == nil {
+	if !errors.Is(ctx.Err(), context.Canceled) {
 		return false
 	}
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
@@ -684,11 +819,12 @@ func coverageOK(historyRange string, spec rangeSpec, points []types.PricePoint, 
 	if historyRange == allRange {
 		return true
 	}
-	to := fetchedTo
-	if to.IsZero() {
-		to = time.Now().UTC()
-	}
-	oldestAge := to.Sub(time.Unix(points[0].T, 0))
+	// fetchedTo is always set: fetchSeries assigns it, and loadCachedSeries
+	// rejects an entry that has no stored `to` instead of reconstructing
+	// one. There is deliberately no zero fallback here — the one this
+	// replaced tested IsZero(), which is year 1 and so could never have
+	// matched the epoch value a missing `to` actually decodes to.
+	oldestAge := fetchedTo.Sub(time.Unix(points[0].T, 0))
 	if historyRange == oneDay {
 		return oldestAge >= minCandleWindow && oldestAge <= maxCandleWindow
 	}

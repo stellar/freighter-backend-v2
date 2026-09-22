@@ -24,15 +24,6 @@ const defaultSupplyDecimals = 7
 // omitted rather than allocated for.
 const maxSupplyDecimals = 30
 
-// PriceHistoryAndStatsService is what NewPriceHistoryService returns: one
-// implementation serves both the history and stats endpoints because they
-// share the tokenstats:v2-cached asset payload — one upstream asset call
-// feeds the volume verdict, the ALL-range `from`, and the stats rows.
-type PriceHistoryAndStatsService interface {
-	types.PriceHistoryService
-	types.TokenStatsService
-}
-
 // GetTokenStats returns the sourceable stats rows for one canonical token
 // id, read off the same cached asset payload the history service fetches.
 // Absent/unsourceable fields are omitted entirely (D4) — no nulls, no zeros.
@@ -67,6 +58,22 @@ func (s *priceHistoryService) GetTokenStats(ctx context.Context, canonical, netw
 			// A budget problem, not an answer about the asset. The handler
 			// maps these to 503, which correctly tells the client to retry;
 			// an empty 200 would claim the token has no stats.
+			//
+			// OPEN QUESTION, deliberately not settled here. This arm is in
+			// tension with the default arm below: an upstream 5xx degrades
+			// to an empty 200 specifically so FreighterBackendV2High5xxRate
+			// does not page on an upstream fault, but a HANGING upstream —
+			// the more common slow-dependency case — expires the handler's
+			// 9s cap, lands here, and pages that same alert anyway. So the
+			// commit's goal is only half delivered.
+			//
+			// Not changed unilaterally because it is a wire-contract
+			// decision: the design doc's B.3 mapping and §5.3 stats state
+			// both still specify 503/500 here and are already queued for
+			// amendment, and a retryable timeout is genuinely different
+			// information from "upstream is down" even if this response
+			// shape cannot carry the difference. Needs a maintainer call
+			// alongside that amendment.
 			return nil, err
 
 		default:
