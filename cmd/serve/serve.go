@@ -15,6 +15,13 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
+// maxDurationSeconds is the largest whole-second value that survives
+// conversion to a time.Duration, which counts nanoseconds in an int64.
+// Typed int64 rather than int: as an untyped-to-int constant conversion this
+// does not compile at all where int is 32 bits, and the comparison below
+// widens its operand to match.
+const maxDurationSeconds int64 = math.MaxInt64 / int64(time.Second)
+
 type ServeCmd struct {
 	Cfg *config.Config
 }
@@ -60,6 +67,32 @@ func (s *ServeCmd) Command() *cobra.Command {
 			} {
 				if v <= 0 {
 					return fmt.Errorf("--%s=%d must be positive", flag, v)
+				}
+			}
+			// EVERY flag that api/serve.go later multiplies by time.Second,
+			// not just the positive-only ones above — the two prices flags
+			// have the weakest validation of the set (price-cache-ttl-seconds
+			// has none at all) and are exactly as able to overflow. Past this
+			// bound the multiply wraps: MaxInt64 seconds becomes -1s, after
+			// which a TTL override is silently ignored and a timeout silently
+			// falls back to its default. Same class as the NaN/Inf check
+			// below — validation that accepts a value it cannot apply is not
+			// fail-fast. Keep this list in step with the conversions in
+			// api/serve.go.
+			for flag, v := range map[string]int{
+				"price-cache-ttl-seconds":             s.Cfg.PricesConfig.PriceCacheTTLSeconds,
+				"price-fetch-timeout-seconds":         s.Cfg.PricesConfig.PriceFetchTimeoutSeconds,
+				"price-history-cache-ttl-1h-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1HSeconds,
+				"price-history-cache-ttl-1d-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1DSeconds,
+				"price-history-cache-ttl-1w-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1WSeconds,
+				"price-history-cache-ttl-1m-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1MSeconds,
+				"price-history-cache-ttl-1y-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1YSeconds,
+				"price-history-cache-ttl-all-seconds": s.Cfg.PriceHistoryConfig.CacheTTLALLSeconds,
+				"price-history-fetch-timeout-seconds": s.Cfg.PriceHistoryConfig.FetchTimeoutSeconds,
+				"token-stats-cache-ttl-seconds":       s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds,
+			} {
+				if int64(v) > maxDurationSeconds {
+					return fmt.Errorf("--%s=%d overflows when converted to a duration; must be <= %d", flag, v, maxDurationSeconds)
 				}
 			}
 			// NaN and ±Inf parse fine as float flags and satisfy NO ordered
@@ -202,7 +235,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	// the cache for the next request. Raising this past the handler cap is
 	// therefore a cache-warming lever, never a way to answer a slow request.
 	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.FetchTimeoutSeconds, "price-history-fetch-timeout-seconds", int(handlers.TokenPriceHistoryContextTimeout/time.Second), "Budget for each uncached price-history/token-stats upstream fetch (seconds). Defaults to the handler's request cap; above that it only warms the cache, since the caller has already been answered 503")
-	cmd.Flags().Float64Var(&s.Cfg.PriceHistoryConfig.MinVolume7dUSD, "price-history-min-volume-7d-usd", 7000, "Low-volume warning threshold in USD 7-day volume; 0 disables the guard and the verdict reads false (the check ran, nothing is flagged). The verdict stays null until --price-history-volume-7d-conversion-divisor is also set")
+	cmd.Flags().Float64Var(&s.Cfg.PriceHistoryConfig.MinVolume7dUSD, "price-history-min-volume-7d-usd", 7000, "Low-volume warning threshold in USD 7-day volume; 0 disables the guard and the verdict reads false (the check ran, nothing is flagged). Two things still outrank a disabled guard and report null: the verdict stays null until --price-history-volume-7d-conversion-divisor is also set, and a failed or absent asset payload is null rather than false, because degradation is not a clean bill of health")
 	cmd.Flags().Float64Var(&s.Cfg.PriceHistoryConfig.Volume7dConversionDivisor, "price-history-volume-7d-conversion-divisor", 0, "Divisor converting the raw upstream volume7d into USD (raw ÷ divisor). The raw units are unconfirmed, so the default 0 disables the conversion and the lowVolume verdict is reported null — unknown rather than a false that would assert a check that never ran; set once units are confirmed (a config change, not a code change)")
 	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds, "token-stats-cache-ttl-seconds", 3600, "Redis TTL for the cached token-stats asset payload (seconds), shared with the history service's volume verdict")
 

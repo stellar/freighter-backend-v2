@@ -1120,3 +1120,37 @@ func TestPriceHistory_AbsentVolumeYieldsUnknownNotLowVolume(t *testing.T) {
 			"the cached entry must not turn absence back into a zero")
 	})
 }
+
+// --price-history-min-volume-7d-usd=0 advertises "disables the guard and the
+// verdict reads false (the check ran, nothing is flagged)". With the guard
+// disabled no comparison happens, so the answer cannot depend on whether
+// upstream sent a volume reading — otherwise "disabled" silently becomes
+// "unknown" for exactly the tokens that have no reading.
+func TestPriceHistory_ZeroThresholdIsFalseRegardlessOfVolumePresence(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	// Guard off, conversion on: the combination the flag help describes.
+	cfg := PriceHistoryServiceConfig{MinVolume7dUSD: 0, Volume7dConversionDivisor: stroopDivisor}
+
+	for _, tc := range []struct {
+		name  string
+		asset *types.StellarExpertAsset
+	}{
+		{"volume present", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)}},
+		{"volume absent", &types.StellarExpertAsset{Price: 0.16}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			expert := newFakeStellarExpert()
+			expert.Set("XLM", tc.asset)
+			expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
+			svc := newHistoryService(expert, nil, spotPrices("0.16"), cfg, nil)
+
+			got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
+			require.NoError(t, err)
+			require.NotNil(t, got.LowVolume, "a disabled guard is a definitive answer, not unknown")
+			assert.False(t, *got.LowVolume)
+		})
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
 	"testing"
 	"time"
 
@@ -465,4 +466,63 @@ func TestServeCmd_RejectsNonFiniteVolumeFlags(t *testing.T) {
 			assert.Contains(t, err.Error(), "must be a finite number")
 		})
 	}
+}
+
+// Every flag api/serve.go multiplies by time.Second — including the two
+// prices flags, which have the weakest validation of the set and were missed
+// by the first version of this check. Past maxDurationSeconds the multiply
+// wraps (MaxInt64 seconds becomes -1s), after which a TTL override is
+// silently ignored and a timeout silently falls back to its default.
+func TestServeCmd_RejectsDurationSecondsThatOverflow(t *testing.T) {
+	t.Parallel()
+
+	durationFlags := []string{
+		"--price-cache-ttl-seconds",
+		"--price-fetch-timeout-seconds",
+		"--price-history-cache-ttl-1h-seconds",
+		"--price-history-cache-ttl-1d-seconds",
+		"--price-history-cache-ttl-1w-seconds",
+		"--price-history-cache-ttl-1m-seconds",
+		"--price-history-cache-ttl-1y-seconds",
+		"--price-history-cache-ttl-all-seconds",
+		"--price-history-fetch-timeout-seconds",
+		"--token-stats-cache-ttl-seconds",
+	}
+
+	// Executing the command is what runs PersistentPreRunE, where the check
+	// lives. Setting the flag value alone only populates the config struct and
+	// asserts nothing — the first version of this test did that, and a
+	// tightened bound would have passed it silently.
+	exec := func(t *testing.T, args ...string) error {
+		t.Helper()
+		cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
+		cmd.RunE = func(*cobra.Command, []string) error { return nil }
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SetArgs(args)
+		return cmd.Execute()
+	}
+
+	for _, flag := range durationFlags {
+		t.Run("rejects"+flag, func(t *testing.T) {
+			t.Parallel()
+			err := exec(t, flag, fmt.Sprintf("%d", int64(math.MaxInt64)))
+			require.Error(t, err, "a value that cannot become a duration must not boot")
+			assert.Contains(t, err.Error(), "overflows when converted to a duration")
+		})
+	}
+
+	// The boundary is the largest usable value and must NOT be rejected by
+	// this check, or a future tightening silently drops the longest
+	// legitimate TTL. Asserted against the overflow error specifically: a
+	// bare NoError would couple this to every other required flag, and an
+	// unrelated failure would then read as a bound regression.
+	t.Run("accepts the boundary", func(t *testing.T) {
+		t.Parallel()
+		err := exec(t, "--price-history-cache-ttl-1d-seconds", fmt.Sprintf("%d", maxDurationSeconds))
+		if err != nil {
+			assert.NotContains(t, err.Error(), "overflows when converted to a duration",
+				"the boundary is the largest value that survives the multiply and must be accepted")
+		}
+	})
 }

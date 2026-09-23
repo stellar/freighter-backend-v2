@@ -735,6 +735,15 @@ func (s *priceHistoryService) volumeVerdict(ctx context.Context, meta *types.Ste
 		// them would swamp an upstream-health signal with a constant.
 		return nil
 	}
+	if s.cfg.MinVolume7dUSD <= 0 {
+		// The operator turned the banner off. No comparison happens, so the
+		// answer cannot depend on whether upstream sent a volume — this
+		// MUST come before the nil check below, or "guard disabled" silently
+		// becomes "unknown" for exactly the tokens with no reading, which is
+		// not what --price-history-min-volume-7d-usd=0 advertises.
+		disabled := false
+		return &disabled
+	}
 	if meta.Volume7d == nil {
 		// No usable volume signal — upstream omitted the field or its shape
 		// drifted. The tri-state exists for exactly this: a false here would
@@ -744,10 +753,7 @@ func (s *priceHistoryService) volumeVerdict(ctx context.Context, meta *types.Ste
 		// this is upstream answering, not upstream failing.
 		return nil
 	}
-	verdict := false
-	if s.cfg.MinVolume7dUSD > 0 {
-		verdict = *meta.Volume7d/s.cfg.Volume7dConversionDivisor < s.cfg.MinVolume7dUSD
-	}
+	verdict := *meta.Volume7d/s.cfg.Volume7dConversionDivisor < s.cfg.MinVolume7dUSD
 	return &verdict
 }
 
