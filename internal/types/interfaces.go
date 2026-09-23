@@ -90,10 +90,8 @@ type StellarExpertAsset struct {
 // negative-cached as unpriceable.
 //
 // Nothing else belongs here. A field decoded strictly but never read has the
-// blast radius of `price` and none of its value: `created` used to sit here
-// for the ALL range's `from`, that refinement was dropped, and the field
-// stayed — so an upstream reshape of a field nobody consults would have
-// nulled every price on the home screen.
+// blast radius of `price` and none of its value — an upstream reshape of
+// something nobody consults would null every price on the home screen.
 type stellarExpertAssetCore struct {
 	Price float64 `json:"price"`
 }

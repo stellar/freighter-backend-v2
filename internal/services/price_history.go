@@ -40,43 +40,17 @@ import (
 const (
 	priceHistoryServiceName = "price-history"
 
-	// These carry the cached-entry SCHEMA version, so a shape change can
-	// cold-start its own keys instead of being read as the old shape by a
-	// pod that has not rolled yet.
+	// The segment is the cached-entry SCHEMA version. Bump it when the
+	// on-disk shape changes in a way an older reader would misread AND that
+	// reader can still be running somewhere shared — `prices:v2` is the
+	// worked example, where a v1 reader takes an unpriced entry for a real
+	// price. Both of these stay at v1 because no shared environment has
+	// ever run this branch.
 	//
-	// Both ship at v1. These keys are introduced by this branch and no
-	// SHARED environment has ever run it — dev, stg and prd all run commits
-	// from main — so there is no deployed predecessor to rotate away from.
-	// What that does NOT rule out is a personal sandbox built from an
-	// earlier commit of this branch. Both later shape changes rotated to v2
-	// in the SAME commit that made them (1b91c29 added `to`, 7c22137 added
-	// `notFound`), so the only PRE-EXISTING entries under these v1 keys are
-	// each shape's original. Neither needs a rotation to read:
-	//
-	//   - cachedSeries without `to` is UNUSABLE — see loadCachedSeries,
-	//     which rejects it as a miss so it refetches.
-	//   - cachedAssetMeta without `notFound` is correctly readable: that
-	//     field was only ever written for an ABSENT asset, so an old entry
-	//     is by construction a found one and the zero value `false` is the
-	//     right answer. The `price` and `created` fields such an entry also
-	//     carries are simply ignored.
-	//
-	// Two costs of coming back to v1, both sandbox-only:
-	//
-	//   - A sandbox that ran an intermediate commit is left with orphaned
-	//     `pricehistory:v2` / `tokenstats:v2` keys. Never read again; they
-	//     expire on their own TTL, 7 days at the longest on ALL.
-	//   - Going BACKWARDS in time now shares a keyspace it did not before.
-	//     This build writes the current shapes under v1, so checking out a
-	//     pre-7c22137 commit to bisect gives a reader with no `notFound`
-	//     field an entry that has one: `{"notFound":true}` decodes as a
-	//     FOUND asset with every value zeroed. Flush the sandbox Redis when
-	//     bisecting across those commits.
-	//
-	// Bump when the on-disk shape changes in a way an older reader would
-	// misread AND the old shape can be in a shared environment —
-	// `prices:v2` is the worked example, where a v1 reader takes an
-	// unpriced entry for a real price.
+	// Flush a sandbox Redis before bisecting back across this branch: older
+	// builds read these same keys with a narrower struct, and a
+	// `{"notFound":true}` entry decodes there as a found asset with every
+	// value zeroed.
 	historyCacheKeyPrefix    = "pricehistory:v1"
 	tokenStatsCacheKeyPrefix = "tokenstats:v1"
 
@@ -114,22 +88,12 @@ type rangeSpec struct {
 	defaultCacheTTL time.Duration
 }
 
-// Resolutions are chosen against an upstream ceiling the API neither
-// advertises nor enforces by rejecting: past roughly 200 buckets it silently
-// COARSENS the response instead (§3 fact 2). Every resolution below is
-// chosen so that never happens — which is what makes the enum-membership
-// note on rangeSpec load-bearing rather than trivia.
-//
-// ALL is the one range that exceeds 200 records (~277, and rising ~26 a year
-// against the fixed 2015-09-01 floor) and is still safe, because the cap is
-// enforced ONLY by coarsening and 2w is the coarsest valid resolution — so
-// there is nothing left to coarsen to and the API returns the full series
-// (measured, A.1). That safety does not generalise: a NEW range at a
-// sub-2w resolution over a long window WOULD be coarsened, and would then
-// depend on undocumented server behaviour. Check the record count before
-// changing any resolution here.
-//
-// This note lived on the 24h-change constant until that moved 3600 → 900.
+// Past roughly 200 buckets the API silently COARSENS rather than rejecting
+// (§3 fact 2), so check the record count before changing a resolution here.
+// ALL exceeds 200 and is safe only because 2w is the coarsest valid
+// resolution — nothing left to coarsen to, so the full series comes back.
+// That does not generalise: a new range at a sub-2w resolution over a long
+// window would be coarsened, and would depend on undocumented behaviour.
 var priceHistoryRanges = map[string]rangeSpec{
 	"1H":     {resolutionSec: 300, window: time.Hour, defaultCacheTTL: 5 * time.Minute},
 	oneDay:   {resolutionSec: 900, window: 24 * time.Hour, defaultCacheTTL: 15 * time.Minute},
@@ -204,10 +168,8 @@ type PriceHistoryServiceConfig struct {
 	TokenStatsCacheTTL time.Duration
 }
 
-// The one implementation satisfies both endpoint interfaces. Asserted here
-// so a drift fails in this package rather than only at the api package's
-// assignment, which is where the now-removed combined interface used to be
-// checked.
+// The one implementation satisfies both endpoint interfaces, asserted here so
+// a drift fails in this package rather than only where api wires it up.
 var (
 	_ types.PriceHistoryService = (*priceHistoryService)(nil)
 	_ types.TokenStatsService   = (*priceHistoryService)(nil)
@@ -480,16 +442,10 @@ func (s *priceHistoryService) fetchSeries(ctx context.Context, network, cacheNet
 		fromUnix := to.Add(-spec.window).Unix()
 		from = time.Unix(fromUnix-fromUnix%spec.resolutionSec, 0).UTC()
 	} else {
-		// ALL: start at the floor. It previously refined this to
-		// max(asset.created, floor) by waiting on the asset payload, which
-		// bought a narrower upstream window and nothing else — the API
-		// returns only buckets that exist, so both windows yield the
-		// IDENTICAL series. That made the asset call a blocking dependency
-		// of the candles call purely for request tidiness, and it had to be
-		// sub-budgeted so a hanging /asset could not starve the chart it was
-		// decorating. Since upstream request width is not a cost we are
-		// managing, the floor is used directly and candles are issued with
-		// no upstream call ahead of them.
+		// ALL: start at the floor rather than at the asset's creation date.
+		// The API returns only buckets that exist, so both windows yield
+		// the identical series — narrowing it would make the candles call
+		// wait on the asset call for nothing.
 		from = time.Unix(allRangeFromFloor, 0).UTC()
 	}
 
@@ -682,16 +638,11 @@ func (s *priceHistoryService) cacheAssetMeta(ctx context.Context, key string, va
 // is operator-visible.
 //
 // An unconfirmed unit conversion (divisor 0, the shipped default) is null for
-// the same reason. It previously evaluated false, which asserted "we checked
-// and this token is fine" for every token on every response while no check
-// was possible — a claim the service could not support, and the one value the
-// tri-state offers no way to walk back. Three things gate the conversion and
-// all are open (§13): whether the raw scale is flat or per-asset (a flat ÷1e7
-// would permanently flag an 18-decimal token, and a single scalar divisor
-// cannot express a per-asset scale), whether the field even counts AMM venues,
-// and the absence of any unit-independent proxy to cross-check against. Until
-// they close, "unknown" is the honest answer, and the eventual rollout then
-// reads as null → true|false — new information arriving — rather than
+// the same reason: a false would assert "we checked and this token is fine"
+// while no check was possible, and it is the one value the tri-state offers
+// no way to walk back. The unit questions gating the conversion are open
+// (§13); until they close, "unknown" is the honest answer, and enabling it
+// later reads as null → true|false — new information — rather than
 // false → true, which looks like the token changed.
 //
 // A zero MinVolume7dUSD is different and stays false: that is an operator

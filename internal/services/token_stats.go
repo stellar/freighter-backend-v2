@@ -59,21 +59,13 @@ func (s *priceHistoryService) GetTokenStats(ctx context.Context, canonical, netw
 			// maps these to 503, which correctly tells the client to retry;
 			// an empty 200 would claim the token has no stats.
 			//
-			// OPEN QUESTION, deliberately not settled here. This arm is in
-			// tension with the default arm below: an upstream 5xx degrades
-			// to an empty 200 specifically so FreighterBackendV2High5xxRate
-			// does not page on an upstream fault, but a HANGING upstream —
-			// the more common slow-dependency case — expires the handler's
-			// 9s cap, lands here, and pages that same alert anyway. So the
-			// commit's goal is only half delivered.
-			//
-			// Not changed unilaterally because it is a wire-contract
-			// decision: the design doc's B.3 mapping and §5.3 stats state
-			// both still specify 503/500 here and are already queued for
-			// amendment, and a retryable timeout is genuinely different
-			// information from "upstream is down" even if this response
-			// shape cannot carry the difference. Needs a maintainer call
-			// alongside that amendment.
+			// OPEN QUESTION, in tension with the default arm below: a 5xx
+			// degrades to an empty 200 so FreighterBackendV2High5xxRate does
+			// not page on an upstream fault, but a HANGING upstream — the
+			// more common case — expires the 9s cap, lands here, and pages
+			// it anyway. Unsettled because it is a wire contract: B.3 and
+			// §5.3 still specify 503 here, and a retryable timeout is
+			// genuinely different information from "upstream is down".
 			return nil, err
 
 		default:

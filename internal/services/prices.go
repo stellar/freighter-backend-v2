@@ -76,17 +76,11 @@ const (
 	// price-change-24h-null runbook. Raising
 	// --price-history-cache-ttl-1d-seconds widens it proportionally.
 	//
-	// It is a constant, not a knob. 900 does fetch ~97 records per token
-	// where the previous 3600 fetched ~25, a 4x increase in rows pulled
-	// from a paid upstream on the hottest path in the service — but we have
-	// no quota that cost counts against, and the only thing a different
-	// value buys is a detail header that visibly disagrees with the list
-	// row again. A redeploy reverts the formula change if it ever has to
-	// be reverted; there is deliberately no runtime lever for it.
-	// The ~200-bucket coarsening ceiling documented on priceHistoryRanges
-	// constrains this too: 900s over a 24h window is ~97 records, well
-	// clear of it. This is where that note used to live, before the
-	// resolution changed from 3600.
+	// A constant, not a knob: the only thing another value buys is a detail
+	// header that visibly disagrees with the list row, and a redeploy
+	// reverts the formula if it ever has to be. ~97 records per token, well
+	// clear of the ~200-bucket coarsening ceiling noted on
+	// priceHistoryRanges.
 	candlesResolutionSec = 900
 
 	// minCandleWindow / maxCandleWindow bound how far before `to` the
@@ -114,18 +108,16 @@ type PricesServiceConfig struct {
 // RedisErrors series and logs it — unless the failure is just the caller
 // walking away, which is not Redis degrading.
 //
-// Single owner for all seven call sites across both services — three reads
-// and four writes. They were seven copies until the cancellation guard was
-// added to two of the three reads and missed the third, at which point one
-// series meant "Redis health" from one
-// endpoint and "Redis health plus however often clients close the tab" from
-// another. The message and its detail vary per site and stay with the caller;
-// what must not vary — the guard, the nil-metrics check, the op label — lives
-// here.
+// Single owner for every increment of that series, across both services. The
+// message and its detail vary per site and stay with the caller; what must not
+// vary — the guard, the nil-metrics check, the op label — lives here. Add a
+// site by calling this, not by copying the block: both services share one
+// *metrics.Prices, so a site that skips the guard makes the series mean
+// something different depending on which endpoint produced it.
 //
-// The guard is applied uniformly even though today's write sites run under a
-// context.Background()-derived budget where it can never fire: a future caller
-// passing a request context should not have to rediscover the rule.
+// The guard applies uniformly even at the write sites, where callers pass a
+// context.Background()-derived budget and it can never fire, so a future
+// caller passing a request context need not rediscover the rule.
 func reportRedisFailure(m *metrics.Prices, op, msg string, err error, logArgs ...any) {
 	if errors.Is(err, context.Canceled) {
 		return
