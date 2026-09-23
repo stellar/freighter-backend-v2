@@ -92,7 +92,7 @@ func TestPriceHistory_HappyPath1D(t *testing.T) {
 	assert.Equal(t, 900, expert.LastCandleResolution("XLM"))
 }
 
-// Fact 2 (§5): upstream silently coarsens oversized windows. The service must
+// Fact 2 (§3): upstream silently coarsens oversized windows. The service must
 // derive resolutionSeconds from the returned timestamps, never echo the
 // request.
 func TestPriceHistory_ResolutionDerivedWhenCoarsened(t *testing.T) {

@@ -83,6 +83,10 @@ const (
 	// value buys is a detail header that visibly disagrees with the list
 	// row again. A redeploy reverts the formula change if it ever has to
 	// be reverted; there is deliberately no runtime lever for it.
+	// The ~200-bucket coarsening ceiling documented on priceHistoryRanges
+	// constrains this too: 900s over a 24h window is ~97 records, well
+	// clear of it. This is where that note used to live, before the
+	// resolution changed from 3600.
 	candlesResolutionSec = 900
 
 	// minCandleWindow / maxCandleWindow bound how far before `to` the
@@ -104,6 +108,32 @@ type PricesServiceConfig struct {
 	CacheTTL         time.Duration
 	MissFetchTimeout time.Duration
 	MaxConcurrent    int
+}
+
+// reportRedisFailure records one failed Redis operation on the shared
+// RedisErrors series and logs it — unless the failure is just the caller
+// walking away, which is not Redis degrading.
+//
+// Single owner for all seven call sites across both services — three reads
+// and four writes. They were seven copies until the cancellation guard was
+// added to two of the three reads and missed the third, at which point one
+// series meant "Redis health" from one
+// endpoint and "Redis health plus however often clients close the tab" from
+// another. The message and its detail vary per site and stay with the caller;
+// what must not vary — the guard, the nil-metrics check, the op label — lives
+// here.
+//
+// The guard is applied uniformly even though today's write sites run under a
+// context.Background()-derived budget where it can never fire: a future caller
+// passing a request context should not have to rediscover the rule.
+func reportRedisFailure(m *metrics.Prices, op, msg string, err error, logArgs ...any) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	logger.Warn(msg, append(logArgs, "error", err)...)
+	if m != nil {
+		m.RedisErrors.WithLabelValues(op).Inc()
+	}
 }
 
 // JSONCache is the subset of *store.RedisStore the prices services depend
@@ -240,12 +270,7 @@ func (p *pricesService) loadCachedPrices(ctx context.Context, cacheKeys []string
 		// DeadlineExceeded deliberately still counts: this MGet is issued at
 		// t≈0 of the request, so a deadline here means Redis itself took the
 		// whole budget to answer one MGET — real degradation.
-		if !errors.Is(mgetErr, context.Canceled) {
-			logger.Warn("prices: redis MGet failed; bypassing cache", "error", mgetErr)
-			if p.pricesMetrics != nil {
-				p.pricesMetrics.RedisErrors.WithLabelValues("mget").Inc()
-			}
-		}
+		reportRedisFailure(p.pricesMetrics, "mget", "prices: redis MGet failed; bypassing cache", mgetErr)
 		p.recordCacheOutcome(network, "miss", len(cacheKeys))
 		return hits
 	}
@@ -467,10 +492,7 @@ func (p *pricesService) cachePositive(ctx context.Context, cacheNet, canonical s
 		PercentagePriceChange24h: entry.PercentagePriceChange24h,
 	}
 	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), value, p.cfg.CacheTTL); err != nil {
-		logger.Warn("prices: redis SET failed", "asset", canonical, "error", err)
-		if p.pricesMetrics != nil {
-			p.pricesMetrics.RedisErrors.WithLabelValues("set").Inc()
-		}
+		reportRedisFailure(p.pricesMetrics, "set", "prices: redis SET failed", err, "asset", canonical)
 	}
 }
 
@@ -482,10 +504,7 @@ func (p *pricesService) cacheNegative(ctx context.Context, cacheNet, canonical s
 		return
 	}
 	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), cachedPriceEntry{Unpriced: true}, negativeCacheTTL); err != nil {
-		logger.Warn("prices: redis SET (negative) failed", "asset", canonical, "error", err)
-		if p.pricesMetrics != nil {
-			p.pricesMetrics.RedisErrors.WithLabelValues("set").Inc()
-		}
+		reportRedisFailure(p.pricesMetrics, "set", "prices: redis SET (negative) failed", err, "asset", canonical)
 	}
 }
 

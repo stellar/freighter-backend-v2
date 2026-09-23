@@ -14,7 +14,6 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils/assetid"
@@ -115,6 +114,22 @@ type rangeSpec struct {
 	defaultCacheTTL time.Duration
 }
 
+// Resolutions are chosen against an upstream ceiling the API neither
+// advertises nor enforces by rejecting: past roughly 200 buckets it silently
+// COARSENS the response instead (§3 fact 2). Every resolution below is
+// chosen so that never happens — which is what makes the enum-membership
+// note on rangeSpec load-bearing rather than trivia.
+//
+// ALL is the one range that exceeds 200 records (~277, and rising ~26 a year
+// against the fixed 2015-09-01 floor) and is still safe, because the cap is
+// enforced ONLY by coarsening and 2w is the coarsest valid resolution — so
+// there is nothing left to coarsen to and the API returns the full series
+// (measured, A.1). That safety does not generalise: a NEW range at a
+// sub-2w resolution over a long window WOULD be coarsened, and would then
+// depend on undocumented server behaviour. Check the record count before
+// changing any resolution here.
+//
+// This note lived on the 24h-change constant until that moved 3600 → 900.
 var priceHistoryRanges = map[string]rangeSpec{
 	"1H":     {resolutionSec: 300, window: time.Hour, defaultCacheTTL: 5 * time.Minute},
 	oneDay:   {resolutionSec: 900, window: 24 * time.Hour, defaultCacheTTL: 15 * time.Minute},
@@ -392,12 +407,7 @@ func (s *priceHistoryService) loadCachedSeries(ctx context.Context, key string) 
 		// surfaces that verbatim. Counting it would move a Redis-health
 		// signal with client behaviour — the same line isCallerCancellation
 		// and VolumeVerdictNull draw. The cache is simply bypassed either way.
-		if !errors.Is(err, context.Canceled) {
-			logger.Warn("price-history: redis MGet failed; bypassing cache", "error", err)
-			if s.pricesMetrics != nil {
-				s.pricesMetrics.RedisErrors.WithLabelValues("mget").Inc()
-			}
-		}
+		reportRedisFailure(s.pricesMetrics, "mget", "price-history: redis MGet failed; bypassing cache", err)
 		return series{}, false
 	}
 	entry, _ := cached[key].(*cachedSeries)
@@ -533,10 +543,7 @@ func (s *priceHistoryService) cacheSeries(ctx context.Context, key string, value
 		return
 	}
 	if err := s.redis.SetJSON(ctx, key, cachedSeries{Points: value.points, To: value.to.Unix()}, ttl); err != nil {
-		logger.Warn("price-history: redis SET failed", "key", key, "error", err)
-		if s.pricesMetrics != nil {
-			s.pricesMetrics.RedisErrors.WithLabelValues("set").Inc()
-		}
+		reportRedisFailure(s.pricesMetrics, "set", "price-history: redis SET failed", err, "key", key)
 	}
 }
 
@@ -592,13 +599,7 @@ func (s *priceHistoryService) getAssetMeta(ctx context.Context, network, cacheNe
 	if s.redis != nil {
 		cached, err := s.redis.MGetJSON(ctx, []string{key}, func() any { return new(cachedAssetMeta) })
 		if err != nil {
-			// Caller cancellation is not a Redis fault; see loadCachedSeries.
-			if !errors.Is(err, context.Canceled) {
-				logger.Warn("price-history: redis MGet failed; bypassing asset cache", "error", err)
-				if s.pricesMetrics != nil {
-					s.pricesMetrics.RedisErrors.WithLabelValues("mget").Inc()
-				}
-			}
+			reportRedisFailure(s.pricesMetrics, "mget", "price-history: redis MGet failed; bypassing asset cache", err)
 		} else if entry, _ := cached[key].(*cachedAssetMeta); entry != nil {
 			if entry.NotFound {
 				// Counted apart from "hit" for the same reason the prices
@@ -663,10 +664,7 @@ func (s *priceHistoryService) cacheAssetMeta(ctx context.Context, key string, va
 		return
 	}
 	if err := s.redis.SetJSON(ctx, key, value, ttl); err != nil {
-		logger.Warn("price-history: redis SET failed", "key", key, "error", err)
-		if s.pricesMetrics != nil {
-			s.pricesMetrics.RedisErrors.WithLabelValues("set").Inc()
-		}
+		reportRedisFailure(s.pricesMetrics, "set", "price-history: redis SET failed", err, "key", key)
 	}
 }
 

@@ -277,10 +277,11 @@ type Prices struct {
 	// drive this one series.
 	//
 	// Caller cancellation is deliberately excluded: a client closing the tab
-	// is not Redis degrading. An eighth increment site must preserve that,
-	// either by guarding with !errors.Is(err, context.Canceled) as the mget
-	// sites do, or by running under a context.Background()-derived ctx as
-	// the singleflight set sites do.
+	// is not Redis degrading. Do NOT hand-roll that — every increment goes
+	// through services.reportRedisFailure, which owns the guard, the op
+	// label and the nil check. An eighth site means one more call to it, not
+	// one more copy of the block; the copies are what let this series mean
+	// two different things per endpoint once before.
 	RedisErrors *prometheus.CounterVec
 	// SkippedTokens counts token-prices request entries that failed to parse
 	// into a canonical asset id and were skipped-and-nulled (entry present in

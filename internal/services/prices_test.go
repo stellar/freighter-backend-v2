@@ -1093,3 +1093,44 @@ func (c *cancelCache) MGetJSON(context.Context, []string, func() any) (map[strin
 	return nil, fmt.Errorf("redis MGET: %w", c.err)
 }
 func (c *cancelCache) SetJSON(context.Context, string, any, time.Duration) error { return nil }
+
+// failingSetCache succeeds on read and fails every write with a chosen error.
+type failingSetCache struct{ err error }
+
+func (c *failingSetCache) MGetJSON(context.Context, []string, func() any) (map[string]any, error) {
+	return map[string]any{}, nil
+}
+func (c *failingSetCache) SetJSON(context.Context, string, any, time.Duration) error {
+	return fmt.Errorf("redis SET: %w", c.err)
+}
+
+// The write sites had no cancellation guard until reportRedisFailure gave all
+// seven one owner. Uniformity is only safe if a GENUINE write failure is still
+// counted — the whole point of the series is that a degraded Redis shows up.
+// Nothing covered the write path before this.
+func TestPrices_FailedSetIsCountedUnlessTheCallerCancelled(t *testing.T) {
+	t.Parallel()
+
+	newSvc := func(pm *metrics.Prices, cacheErr error) types.PricesService {
+		expert := newFakeStellarExpert()
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
+		return NewPricesService(expert, &failingSetCache{err: cacheErr}, PricesServiceConfig{}, nil, pm)
+	}
+
+	t.Run("a real write failure is counted", func(t *testing.T) {
+		t.Parallel()
+		pm := metrics.NewPrices(prometheus.NewRegistry())
+		_, err := newSvc(pm, errors.New("READONLY replica")).GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+		require.NoError(t, err, "a cache write failure must not fail the request")
+		assert.Equal(t, float64(1), testutil.ToFloat64(pm.RedisErrors.WithLabelValues("set")),
+			"a degraded Redis must still reach the operator")
+	})
+
+	t.Run("a cancelled caller is not", func(t *testing.T) {
+		t.Parallel()
+		pm := metrics.NewPrices(prometheus.NewRegistry())
+		_, _ = newSvc(pm, context.Canceled).GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+		assert.Equal(t, float64(0), testutil.ToFloat64(pm.RedisErrors.WithLabelValues("set")),
+			"a client closing the tab is not Redis degrading, on writes as on reads")
+	})
+}
