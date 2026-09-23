@@ -177,3 +177,55 @@ func (m *MockPricesService) GetPrices(ctx context.Context, tokens []string, netw
 	}
 	return map[string]*types.PriceEntry{}, nil
 }
+
+type MockPriceHistoryService struct {
+	GetPriceHistoryFunc     func(ctx context.Context, canonical, network, historyRange string) (*types.TokenPriceHistory, error)
+	GetPriceHistoryOverride *types.TokenPriceHistory
+	GetPriceHistoryError    error
+	LastCanonical           string
+	LastNetwork             string
+	LastRange               string
+}
+
+func (m *MockPriceHistoryService) Name() string { return "mock-price-history" }
+
+func (m *MockPriceHistoryService) GetPriceHistory(ctx context.Context, canonical, network, historyRange string) (*types.TokenPriceHistory, error) {
+	m.LastCanonical = canonical
+	m.LastNetwork = network
+	m.LastRange = historyRange
+	if m.GetPriceHistoryFunc != nil {
+		return m.GetPriceHistoryFunc(ctx, canonical, network, historyRange)
+	}
+	if m.GetPriceHistoryError != nil {
+		return nil, m.GetPriceHistoryError
+	}
+	if m.GetPriceHistoryOverride != nil {
+		return m.GetPriceHistoryOverride, nil
+	}
+	return &types.TokenPriceHistory{Range: historyRange, Currency: "USD", Points: []types.PricePoint{}}, nil
+}
+
+type MockTokenStatsService struct {
+	GetTokenStatsFunc     func(ctx context.Context, canonical, network string) (*types.TokenStats, error)
+	GetTokenStatsOverride *types.TokenStats
+	GetTokenStatsError    error
+	LastCanonical         string
+	LastNetwork           string
+}
+
+func (m *MockTokenStatsService) Name() string { return "mock-token-stats" }
+
+func (m *MockTokenStatsService) GetTokenStats(ctx context.Context, canonical, network string) (*types.TokenStats, error) {
+	m.LastCanonical = canonical
+	m.LastNetwork = network
+	if m.GetTokenStatsFunc != nil {
+		return m.GetTokenStatsFunc(ctx, canonical, network)
+	}
+	if m.GetTokenStatsError != nil {
+		return nil, m.GetTokenStatsError
+	}
+	if m.GetTokenStatsOverride != nil {
+		return m.GetTokenStatsOverride, nil
+	}
+	return &types.TokenStats{}, nil
+}

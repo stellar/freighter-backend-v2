@@ -11,6 +11,7 @@ import (
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils/assetid"
 )
@@ -18,10 +19,12 @@ import (
 type TokenPricesHandler struct {
 	PricesService types.PricesService
 	MaxTokens     int
+	// PricesMetrics may be nil (tests); counters become no-ops in that case.
+	PricesMetrics *metrics.Prices
 }
 
-func NewTokenPricesHandler(svc types.PricesService, maxTokens int) *TokenPricesHandler {
-	return &TokenPricesHandler{PricesService: svc, MaxTokens: maxTokens}
+func NewTokenPricesHandler(svc types.PricesService, maxTokens int, pricesMetrics *metrics.Prices) *TokenPricesHandler {
+	return &TokenPricesHandler{PricesService: svc, MaxTokens: maxTokens, PricesMetrics: pricesMetrics}
 }
 
 type TokenPricesRequest struct {
@@ -32,21 +35,28 @@ type validatedTokenPricesRequest struct {
 	originalInputs []string
 	canonicalIDs   []string
 	// canonicalByOriginal maps each raw client input to its canonical id so the
-	// response loop can echo the original key without re-normalizing.
+	// response loop can echo the original key without re-normalizing. Inputs
+	// that failed to parse are absent from this map — they are skipped-and-
+	// nulled in the response rather than failing the batch.
 	canonicalByOriginal map[string]string
 }
 
-func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedTokenPricesRequest, *httperror.HttpError) {
+// The skipped count is returned alongside the error rather than only inside
+// the request, because the all-unparseable batch is BOTH a 400 and the
+// loudest possible instance of skipping — a client that has started sending
+// only ids we cannot parse. Reporting it only on the success path would make
+// SkippedTokens read zero for exactly the failure it exists to detect.
+func validateTokenPricesRequest(r *http.Request, maxTokens int) (_ *validatedTokenPricesRequest, skipped int, _ *httperror.HttpError) {
 	var req TokenPricesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		if middleware.IsMaxBytesError(err) {
-			return nil, httperror.RequestEntityTooLarge("Request body too large", err)
+			return nil, skipped, httperror.RequestEntityTooLarge("Request body too large", err)
 		}
-		return nil, httperror.BadRequest("invalid request body", err)
+		return nil, skipped, httperror.BadRequest("invalid request body", err)
 	}
 	if len(req.Tokens) == 0 {
 		errStr := "tokens array cannot be empty"
-		return nil, httperror.BadRequest(errStr, errors.New(errStr))
+		return nil, skipped, httperror.BadRequest(errStr, errors.New(errStr))
 	}
 
 	canonicalIDs := make([]string, 0, len(req.Tokens))
@@ -55,13 +65,21 @@ func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedToken
 	for _, t := range req.Tokens {
 		canonical, err := assetid.Normalize(t)
 		if err != nil {
-			return nil, httperror.BadRequest("invalid token id", err)
+			// Skip-and-null: one unparseable id (an LP-share id, a client
+			// format mistake) degrades to one null entry, never a batch-wide
+			// failure that would blank every price on the home screen.
+			skipped++
+			continue
 		}
 		canonicalByOriginal[t] = canonical
 		if _, dup := seen[canonical]; !dup {
 			seen[canonical] = struct{}{}
 			canonicalIDs = append(canonicalIDs, canonical)
 		}
+	}
+	if len(canonicalIDs) == 0 {
+		errStr := "no parseable token ids in request"
+		return nil, skipped, httperror.BadRequest(errStr, errors.New(errStr))
 	}
 
 	// Apply the cap on the deduped canonical set, not raw input — a request
@@ -70,14 +88,14 @@ func validateTokenPricesRequest(r *http.Request, maxTokens int) (*validatedToken
 	// case before we ever decode.
 	if maxTokens > 0 && len(canonicalIDs) > maxTokens {
 		errStr := fmt.Sprintf("too many tokens: maximum is %d, got %d unique", maxTokens, len(canonicalIDs))
-		return nil, httperror.BadRequest(errStr, errors.New(errStr))
+		return nil, skipped, httperror.BadRequest(errStr, errors.New(errStr))
 	}
 
 	return &validatedTokenPricesRequest{
 		originalInputs:      req.Tokens,
 		canonicalIDs:        canonicalIDs,
 		canonicalByOriginal: canonicalByOriginal,
-	}, nil
+	}, skipped, nil
 }
 
 // GetPrices handles POST /api/v1/token-prices.
@@ -90,7 +108,12 @@ func (h *TokenPricesHandler) GetPrices(w http.ResponseWriter, r *http.Request) e
 		return httperror.BadRequest("token prices are not available on FUTURENET", errors.New("futurenet not supported"))
 	}
 
-	req, validationErr := validateTokenPricesRequest(r, h.MaxTokens)
+	req, skipped, validationErr := validateTokenPricesRequest(r, h.MaxTokens)
+	// Recorded before the error check: an all-unparseable batch 400s, and
+	// those skips still have to be counted (see the validator's comment).
+	if skipped > 0 && h.PricesMetrics != nil {
+		h.PricesMetrics.SkippedTokens.WithLabelValues(network).Add(float64(skipped))
+	}
 	if validationErr != nil {
 		return validationErr
 	}
@@ -106,10 +129,15 @@ func (h *TokenPricesHandler) GetPrices(w http.ResponseWriter, r *http.Request) e
 
 	// Build response keyed by the *original* client input, preserving v1's
 	// echo behavior (so a request for "native" returns "native": ...). The
-	// canonical id was already resolved during validation.
+	// canonical id was already resolved during validation; skipped inputs are
+	// absent from canonicalByOriginal and fall out as explicit nulls.
 	out := make(map[string]*types.PriceEntry, len(req.originalInputs))
 	for _, original := range req.originalInputs {
-		out[original] = prices[req.canonicalByOriginal[original]]
+		if canonical, ok := req.canonicalByOriginal[original]; ok {
+			out[original] = prices[canonical]
+		} else {
+			out[original] = nil
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

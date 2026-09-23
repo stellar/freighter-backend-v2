@@ -16,14 +16,27 @@ const (
 )
 
 var (
-	ErrEmpty     = errors.New("token id is empty")
-	ErrMalformed = errors.New("token id is malformed: expected \"XLM\" or \"CODE:ISSUER\"")
+	ErrEmpty = errors.New("token id is empty")
+	// NOT client-visible: handlers wrap it as
+	// httperror.BadRequest("invalid token id", err) and HttpError.Err is
+	// tagged `json:"-"`, so a caller sees only {"message":"invalid token
+	// id"}. This text reaches logs and errors.Is chains, so it still has to
+	// name every accepted form — including the two contract forms this
+	// service added for SEP-41 — or it misleads whoever is reading the log.
+	ErrMalformed = errors.New("token id is malformed: expected \"XLM\", \"CODE:ISSUER\", a contract id, or \"SYMBOL:CONTRACTID\"")
 )
 
 // Normalize accepts a client-side token identifier and returns its canonical
 // form. "XLM", "xlm", and "native" all collapse to "XLM". A "CODE:ISSUER"
 // pair is validated (1-12 alphanumeric code, valid ed25519 public key issuer)
 // and returned with the code preserved as supplied.
+//
+// SEP-41 contract tokens are accepted in both client forms — a bare C…
+// contract id and "SYMBOL:CONTRACTID" — and canonicalize to the bare
+// contract id (the verified Stellar Expert wire format). The symbol half is
+// opaque contract metadata, not a Stellar asset code: it gets no
+// alphanumeric or length validation and may itself contain colons, so the
+// contract id is taken from after the LAST colon.
 func Normalize(input string) (string, error) {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
@@ -32,6 +45,13 @@ func Normalize(input string) (string, error) {
 
 	if strings.EqualFold(trimmed, "XLM") || strings.EqualFold(trimmed, "native") {
 		return NativeCanonical, nil
+	}
+
+	if utils.IsValidContractID(trimmed) {
+		return trimmed, nil
+	}
+	if idx := strings.LastIndex(trimmed, ":"); idx >= 0 && utils.IsValidContractID(trimmed[idx+1:]) {
+		return trimmed[idx+1:], nil
 	}
 
 	parts := strings.Split(trimmed, ":")
