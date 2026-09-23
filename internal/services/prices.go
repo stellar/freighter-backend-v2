@@ -105,27 +105,42 @@ type PricesServiceConfig struct {
 }
 
 // reportRedisFailure records one failed Redis operation on the shared
-// RedisErrors series and logs it — unless the failure is just the caller
-// walking away, which is not Redis degrading.
+// RedisErrors series and logs it — unless the failure is the caller walking
+// away, which is not Redis degrading.
 //
 // Single owner for every increment of that series, across both services. The
 // message and its detail vary per site and stay with the caller; what must not
-// vary — the guard, the nil-metrics check, the op label — lives here. Add a
-// site by calling this, not by copying the block: both services share one
-// *metrics.Prices, so a site that skips the guard makes the series mean
-// something different depending on which endpoint produced it.
+// vary — the cancellation predicate, the nil-metrics check, the op label —
+// lives here. Add a site by calling this, not by copying the block: both
+// services share one *metrics.Prices, so a site that skips the guard makes the
+// series mean something different depending on which endpoint produced it.
 //
-// The guard applies uniformly even at the write sites, where callers pass a
-// context.Background()-derived budget and it can never fire, so a future
-// caller passing a request context need not rediscover the rule.
-func reportRedisFailure(m *metrics.Prices, op, msg string, err error, logArgs ...any) {
-	if errors.Is(err, context.Canceled) {
+// ctx is the context the failed operation ran under. Reads run under the
+// request context, where a cancelled client is excluded; writes run under
+// cacheWriteContext, whose only possible error is Redis itself being slow, so
+// every write failure counts.
+func reportRedisFailure(ctx context.Context, m *metrics.Prices, op, msg string, err error, logArgs ...any) {
+	if isCallerCancellation(ctx, err) {
 		return
 	}
 	logger.Warn(msg, append(logArgs, "error", err)...)
 	if m != nil {
 		m.RedisErrors.WithLabelValues(op).Inc()
 	}
+}
+
+// cacheWriteTimeout bounds one cache SET on its own. A healthy SET is
+// sub-millisecond; anything approaching this is Redis degrading.
+const cacheWriteTimeout = 2 * time.Second
+
+// cacheWriteContext detaches a cache write from the fetch budget it arrives
+// on. That budget is shared with upstream, so by the time a fetched value is
+// ready to store it may already be spent — and a SET issued under a spent
+// context fails before it dials, throwing away a value we just paid upstream
+// for and reporting a healthy Redis as failing. The write gets a short budget
+// of its own instead.
+func cacheWriteContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), cacheWriteTimeout)
 }
 
 // JSONCache is the subset of *store.RedisStore the prices services depend
@@ -262,7 +277,7 @@ func (p *pricesService) loadCachedPrices(ctx context.Context, cacheKeys []string
 		// DeadlineExceeded deliberately still counts: this MGet is issued at
 		// t≈0 of the request, so a deadline here means Redis itself took the
 		// whole budget to answer one MGET — real degradation.
-		reportRedisFailure(p.pricesMetrics, "mget", "prices: redis MGet failed; bypassing cache", mgetErr)
+		reportRedisFailure(ctx, p.pricesMetrics, "mget", "prices: redis MGet failed; bypassing cache", mgetErr)
 		p.recordCacheOutcome(network, "miss", len(cacheKeys))
 		return hits
 	}
@@ -483,8 +498,10 @@ func (p *pricesService) cachePositive(ctx context.Context, cacheNet, canonical s
 		CurrentPrice:             entry.CurrentPrice,
 		PercentagePriceChange24h: entry.PercentagePriceChange24h,
 	}
-	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), value, p.cfg.CacheTTL); err != nil {
-		reportRedisFailure(p.pricesMetrics, "set", "prices: redis SET failed", err, "asset", canonical)
+	wctx, cancel := cacheWriteContext(ctx)
+	defer cancel()
+	if err := p.redis.SetJSON(wctx, cacheKey(cacheNet, canonical), value, p.cfg.CacheTTL); err != nil {
+		reportRedisFailure(wctx, p.pricesMetrics, "set", "prices: redis SET failed", err, "asset", canonical)
 	}
 }
 
@@ -495,8 +512,10 @@ func (p *pricesService) cacheNegative(ctx context.Context, cacheNet, canonical s
 	if p.redis == nil {
 		return
 	}
-	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), cachedPriceEntry{Unpriced: true}, negativeCacheTTL); err != nil {
-		reportRedisFailure(p.pricesMetrics, "set", "prices: redis SET (negative) failed", err, "asset", canonical)
+	wctx, cancel := cacheWriteContext(ctx)
+	defer cancel()
+	if err := p.redis.SetJSON(wctx, cacheKey(cacheNet, canonical), cachedPriceEntry{Unpriced: true}, negativeCacheTTL); err != nil {
+		reportRedisFailure(wctx, p.pricesMetrics, "set", "prices: redis SET (negative) failed", err, "asset", canonical)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -54,6 +55,7 @@ type fakeStellarExpert struct {
 	candleTo    map[string]time.Time
 	delay       time.Duration
 	assetDelay  time.Duration
+	candleDelay time.Duration
 	// honorFrom makes GetAssetCandles drop rows older than `from`, the way
 	// upstream does. Off by default because most tests want the fixture
 	// back verbatim; on for the tests that assert the requested WINDOW is
@@ -62,6 +64,7 @@ type fakeStellarExpert struct {
 	// beforeCandles, when set, runs at the top of GetAssetCandles. Tests use
 	// it as an ordering probe to observe what else is in flight.
 	beforeCandles   func()
+	beforeAsset     func()
 	concurrentInUse atomic.Int64
 	maxConcurrent   atomic.Int64
 }
@@ -83,6 +86,9 @@ func newFakeStellarExpert() *fakeStellarExpert {
 func (f *fakeStellarExpert) Name() string { return "fake-expert" }
 
 func (f *fakeStellarExpert) GetAsset(ctx context.Context, network, assetID string) (*types.StellarExpertAsset, error) {
+	if f.beforeAsset != nil {
+		f.beforeAsset()
+	}
 	in := f.concurrentInUse.Add(1)
 	for {
 		cur := f.maxConcurrent.Load()
@@ -131,9 +137,9 @@ func (f *fakeStellarExpert) GetAssetCandles(ctx context.Context, network, assetI
 	}
 	defer f.concurrentInUse.Add(-1)
 
-	if f.delay > 0 {
+	if d := f.delay + f.candleDelay; d > 0 {
 		select {
-		case <-time.After(f.delay):
+		case <-time.After(d):
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
@@ -650,6 +656,9 @@ func newFakeJSONCache() *fakeJSONCache {
 }
 
 func (f *fakeJSONCache) MGetJSON(ctx context.Context, keys []string, makeDest func() any) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("redis MGET: %w", err)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make(map[string]any, len(keys))
@@ -668,6 +677,9 @@ func (f *fakeJSONCache) MGetJSON(ctx context.Context, keys []string, makeDest fu
 }
 
 func (f *fakeJSONCache) SetJSON(ctx context.Context, key string, value any, ttl time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("redis SET %s: %w", key, err)
+	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -1064,7 +1076,7 @@ func TestPrices_CancelledMGetIsNotARedisFault(t *testing.T) {
 	t.Run("a cancelled caller is not counted", func(t *testing.T) {
 		t.Parallel()
 		pm := metrics.NewPrices(prometheus.NewRegistry())
-		svc := NewPricesService(newFakeStellarExpert(), &cancelCache{err: context.Canceled}, PricesServiceConfig{}, nil, pm)
+		svc := NewPricesService(newFakeStellarExpert(), &errCache{mgetErr: context.Canceled}, PricesServiceConfig{}, nil, pm)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -1077,7 +1089,7 @@ func TestPrices_CancelledMGetIsNotARedisFault(t *testing.T) {
 	t.Run("a genuine Redis fault still is", func(t *testing.T) {
 		t.Parallel()
 		pm := metrics.NewPrices(prometheus.NewRegistry())
-		svc := NewPricesService(newFakeStellarExpert(), &cancelCache{err: errors.New("connection refused")}, PricesServiceConfig{}, nil, pm)
+		svc := NewPricesService(newFakeStellarExpert(), &errCache{mgetErr: errors.New("connection refused")}, PricesServiceConfig{}, nil, pm)
 
 		_, _ = svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
 
@@ -1086,51 +1098,66 @@ func TestPrices_CancelledMGetIsNotARedisFault(t *testing.T) {
 	})
 }
 
-// cancelCache is a JSONCache whose MGet always fails with a chosen error.
-type cancelCache struct{ err error }
+// errCache is a JSONCache that fails the chosen operations with the chosen
+// errors and is otherwise an empty, accepting cache.
+type errCache struct{ mgetErr, setErr error }
 
-func (c *cancelCache) MGetJSON(context.Context, []string, func() any) (map[string]any, error) {
-	return nil, fmt.Errorf("redis MGET: %w", c.err)
-}
-func (c *cancelCache) SetJSON(context.Context, string, any, time.Duration) error { return nil }
-
-// failingSetCache succeeds on read and fails every write with a chosen error.
-type failingSetCache struct{ err error }
-
-func (c *failingSetCache) MGetJSON(context.Context, []string, func() any) (map[string]any, error) {
+func (c *errCache) MGetJSON(context.Context, []string, func() any) (map[string]any, error) {
+	if c.mgetErr != nil {
+		return nil, fmt.Errorf("redis MGET: %w", c.mgetErr)
+	}
 	return map[string]any{}, nil
 }
-func (c *failingSetCache) SetJSON(context.Context, string, any, time.Duration) error {
-	return fmt.Errorf("redis SET: %w", c.err)
+func (c *errCache) SetJSON(context.Context, string, any, time.Duration) error {
+	if c.setErr != nil {
+		return fmt.Errorf("redis SET: %w", c.setErr)
+	}
+	return nil
 }
 
-// The write sites had no cancellation guard until reportRedisFailure gave all
-// seven one owner. Uniformity is only safe if a GENUINE write failure is still
-// counted — the whole point of the series is that a degraded Redis shows up.
-// Nothing covered the write path before this.
-func TestPrices_FailedSetIsCountedUnlessTheCallerCancelled(t *testing.T) {
+// A cache write failing for a reason of its own is Redis degrading and must
+// reach the operator through RedisErrors{op="set"}.
+func TestPrices_FailedSetIsCounted(t *testing.T) {
 	t.Parallel()
+	pm := metrics.NewPrices(prometheus.NewRegistry())
+	expert := newFakeStellarExpert()
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
+	svc := NewPricesService(expert, &errCache{setErr: errors.New("READONLY replica")}, PricesServiceConfig{}, nil, pm)
 
-	newSvc := func(pm *metrics.Prices, cacheErr error) types.PricesService {
-		expert := newFakeStellarExpert()
-		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
-		return NewPricesService(expert, &failingSetCache{err: cacheErr}, PricesServiceConfig{}, nil, pm)
-	}
+	_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err, "a cache write failure must not fail the request")
+	assert.Equal(t, float64(1), testutil.ToFloat64(pm.RedisErrors.WithLabelValues("set")),
+		"a degraded Redis must still reach the operator")
+}
 
-	t.Run("a real write failure is counted", func(t *testing.T) {
-		t.Parallel()
-		pm := metrics.NewPrices(prometheus.NewRegistry())
-		_, err := newSvc(pm, errors.New("READONLY replica")).GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
-		require.NoError(t, err, "a cache write failure must not fail the request")
-		assert.Equal(t, float64(1), testutil.ToFloat64(pm.RedisErrors.WithLabelValues("set")),
-			"a degraded Redis must still reach the operator")
-	})
+// The miss-fetch budget is shared with upstream. When /candles consumes all
+// of it, the price /asset already returned is still worth caching, and a SET
+// that fails only because that budget is spent is not Redis degrading. The
+// first response racing its own budget is not asserted; the write landing and
+// the next request being a hit are.
+func TestPrices_CacheWriteOutlivesTheFetchBudget(t *testing.T) {
+	t.Parallel()
+	pm := metrics.NewPrices(prometheus.NewRegistry())
+	cache := newFakeJSONCache()
+	expert := newFakeStellarExpert()
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16})
+	expert.candleDelay = time.Minute // /candles hangs; /asset is healthy
+	svc := NewPricesService(expert, cache, PricesServiceConfig{MissFetchTimeout: 50 * time.Millisecond}, nil, pm)
 
-	t.Run("a cancelled caller is not", func(t *testing.T) {
-		t.Parallel()
-		pm := metrics.NewPrices(prometheus.NewRegistry())
-		_, _ = newSvc(pm, context.Canceled).GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
-		assert.Equal(t, float64(0), testutil.ToFloat64(pm.RedisErrors.WithLabelValues("set")),
-			"a client closing the tab is not Redis degrading, on writes as on reads")
-	})
+	_, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+
+	key := cacheKey(strings.ToLower(types.PUBLIC), "XLM")
+	require.Eventually(t, func() bool {
+		cached, _ := cache.MGetJSON(context.Background(), []string{key}, func() any { return new(cachedPriceEntry) })
+		return cached[key] != nil
+	}, 2*time.Second, 10*time.Millisecond, "a price we paid upstream for must be cached even after the fetch budget is spent")
+	assert.Equal(t, float64(0), testutil.ToFloat64(pm.RedisErrors.WithLabelValues("set")),
+		"our own spent budget is not a Redis fault")
+
+	res, err := svc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
+	require.NoError(t, err)
+	require.NotNil(t, res["XLM"])
+	assert.Equal(t, "0.16", res["XLM"].CurrentPrice)
+	assert.Equal(t, 1, expert.CallCount("XLM"), "the second request is a cache hit, not a second upstream fetch")
 }

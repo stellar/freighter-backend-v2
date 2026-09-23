@@ -465,8 +465,10 @@ func TestPriceHistory_VolumeVerdictNullNotCountedForClientCancellation(t *testin
 	pm := metrics.NewPrices(reg)
 	svc := newHistoryService(expert, cache, spotPrices("0.16"), PriceHistoryServiceConfig{}, pm)
 
+	// The series read succeeds, then the client leaves while /asset hangs.
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // the client is already gone
+	defer cancel()
+	expert.beforeAsset = cancel
 
 	got, err := svc.GetPriceHistory(ctx, "XLM", types.PUBLIC, "1D")
 	require.NoError(t, err, "the series was cached, so the request still completes")

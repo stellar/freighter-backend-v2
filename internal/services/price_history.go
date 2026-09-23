@@ -369,7 +369,7 @@ func (s *priceHistoryService) loadCachedSeries(ctx context.Context, key string) 
 		// surfaces that verbatim. Counting it would move a Redis-health
 		// signal with client behaviour — the same line isCallerCancellation
 		// and VolumeVerdictNull draw. The cache is simply bypassed either way.
-		reportRedisFailure(s.pricesMetrics, "mget", "price-history: redis MGet failed; bypassing cache", err)
+		reportRedisFailure(ctx, s.pricesMetrics, "mget", "price-history: redis MGet failed; bypassing cache", err)
 		return series{}, false
 	}
 	entry, _ := cached[key].(*cachedSeries)
@@ -498,8 +498,10 @@ func (s *priceHistoryService) cacheSeries(ctx context.Context, key string, value
 	if s.redis == nil {
 		return
 	}
-	if err := s.redis.SetJSON(ctx, key, cachedSeries{Points: value.points, To: value.to.Unix()}, ttl); err != nil {
-		reportRedisFailure(s.pricesMetrics, "set", "price-history: redis SET failed", err, "key", key)
+	wctx, cancel := cacheWriteContext(ctx)
+	defer cancel()
+	if err := s.redis.SetJSON(wctx, key, cachedSeries{Points: value.points, To: value.to.Unix()}, ttl); err != nil {
+		reportRedisFailure(wctx, s.pricesMetrics, "set", "price-history: redis SET failed", err, "key", key)
 	}
 }
 
@@ -555,7 +557,7 @@ func (s *priceHistoryService) getAssetMeta(ctx context.Context, network, cacheNe
 	if s.redis != nil {
 		cached, err := s.redis.MGetJSON(ctx, []string{key}, func() any { return new(cachedAssetMeta) })
 		if err != nil {
-			reportRedisFailure(s.pricesMetrics, "mget", "price-history: redis MGet failed; bypassing asset cache", err)
+			reportRedisFailure(ctx, s.pricesMetrics, "mget", "price-history: redis MGet failed; bypassing asset cache", err)
 		} else if entry, _ := cached[key].(*cachedAssetMeta); entry != nil {
 			if entry.NotFound {
 				// Counted apart from "hit" for the same reason the prices
@@ -619,8 +621,10 @@ func (s *priceHistoryService) cacheAssetMeta(ctx context.Context, key string, va
 	if s.redis == nil {
 		return
 	}
-	if err := s.redis.SetJSON(ctx, key, value, ttl); err != nil {
-		reportRedisFailure(s.pricesMetrics, "set", "price-history: redis SET failed", err, "key", key)
+	wctx, cancel := cacheWriteContext(ctx)
+	defer cancel()
+	if err := s.redis.SetJSON(wctx, key, value, ttl); err != nil {
+		reportRedisFailure(wctx, s.pricesMetrics, "set", "price-history: redis SET failed", err, "key", key)
 	}
 }
 
