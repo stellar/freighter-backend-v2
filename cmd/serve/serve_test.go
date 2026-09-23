@@ -524,6 +524,6 @@ func TestServeCmd_RejectsDurationSecondsThatOverflow(t *testing.T) {
 			"--database-url", "postgres://localhost/test",
 		)
 		require.NoError(t, err, "the boundary is the largest value that survives the multiply")
-		assert.Equal(t, int(maxDurationSeconds), serveCmd.Cfg.PriceHistoryConfig.CacheTTL1DSeconds)
+		assert.EqualValues(t, maxDurationSeconds, serveCmd.Cfg.PriceHistoryConfig.CacheTTL1DSeconds)
 	})
 }

@@ -129,8 +129,10 @@ func reportRedisFailure(ctx context.Context, m *metrics.Prices, op, msg string, 
 	}
 }
 
-// cacheWriteTimeout bounds one cache SET on its own. A healthy SET is
-// sub-millisecond; anything approaching this is Redis degrading.
+// cacheWriteTimeout bounds pool acquisition, dial and retry back-off for one
+// cache SET; socket I/O is bounded by the client's own read/write timeouts.
+// A healthy SET is sub-millisecond; anything approaching this is Redis
+// degrading.
 const cacheWriteTimeout = 2 * time.Second
 
 // cacheWriteContext detaches a cache write from the fetch budget it arrives

@@ -64,7 +64,6 @@ type fakeStellarExpert struct {
 	// beforeCandles, when set, runs at the top of GetAssetCandles. Tests use
 	// it as an ordering probe to observe what else is in flight.
 	beforeCandles   func()
-	beforeAsset     func()
 	concurrentInUse atomic.Int64
 	maxConcurrent   atomic.Int64
 }
@@ -86,9 +85,6 @@ func newFakeStellarExpert() *fakeStellarExpert {
 func (f *fakeStellarExpert) Name() string { return "fake-expert" }
 
 func (f *fakeStellarExpert) GetAsset(ctx context.Context, network, assetID string) (*types.StellarExpertAsset, error) {
-	if f.beforeAsset != nil {
-		f.beforeAsset()
-	}
 	in := f.concurrentInUse.Add(1)
 	for {
 		cur := f.maxConcurrent.Load()
@@ -656,9 +652,6 @@ func newFakeJSONCache() *fakeJSONCache {
 }
 
 func (f *fakeJSONCache) MGetJSON(ctx context.Context, keys []string, makeDest func() any) (map[string]any, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("redis MGET: %w", err)
-	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make(map[string]any, len(keys))
