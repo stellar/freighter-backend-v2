@@ -632,8 +632,9 @@ func (s *priceHistoryService) cacheAssetMeta(ctx context.Context, key string, va
 // "did the check run?", which is the only reading under which all three
 // values are truthful:
 //
-//	null   the check could not run — no usable volume signal exists
-//	false  the check ran and this token passed
+//	null   the check could not run — no asset payload, no conversion, or
+//	       no volume reading while the guard is on
+//	false  the check ran and this token passed, or the guard is off
 //	true   the check ran and this token failed; show the banner
 //
 // So an unavailable asset payload is null and NEVER false: defaulting to
