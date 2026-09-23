@@ -26,6 +26,13 @@ type ServeCmd struct {
 	Cfg *config.Config
 }
 
+// secondsFlag is one integer-seconds flag that becomes a time.Duration.
+type secondsFlag struct {
+	name   string
+	value  int
+	zeroOK bool
+}
+
 func (s *ServeCmd) Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "serve",
@@ -47,54 +54,41 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.PricesConfig.MaxTokensPerRequest; n <= 0 {
 				return fmt.Errorf("--max-tokens-per-request=%d must be positive", n)
 			}
-			if n := s.Cfg.PricesConfig.PriceFetchTimeoutSeconds; n < 0 {
-				return fmt.Errorf("--price-fetch-timeout-seconds=%d must be >= 0", n)
+			// Every integer-seconds flag that internal/api/serve.go multiplies
+			// by time.Second, bounded on both sides in one place. Past
+			// maxDurationSeconds the multiply wraps and the override is
+			// silently dropped; a negative value is either silently replaced
+			// by a default or, near the bound, wraps to a positive duration
+			// of centuries. zeroOK marks the two prices flags where 0 means
+			// "service default"; a zero history TTL is rejected because it
+			// would silently disable caching against a paid upstream.
+			// TestServeCmd_RejectsDurationSecondsThatOverflow derives its
+			// list from the registered flags, so a new -seconds flag missing
+			// here fails that test.
+			for _, f := range []secondsFlag{
+				{"price-cache-ttl-seconds", s.Cfg.PricesConfig.PriceCacheTTLSeconds, true},
+				{"price-fetch-timeout-seconds", s.Cfg.PricesConfig.PriceFetchTimeoutSeconds, true},
+				{"price-history-cache-ttl-1h-seconds", s.Cfg.PriceHistoryConfig.CacheTTL1HSeconds, false},
+				{"price-history-cache-ttl-1d-seconds", s.Cfg.PriceHistoryConfig.CacheTTL1DSeconds, false},
+				{"price-history-cache-ttl-1w-seconds", s.Cfg.PriceHistoryConfig.CacheTTL1WSeconds, false},
+				{"price-history-cache-ttl-1m-seconds", s.Cfg.PriceHistoryConfig.CacheTTL1MSeconds, false},
+				{"price-history-cache-ttl-1y-seconds", s.Cfg.PriceHistoryConfig.CacheTTL1YSeconds, false},
+				{"price-history-cache-ttl-all-seconds", s.Cfg.PriceHistoryConfig.CacheTTLALLSeconds, false},
+				{"price-history-fetch-timeout-seconds", s.Cfg.PriceHistoryConfig.FetchTimeoutSeconds, false},
+				{"token-stats-cache-ttl-seconds", s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds, false},
+			} {
+				switch {
+				case f.zeroOK && f.value < 0:
+					return fmt.Errorf("--%s=%d must be >= 0", f.name, f.value)
+				case !f.zeroOK && f.value <= 0:
+					return fmt.Errorf("--%s=%d must be positive", f.name, f.value)
+				case int64(f.value) > maxDurationSeconds:
+					return fmt.Errorf("--%s=%d overflows when converted to a duration; must be <= %d", f.name, f.value, maxDurationSeconds)
+				}
 			}
-			// Price-history config: TTLs and budgets must be positive (a zero
-			// TTL would silently disable caching against a paid upstream);
-			// the volume threshold and conversion divisor are magnitudes
+			// The volume threshold and conversion divisor are magnitudes
 			// where 0 is meaningful ("guard disabled" / "conversion not
 			// enabled") but negatives are operator error.
-			for flag, v := range map[string]int{
-				"price-history-cache-ttl-1h-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1HSeconds,
-				"price-history-cache-ttl-1d-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1DSeconds,
-				"price-history-cache-ttl-1w-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1WSeconds,
-				"price-history-cache-ttl-1m-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1MSeconds,
-				"price-history-cache-ttl-1y-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1YSeconds,
-				"price-history-cache-ttl-all-seconds": s.Cfg.PriceHistoryConfig.CacheTTLALLSeconds,
-				"price-history-fetch-timeout-seconds": s.Cfg.PriceHistoryConfig.FetchTimeoutSeconds,
-				"token-stats-cache-ttl-seconds":       s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds,
-			} {
-				if v <= 0 {
-					return fmt.Errorf("--%s=%d must be positive", flag, v)
-				}
-			}
-			// EVERY flag that api/serve.go later multiplies by time.Second,
-			// not just the positive-only ones above — the two prices flags
-			// have the weakest validation of the set (price-cache-ttl-seconds
-			// has none at all) and are exactly as able to overflow. Past this
-			// bound the multiply wraps: MaxInt64 seconds becomes -1s, after
-			// which a TTL override is silently ignored and a timeout silently
-			// falls back to its default. Same class as the NaN/Inf check
-			// below — validation that accepts a value it cannot apply is not
-			// fail-fast. Keep this list in step with the conversions in
-			// api/serve.go.
-			for flag, v := range map[string]int{
-				"price-cache-ttl-seconds":             s.Cfg.PricesConfig.PriceCacheTTLSeconds,
-				"price-fetch-timeout-seconds":         s.Cfg.PricesConfig.PriceFetchTimeoutSeconds,
-				"price-history-cache-ttl-1h-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1HSeconds,
-				"price-history-cache-ttl-1d-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1DSeconds,
-				"price-history-cache-ttl-1w-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1WSeconds,
-				"price-history-cache-ttl-1m-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1MSeconds,
-				"price-history-cache-ttl-1y-seconds":  s.Cfg.PriceHistoryConfig.CacheTTL1YSeconds,
-				"price-history-cache-ttl-all-seconds": s.Cfg.PriceHistoryConfig.CacheTTLALLSeconds,
-				"price-history-fetch-timeout-seconds": s.Cfg.PriceHistoryConfig.FetchTimeoutSeconds,
-				"token-stats-cache-ttl-seconds":       s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds,
-			} {
-				if int64(v) > maxDurationSeconds {
-					return fmt.Errorf("--%s=%d overflows when converted to a duration; must be <= %d", flag, v, maxDurationSeconds)
-				}
-			}
 			// NaN and ±Inf parse fine as float flags and satisfy NO ordered
 			// comparison, so `< 0` lets both through. They are not academic:
 			// a NaN divisor makes every volume comparison false and reports

@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -468,61 +471,59 @@ func TestServeCmd_RejectsNonFiniteVolumeFlags(t *testing.T) {
 	}
 }
 
-// Every flag api/serve.go multiplies by time.Second — including the two
-// prices flags, which have the weakest validation of the set and were missed
-// by the first version of this check. Past maxDurationSeconds the multiply
-// wraps (MaxInt64 seconds becomes -1s), after which a TTL override is
-// silently ignored and a timeout silently falls back to its default.
+// execServe parses args and runs PersistentPreRunE with RunE stubbed out,
+// returning the command so tests can assert on the populated config.
+func execServe(t *testing.T, args ...string) (*ServeCmd, error) {
+	t.Helper()
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs(args)
+	return serveCmd, cmd.Execute()
+}
+
+// Every int flag named *-seconds is multiplied by time.Second in
+// internal/api/serve.go, so each needs both bounds: past maxDurationSeconds
+// the multiply wraps and the override is silently dropped, and a negative
+// value is either silently replaced by a default or wraps to a positive
+// duration of centuries. The list is derived from the registered flags, not
+// written out, so a new -seconds flag missing from the serve.go table fails
+// here the moment it exists.
 func TestServeCmd_RejectsDurationSecondsThatOverflow(t *testing.T) {
 	t.Parallel()
 
-	durationFlags := []string{
-		"--price-cache-ttl-seconds",
-		"--price-fetch-timeout-seconds",
-		"--price-history-cache-ttl-1h-seconds",
-		"--price-history-cache-ttl-1d-seconds",
-		"--price-history-cache-ttl-1w-seconds",
-		"--price-history-cache-ttl-1m-seconds",
-		"--price-history-cache-ttl-1y-seconds",
-		"--price-history-cache-ttl-all-seconds",
-		"--price-history-fetch-timeout-seconds",
-		"--token-stats-cache-ttl-seconds",
-	}
-
-	// Executing the command is what runs PersistentPreRunE, where the check
-	// lives. Setting the flag value alone only populates the config struct and
-	// asserts nothing — the first version of this test did that, and a
-	// tightened bound would have passed it silently.
-	exec := func(t *testing.T, args ...string) error {
-		t.Helper()
-		cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
-		cmd.RunE = func(*cobra.Command, []string) error { return nil }
-		cmd.SetOut(io.Discard)
-		cmd.SetErr(io.Discard)
-		cmd.SetArgs(args)
-		return cmd.Execute()
-	}
+	var durationFlags []string
+	(&ServeCmd{Cfg: &config.Config{}}).Command().Flags().VisitAll(func(f *pflag.Flag) {
+		if strings.HasSuffix(f.Name, "-seconds") && f.Value.Type() == "int" {
+			durationFlags = append(durationFlags, f.Name)
+		}
+	})
+	require.NotEmpty(t, durationFlags)
 
 	for _, flag := range durationFlags {
-		t.Run("rejects"+flag, func(t *testing.T) {
+		t.Run("rejects overflow "+flag, func(t *testing.T) {
 			t.Parallel()
-			err := exec(t, flag, fmt.Sprintf("%d", int64(math.MaxInt64)))
+			_, err := execServe(t, "--"+flag, strconv.FormatInt(math.MaxInt64, 10))
 			require.Error(t, err, "a value that cannot become a duration must not boot")
 			assert.Contains(t, err.Error(), "overflows when converted to a duration")
 		})
+		t.Run("rejects negative "+flag, func(t *testing.T) {
+			t.Parallel()
+			_, err := execServe(t, "--"+flag, "-1")
+			require.Error(t, err, "a negative duration must not boot")
+			assert.Contains(t, err.Error(), fmt.Sprintf("--%s=-1 must be", flag))
+		})
 	}
 
-	// The boundary is the largest usable value and must NOT be rejected by
-	// this check, or a future tightening silently drops the longest
-	// legitimate TTL. Asserted against the overflow error specifically: a
-	// bare NoError would couple this to every other required flag, and an
-	// unrelated failure would then read as a bound regression.
 	t.Run("accepts the boundary", func(t *testing.T) {
 		t.Parallel()
-		err := exec(t, "--price-history-cache-ttl-1d-seconds", fmt.Sprintf("%d", maxDurationSeconds))
-		if err != nil {
-			assert.NotContains(t, err.Error(), "overflows when converted to a duration",
-				"the boundary is the largest value that survives the multiply and must be accepted")
-		}
+		serveCmd, err := execServe(t,
+			"--price-history-cache-ttl-1d-seconds", strconv.FormatInt(maxDurationSeconds, 10),
+			"--database-url", "postgres://localhost/test",
+		)
+		require.NoError(t, err, "the boundary is the largest value that survives the multiply")
+		assert.Equal(t, int(maxDurationSeconds), serveCmd.Cfg.PriceHistoryConfig.CacheTTL1DSeconds)
 	})
 }
