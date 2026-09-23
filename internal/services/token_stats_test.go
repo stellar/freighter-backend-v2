@@ -34,8 +34,9 @@ func assetWithStats(price float64, supply string, decimals *int, funded *int64) 
 	return asset
 }
 
-func intPtr(v int) *int       { return &v }
-func int64Ptr(v int64) *int64 { return &v }
+func intPtr(v int) *int             { return &v }
+func int64Ptr(v int64) *int64       { return &v }
+func float64Ptr(v float64) *float64 { return &v }
 
 // The A.2 XLM fixture: supply is a 19-digit raw integer, decimals absent
 // (default 7), holders = trustlines.funded.
@@ -259,7 +260,9 @@ func TestTokenStats_SharesCachedAssetPayloadWithHistory(t *testing.T) {
 // block still serves. No real token exceeds ~18 decimals; Stellar's default
 // is 7.
 func TestTokenStats_AbsurdDecimalsOmitsSupplyWithoutAllocating(t *testing.T) {
-	t.Parallel()
+	// NOT parallel: the assertion below reads process-global runtime.MemStats,
+	// so any other test allocating between the two snapshots inflates the
+	// delta and fails this nondeterministically.
 
 	expert := newFakeStellarExpert()
 	hostile := 2_000_000_000 // 2e9: a naive strings.Repeat would allocate ~2 GB

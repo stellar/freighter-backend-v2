@@ -65,7 +65,7 @@ func TestPriceHistory_HappyPath1D(t *testing.T) {
 
 	now := time.Now().UTC()
 	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.160259, Volume7d: xlmRawVolume7d})
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.160259, Volume7d: float64Ptr(xlmRawVolume7d)})
 	expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.1589, 0.1592, 0.1601))
 
 	svc := newHistoryService(expert, nil, spotPrices("0.160259"), PriceHistoryServiceConfig{}, nil)
@@ -100,7 +100,7 @@ func TestPriceHistory_ResolutionDerivedWhenCoarsened(t *testing.T) {
 
 	now := time.Now().UTC()
 	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 	// 1Y requests 259200 (3d), but the fake returns 2w buckets.
 	expert.SetCandles("XLM", historyCandles(now, 360*24*time.Hour, 1209600, 0.10, 0.11, 0.12))
 
@@ -118,7 +118,7 @@ func TestPriceHistory_ResolutionFallsBackToRequestedOnSinglePoint(t *testing.T) 
 
 	now := time.Now().UTC()
 	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 	expert.SetCandles("XLM", historyCandles(now, 2*time.Hour, 900, 0.159))
 
 	svc := newHistoryService(expert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
@@ -137,7 +137,7 @@ func TestPriceHistory_PricedContractToken(t *testing.T) {
 
 	now := time.Now().UTC()
 	expert := newFakeStellarExpert()
-	expert.Set(solvBTCContract, &types.StellarExpertAsset{Price: 66683, Volume7d: xlmRawVolume7d})
+	expert.Set(solvBTCContract, &types.StellarExpertAsset{Price: 66683, Volume7d: float64Ptr(xlmRawVolume7d)})
 	expert.SetCandles(solvBTCContract, historyCandles(now, 24*time.Hour, 900, 66000, 66500))
 
 	svc := newHistoryService(expert, nil, spotPrices("66683"), PriceHistoryServiceConfig{}, nil)
@@ -218,7 +218,7 @@ func TestPriceHistory_SeriesCachedAtPerRangeTTL(t *testing.T) {
 
 	now := time.Now().UTC()
 	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 	expert.SetCandles("XLM", historyCandles(now, 6*24*time.Hour, 3600, 0.15, 0.16))
 	cache := newFakeJSONCache()
 
@@ -240,7 +240,7 @@ func TestPriceHistory_D8EqualityOnIdenticalInputs(t *testing.T) {
 
 	now := time.Now().UTC()
 	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.160259, Volume7d: xlmRawVolume7d})
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.160259, Volume7d: float64Ptr(xlmRawVolume7d)})
 	expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.1589, 0.1596, 0.1601))
 
 	pricesSvc := NewPricesService(expert, nil, PricesServiceConfig{}, nil, nil)
@@ -269,7 +269,7 @@ func TestPriceHistory_CoverageGuard(t *testing.T) {
 	t.Run("1Y with 4 months of data → null change, full series", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
-		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 		expert.SetCandles("XLM", historyCandles(now, 120*24*time.Hour, 259200, 0.10, 0.12, 0.14))
 
 		svc := newHistoryService(expert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
@@ -282,7 +282,7 @@ func TestPriceHistory_CoverageGuard(t *testing.T) {
 	t.Run("1Y with ~360d of data → change present", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
-		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 		expert.SetCandles("XLM", historyCandles(now, 360*24*time.Hour, 259200, 0.10, 0.12, 0.14))
 
 		svc := newHistoryService(expert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
@@ -294,7 +294,7 @@ func TestPriceHistory_CoverageGuard(t *testing.T) {
 	t.Run("ALL is exempt from the guard", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
-		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 		expert.SetCandles("XLM", historyCandles(now, 60*24*time.Hour, 1209600, 0.10, 0.12))
 
 		svc := newHistoryService(expert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
@@ -306,7 +306,7 @@ func TestPriceHistory_CoverageGuard(t *testing.T) {
 	t.Run("1D uses the 23-25h guard verbatim", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
-		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 		// 22h coverage is >90% of 24h but outside the [23h, 25h] band the
 		// prices path enforces — the 1D guard survives verbatim so the two
 		// surfaces can never disagree on when the number exists.
@@ -327,7 +327,7 @@ func TestPriceHistory_NoSpotNullChange(t *testing.T) {
 
 	now := time.Now().UTC()
 	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 	expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
 
 	svc := newHistoryService(expert, nil, &utils.MockPricesService{}, PriceHistoryServiceConfig{}, nil)
@@ -346,7 +346,7 @@ func TestPriceHistory_VolumeVerdict(t *testing.T) {
 	t.Run("captured real XLM payload reads false with conversion enabled", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
-		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 		expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
 
 		svc := newHistoryService(expert, nil, spotPrices("0.16"), enabled, nil)
@@ -359,7 +359,7 @@ func TestPriceHistory_VolumeVerdict(t *testing.T) {
 	t.Run("below-threshold token warns and touches nothing else", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
-		expert.Set("THIN-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 0.01, Volume7d: lowRawVolume7d})
+		expert.Set("THIN-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 0.01, Volume7d: float64Ptr(lowRawVolume7d)})
 		expert.SetCandles("THIN-"+testIssuer+"-1", historyCandles(now, 24*time.Hour, 900, 0.009, 0.01))
 
 		svc := newHistoryService(expert, nil, spotPrices("0.01"), enabled, nil)
@@ -377,7 +377,7 @@ func TestPriceHistory_VolumeVerdict(t *testing.T) {
 	t.Run("verdict is null while the conversion is unconfirmed", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
-		expert.Set("THIN-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 0.01, Volume7d: lowRawVolume7d})
+		expert.Set("THIN-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 0.01, Volume7d: float64Ptr(lowRawVolume7d)})
 		expert.SetCandles("THIN-"+testIssuer+"-1", historyCandles(now, 24*time.Hour, 900, 0.009, 0.01))
 
 		// Default config: divisor 0 → no conversion → the check cannot run.
@@ -392,7 +392,7 @@ func TestPriceHistory_VolumeVerdict(t *testing.T) {
 	t.Run("the unconfirmed-conversion null does not count as upstream degradation", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
-		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 		expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
 
 		reg := prometheus.NewRegistry()
@@ -410,7 +410,7 @@ func TestPriceHistory_VolumeVerdict(t *testing.T) {
 	t.Run("threshold 0 disables the guard and stays false", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
-		expert.Set("THIN-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 0.01, Volume7d: lowRawVolume7d})
+		expert.Set("THIN-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 0.01, Volume7d: float64Ptr(lowRawVolume7d)})
 		expert.SetCandles("THIN-"+testIssuer+"-1", historyCandles(now, 24*time.Hour, 900, 0.009, 0.01))
 
 		svc := newHistoryService(expert, nil, spotPrices("0.01"), PriceHistoryServiceConfig{MinVolume7dUSD: 0, Volume7dConversionDivisor: stroopDivisor}, nil)
@@ -458,7 +458,7 @@ func TestPriceHistory_VolumeVerdictNullNotCountedForClientCancellation(t *testin
 	}, time.Hour))
 
 	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 	expert.assetDelay = time.Minute // the meta wait cannot finish before the client leaves
 
 	reg := prometheus.NewRegistry()
@@ -490,7 +490,7 @@ func TestPriceHistory_ALLRangeFrom(t *testing.T) {
 		asset *types.StellarExpertAsset
 		err   error
 	}{
-		{name: "asset payload resolves", asset: &types.StellarExpertAsset{Price: 1.0, Volume7d: xlmRawVolume7d}},
+		{name: "asset payload resolves", asset: &types.StellarExpertAsset{Price: 1.0, Volume7d: float64Ptr(xlmRawVolume7d)}},
 		{name: "asset call fails outright", err: errors.New("asset endpoint boom")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -522,7 +522,7 @@ func TestPriceHistory_ALLRangeFrom(t *testing.T) {
 	t.Run("a hanging asset call does not delay the candles call", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
-		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 		expert.assetDelay = time.Minute // /asset hangs; candles are healthy
 		expert.delay = 50 * time.Millisecond
 		expert.SetCandles("XLM", historyCandles(time.Now().UTC(), 60*24*time.Hour, 1209600, 0.15, 0.16))
@@ -567,7 +567,7 @@ func TestPriceHistory_UpstreamWindowEndsAtNow(t *testing.T) {
 		t.Run(tc.historyRange, func(t *testing.T) {
 			t.Parallel()
 			expert := newFakeStellarExpert()
-			expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+			expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 			expert.SetCandles("XLM", historyCandles(now, tc.oldestAge, tc.stepSec, 0.15, 0.16))
 
 			svc := newHistoryService(expert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
@@ -590,7 +590,7 @@ func TestPriceHistory_InProgressFinalBucketRoundTrips(t *testing.T) {
 
 	now := time.Now().UTC()
 	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.17, Volume7d: xlmRawVolume7d})
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.17, Volume7d: float64Ptr(xlmRawVolume7d)})
 	// Three 15m buckets ending with one that opened after the last completed
 	// boundary — i.e. the bucket now sits inside.
 	inProgress := now.Truncate(15 * time.Minute)
@@ -627,7 +627,7 @@ func TestPriceHistory_SeriesAndSpotFetchConcurrently(t *testing.T) {
 	var overlapped atomic.Bool
 
 	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 	expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
 	// The probe is deliberately one-sided: the candles call announces itself
 	// and then waits, still in flight, to see whether the spot call starts.
@@ -699,7 +699,7 @@ func TestPriceHistory_CacheOutcomeMetrics(t *testing.T) {
 
 	now := time.Now().UTC()
 	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 	expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
 	cache := newFakeJSONCache()
 
@@ -728,7 +728,7 @@ func TestPriceHistory_ALLResolvesAssetMetaExactlyOnce(t *testing.T) {
 
 	now := time.Now().UTC()
 	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 	expert.SetCandles("XLM", historyCandles(now, 60*24*time.Hour, 1209600, 0.15, 0.16))
 
 	reg := prometheus.NewRegistry()
@@ -797,7 +797,7 @@ func TestPriceHistory_WindowedFromIsBucketAligned(t *testing.T) {
 
 			spec := priceHistoryRanges[r]
 			expert := newFakeStellarExpert()
-			expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+			expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 			svc := newHistoryService(expert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
 
 			_, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, r)
@@ -823,13 +823,13 @@ func TestPriceHistory_1DWindowMatchesPricesPath(t *testing.T) {
 	// prices service, which issues its own candles call and would otherwise
 	// overwrite the recorded window before it is read.
 	pricesExpert := newFakeStellarExpert()
-	pricesExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	pricesExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 	pricesSvc := NewPricesService(pricesExpert, nil, PricesServiceConfig{}, nil, nil)
 	_, err := pricesSvc.GetPrices(context.Background(), []string{"XLM"}, types.PUBLIC)
 	require.NoError(t, err)
 
 	historyExpert := newFakeStellarExpert()
-	historyExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	historyExpert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 	historySvc := newHistoryService(historyExpert, nil, spotPrices("0.16"), PriceHistoryServiceConfig{}, nil)
 	_, err = historySvc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, oneDay)
 	require.NoError(t, err)
@@ -848,7 +848,7 @@ func TestPriceHistory_D8EqualityWhenUpstreamHonorsTheWindow(t *testing.T) {
 
 	expert := newFakeStellarExpert()
 	expert.HonorFrom()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.160259, Volume7d: xlmRawVolume7d})
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.160259, Volume7d: float64Ptr(xlmRawVolume7d)})
 	// The oldest bucket opens exactly on the prices path's `from`. An
 	// unaligned history window starts one bucket later and anchors on
 	// 0.1596 instead of 0.1589.
@@ -890,7 +890,7 @@ func TestPriceHistory_PreToCacheEntryIsRefetchedNotTrusted(t *testing.T) {
 
 			now := time.Now().UTC()
 			expert := newFakeStellarExpert()
-			expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+			expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 			expert.SetCandles("XLM", historyCandles(now, 26*time.Hour, 900, 0.15, 0.16))
 
 			cache := newFakeJSONCache()
@@ -973,7 +973,7 @@ func TestPriceHistory_VolumeVerdictNullCountedWhenOurOwnBudgetExpires(t *testing
 	}, time.Hour))
 
 	expert := newFakeStellarExpert()
-	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: xlmRawVolume7d})
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
 	expert.assetDelay = time.Minute // upstream is hanging
 
 	reg := prometheus.NewRegistry()
@@ -1064,4 +1064,59 @@ func TestPriceHistory_NotFoundEmptySeriesObeysTheSameTTLCap(t *testing.T) {
 				"a not-found empty series must cap at the range TTL just like a zero-point one")
 		})
 	}
+}
+
+// The verdict is a tri-state, and "upstream reported no volume" is the
+// unknown arm. Treating a missing reading as a real 0 makes the comparison
+// 0 < threshold, i.e. lowVolume:true — the service accusing a token of
+// manipulation on data it never received. The conversion is enabled here, so
+// a nil would be indistinguishable from the divisor-disabled default if the
+// distinction were not real.
+func TestPriceHistory_AbsentVolumeYieldsUnknownNotLowVolume(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	enabled := PriceHistoryServiceConfig{MinVolume7dUSD: 7000, Volume7dConversionDivisor: stroopDivisor}
+
+	t.Run("absent volume is unknown", func(t *testing.T) {
+		t.Parallel()
+		expert := newFakeStellarExpert()
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16}) // no Volume7d
+		expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
+		svc := newHistoryService(expert, nil, spotPrices("0.16"), enabled, nil)
+
+		got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
+		require.NoError(t, err)
+		assert.Nil(t, got.LowVolume,
+			"no volume reading means unknown — never a manipulation warning")
+	})
+
+	t.Run("an explicit zero is still a real low-volume reading", func(t *testing.T) {
+		t.Parallel()
+		expert := newFakeStellarExpert()
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(0)})
+		expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
+		svc := newHistoryService(expert, nil, spotPrices("0.16"), enabled, nil)
+
+		got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
+		require.NoError(t, err)
+		require.NotNil(t, got.LowVolume, "a reported zero is data, not absence")
+		assert.True(t, *got.LowVolume)
+	})
+
+	t.Run("presence survives the cache round-trip", func(t *testing.T) {
+		t.Parallel()
+		expert := newFakeStellarExpert()
+		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16}) // no Volume7d
+		expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.15, 0.16))
+		cache := newFakeJSONCache()
+		svc := newHistoryService(expert, cache, spotPrices("0.16"), enabled, nil)
+
+		_, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
+		require.NoError(t, err)
+		got, err := svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
+		require.NoError(t, err)
+		assert.Nil(t, got.LowVolume,
+			"the cached entry must not turn absence back into a zero")
+	})
 }

@@ -437,3 +437,32 @@ func TestServeCmd_PriceHistoryAcceptsValidConfig(t *testing.T) {
 	assert.Equal(t, float64(0), serveCmd.Cfg.PriceHistoryConfig.MinVolume7dUSD)
 	assert.Equal(t, float64(10000000), serveCmd.Cfg.PriceHistoryConfig.Volume7dConversionDivisor)
 }
+
+// NaN and ±Inf parse fine as float flags and satisfy no ordered comparison,
+// so a `< 0` check lets both through. Neither is academic: a NaN divisor makes
+// every volume comparison false and reports lowVolume:false for every token,
+// and an infinite threshold flags every token — silently, fleet-wide, with the
+// service claiming a check it never performed.
+func TestServeCmd_RejectsNonFiniteVolumeFlags(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ name, flag, value string }{
+		{"NaN divisor", "--price-history-volume-7d-conversion-divisor", "NaN"},
+		{"Inf divisor", "--price-history-volume-7d-conversion-divisor", "+Inf"},
+		{"NaN threshold", "--price-history-min-volume-7d-usd", "NaN"},
+		{"Inf threshold", "--price-history-min-volume-7d-usd", "+Inf"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
+			cmd.RunE = func(*cobra.Command, []string) error { return nil }
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs([]string{tc.flag, tc.value})
+
+			err := cmd.Execute()
+			require.Error(t, err, "a non-finite value must not boot")
+			assert.Contains(t, err.Error(), "must be a finite number")
+		})
+	}
+}

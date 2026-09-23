@@ -30,7 +30,8 @@ func TestStellarExpertAsset_DecodesStatsFields(t *testing.T) {
 	assert.Equal(t, 0.1604, asset.Price)
 	assert.Equal(t, "1054439020873472865", asset.Supply.String(), "supply must not round-trip through float64")
 	assert.Nil(t, asset.Decimals, "absent decimals stays nil (callers default to 7)")
-	assert.Equal(t, float64(103319258398384), asset.Volume7d)
+	require.NotNil(t, asset.Volume7d)
+	assert.Equal(t, float64(103319258398384), *asset.Volume7d)
 	require.NotNil(t, asset.Trustlines.Funded)
 	assert.Equal(t, int64(9926520), *asset.Trustlines.Funded)
 }
@@ -130,7 +131,8 @@ func TestStellarExpertAsset_DriftIsIsolatedToTheDriftedField(t *testing.T) {
 	assert.Equal(t, 0.1604, asset.Price)
 	require.NotNil(t, asset.Decimals)
 	assert.Equal(t, 7, *asset.Decimals)
-	assert.Equal(t, float64(103319258398384), asset.Volume7d)
+	require.NotNil(t, asset.Volume7d)
+	assert.Equal(t, float64(103319258398384), *asset.Volume7d)
 	require.NotNil(t, asset.Trustlines.Funded)
 	assert.Equal(t, int64(9926520), *asset.Trustlines.Funded)
 }
@@ -143,4 +145,57 @@ func TestStellarExpertAsset_PriceDriftStillFails(t *testing.T) {
 
 	var asset types.StellarExpertAsset
 	assert.Error(t, json.Unmarshal([]byte(`{"price":"0.16"}`), &asset))
+}
+
+// `decimals` is the one field where "absent" and "present but undecodable"
+// must not collapse. Absent means "assume 7" (Stellar's classic default), so
+// treating a drifted value the same way scales the supply by 7 when it may
+// actually be 18 — a number wrong by eleven orders of magnitude, presented as
+// authoritative. Omitting the row is the honest outcome.
+func TestStellarExpertAsset_UndecodableDecimalsDropsSupply(t *testing.T) {
+	t.Parallel()
+
+	var drifted types.StellarExpertAsset
+	require.NoError(t, json.Unmarshal([]byte(
+		`{"price":1,"supply":1000000000000000000,"decimals":"eighteen"}`), &drifted))
+	assert.Nil(t, drifted.Decimals, "an undecodable decimals stays nil")
+	assert.Equal(t, "", drifted.Supply.String(),
+		"supply must be dropped rather than scaled by a default that may be wrong")
+
+	// Both spellings of "no value" are the legitimate default-to-7 case and
+	// must be unaffected. An explicit null is the trap: unmarshalling it into
+	// a *int SUCCEEDS and leaves the pointer nil, so a nil check alone would
+	// mistake it for drift and drop the supply for every asset upstream
+	// chose to spell that way.
+	for _, tc := range []struct{ name, payload string }{
+		{"omitted key", `{"price":1,"supply":1000000000000000000}`},
+		{"explicit null", `{"price":1,"supply":1000000000000000000,"decimals":null}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var absent types.StellarExpertAsset
+			require.NoError(t, json.Unmarshal([]byte(tc.payload), &absent))
+			assert.Nil(t, absent.Decimals)
+			assert.Equal(t, "1000000000000000000", absent.Supply.String(),
+				"no decimals legitimately means 7 — the supply still serves")
+		})
+	}
+}
+
+// volume7d must distinguish "upstream did not report it" from "genuinely
+// zero". Collapsed into a float64 they are the same value, and once the
+// conversion is enabled the verdict reports lowVolume:true — accusing a token
+// of manipulation on data we never received.
+func TestStellarExpertAsset_AbsentVolumeIsNotZeroVolume(t *testing.T) {
+	t.Parallel()
+
+	var absent, drifted, zero types.StellarExpertAsset
+	require.NoError(t, json.Unmarshal([]byte(`{"price":1}`), &absent))
+	require.NoError(t, json.Unmarshal([]byte(`{"price":1,"volume7d":"lots"}`), &drifted))
+	require.NoError(t, json.Unmarshal([]byte(`{"price":1,"volume7d":0}`), &zero))
+
+	assert.Nil(t, absent.Volume7d, "omitted volume is unknown, not zero")
+	assert.Nil(t, drifted.Volume7d, "a drifted shape is unknown, not zero")
+	require.NotNil(t, zero.Volume7d, "an explicit zero is a real reading")
+	assert.Equal(t, float64(0), *zero.Volume7d)
 }

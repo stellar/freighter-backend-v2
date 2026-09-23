@@ -66,11 +66,16 @@ type StellarExpertAsset struct {
 	Supply json.Number `json:"supply"`
 	// Decimals is the supply scale; nil when upstream omits it (default 7).
 	Decimals *int `json:"decimals"`
-	// Volume7d is the raw upstream 7-day volume. Its units are UNCONFIRMED
-	// (~1e7 times larger than USD for classic assets); it must never be
-	// compared against a USD threshold without an explicit, config-enabled
-	// conversion.
-	Volume7d float64 `json:"volume7d"`
+	// Volume7d is the raw upstream 7-day volume, nil when upstream omitted
+	// the field or its shape drifted. A POINTER because the verdict is a
+	// tri-state: collapsing absent/undecodable into 0 the way a float64
+	// does makes "no volume signal" indistinguishable from "genuinely zero
+	// volume", and once the conversion is enabled the second reports
+	// lowVolume:true — accusing a token of manipulation on data we never
+	// received. Its units are UNCONFIRMED (~1e7 times larger than USD for
+	// classic assets); it must never be compared against a USD threshold
+	// without an explicit, config-enabled conversion.
+	Volume7d *float64 `json:"volume7d"`
 	// Trustlines.Funded is the funded-trustline count ("Holders"); nil when
 	// upstream omits it.
 	Trustlines struct {
@@ -133,25 +138,48 @@ func (a *StellarExpertAsset) UnmarshalJSON(data []byte) error {
 	// Errors are dropped by design (see the doc comment); an unparseable
 	// field is left at its zero value, which means "upstream omitted it".
 	decodeOptional(raw.Supply, &a.Supply)
-	decodeOptional(raw.Decimals, &a.Decimals)
+	decimalsUnderstood := decodeOptional(raw.Decimals, &a.Decimals)
 	decodeOptional(raw.Volume7d, &a.Volume7d)
 	decodeOptional(raw.Trustlines, &a.Trustlines)
+
+	// Decimals is the one field where "absent" and "present but UNDECODABLE"
+	// must not collapse together. Absent — an omitted key or an explicit
+	// null — legitimately means "assume 7", the Stellar classic default.
+	// Undecodable means the scale is genuinely unknown, and applying 7 to a
+	// supply that was actually scaled by, say, 18 reports a number wrong by
+	// eleven orders of magnitude. Omitting the row is the honest outcome, so
+	// drop the supply and let it report as unsourceable.
+	//
+	// Keyed on the decode result, not on `a.Decimals == nil`: unmarshalling
+	// a literal `null` into a *int SUCCEEDS and leaves the pointer nil, so a
+	// nil check alone would treat the canonical "no value" encoding as drift
+	// and silently drop the supply row for every asset upstream chose to
+	// spell that way.
+	if !decimalsUnderstood {
+		a.Supply = ""
+	}
 	return nil
 }
 
 // decodeOptional decodes one stats field, leaving dst untouched when the
-// field is absent or its shape has drifted. Absent and undecodable are
-// deliberately the same outcome: callers already treat the zero value as
-// "upstream did not report this".
-func decodeOptional[T any](raw json.RawMessage, dst *T) {
+// field is absent or its shape has drifted. Absent and undecodable give the
+// same VALUE — callers treat the zero value as "upstream did not report
+// this" — but they are distinguishable via the returned bool, which reports
+// whether the field was understood.
+//
+// An explicit JSON `null` counts as understood: it is the canonical encoding
+// of "no value", so it must behave exactly like an omitted key and not like
+// shape drift.
+func decodeOptional[T any](raw json.RawMessage, dst *T) (understood bool) {
 	if len(raw) == 0 {
-		return
+		return true
 	}
 	var v T
 	if err := json.Unmarshal(raw, &v); err != nil {
-		return
+		return false
 	}
 	*dst = v
+	return true
 }
 
 // StellarExpertCandle is one row of /asset/{id}/candles.

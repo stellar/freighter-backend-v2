@@ -550,10 +550,13 @@ func (s *priceHistoryService) cacheSeries(ctx context.Context, key string, value
 // once and read by nobody after the ALL-range `from` refinement was dropped,
 // which is a cache entry storing fields it cannot answer questions about.
 type cachedAssetMeta struct {
-	Supply   string  `json:"supply,omitempty"`
-	Decimals *int    `json:"decimals,omitempty"`
-	Volume7d float64 `json:"volume7d,omitempty"`
-	Funded   *int64  `json:"funded,omitempty"`
+	Supply   string `json:"supply,omitempty"`
+	Decimals *int   `json:"decimals,omitempty"`
+	// Pointer for the same reason StellarExpertAsset.Volume7d is one: a
+	// float64 here would turn "upstream never reported volume" back into a
+	// genuine zero on the way out of the cache, undoing the distinction.
+	Volume7d *float64 `json:"volume7d,omitempty"`
+	Funded   *int64   `json:"funded,omitempty"`
 	// NotFound marks an authoritative "upstream does not know this asset".
 	// Caching it follows the emptySeriesCacheTTL reasoning: a 404 asset is
 	// the common case for unpriced SEP-41 tokens, and without this every
@@ -732,9 +735,18 @@ func (s *priceHistoryService) volumeVerdict(ctx context.Context, meta *types.Ste
 		// them would swamp an upstream-health signal with a constant.
 		return nil
 	}
+	if meta.Volume7d == nil {
+		// No usable volume signal — upstream omitted the field or its shape
+		// drifted. The tri-state exists for exactly this: a false here would
+		// assert "we checked and this token is fine" on data we never
+		// received, and a true would accuse it of manipulation on the same
+		// absence. Not counted in VolumeVerdictNull for the reason above —
+		// this is upstream answering, not upstream failing.
+		return nil
+	}
 	verdict := false
 	if s.cfg.MinVolume7dUSD > 0 {
-		verdict = meta.Volume7d/s.cfg.Volume7dConversionDivisor < s.cfg.MinVolume7dUSD
+		verdict = *meta.Volume7d/s.cfg.Volume7dConversionDivisor < s.cfg.MinVolume7dUSD
 	}
 	return &verdict
 }

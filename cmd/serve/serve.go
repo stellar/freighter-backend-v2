@@ -2,6 +2,7 @@ package serve
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -61,11 +62,22 @@ func (s *ServeCmd) Command() *cobra.Command {
 					return fmt.Errorf("--%s=%d must be positive", flag, v)
 				}
 			}
-			if v := s.Cfg.PriceHistoryConfig.MinVolume7dUSD; v < 0 {
-				return fmt.Errorf("--price-history-min-volume-7d-usd=%v must be >= 0", v)
-			}
-			if v := s.Cfg.PriceHistoryConfig.Volume7dConversionDivisor; v < 0 {
-				return fmt.Errorf("--price-history-volume-7d-conversion-divisor=%v must be >= 0", v)
+			// NaN and ±Inf parse fine as float flags and satisfy NO ordered
+			// comparison, so `< 0` lets both through. They are not academic:
+			// a NaN divisor makes every volume comparison false and reports
+			// lowVolume:false for every token, and an infinite threshold
+			// flags every token — in both cases silently, fleet-wide, with
+			// the service claiming a check it never performed.
+			for flag, v := range map[string]float64{
+				"price-history-min-volume-7d-usd":            s.Cfg.PriceHistoryConfig.MinVolume7dUSD,
+				"price-history-volume-7d-conversion-divisor": s.Cfg.PriceHistoryConfig.Volume7dConversionDivisor,
+			} {
+				if math.IsNaN(v) || math.IsInf(v, 0) {
+					return fmt.Errorf("--%s=%v must be a finite number", flag, v)
+				}
+				if v < 0 {
+					return fmt.Errorf("--%s=%v must be >= 0", flag, v)
+				}
 			}
 			if d, m := s.Cfg.AppConfig.AccountHistoryDefaultLimit, s.Cfg.AppConfig.AccountHistoryMaxLimit; d <= 0 || m <= 0 || d > m || m > handlers.AccountHistoryUpstreamMaxLimit {
 				return fmt.Errorf("--account-history-default-limit=%d / --account-history-max-limit=%d must be positive, default <= max, and max <= %d", d, m, handlers.AccountHistoryUpstreamMaxLimit)
