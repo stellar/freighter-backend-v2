@@ -225,9 +225,14 @@ func NewService(reg prometheus.Registerer) *Service {
 	return s
 }
 
-// Prices holds metrics specific to the token-prices service: cache outcomes,
-// degraded-mode signals (miss-budget exhaustion), and
-// Redis-from-this-service-POV errors.
+// Prices holds the price-family metrics — the prices service's own cache and
+// degraded-mode signals, plus the price-history and token-stats series.
+//
+// NOT prices-only, despite the name, and NOT one-per-service: api/serve.go
+// deliberately passes a SINGLE *Prices to both the prices and price-history
+// services. Several series below are shared across them, so registering a
+// second instance would split each shared series into two registrations and
+// silently halve every rate computed from it.
 type Prices struct {
 	// CacheOutcomes counts per-token cache outcomes by network and outcome.
 	//
@@ -250,9 +255,18 @@ type Prices struct {
 	// Also driven by /token-price-history's spot lookup, not just
 	// /token-prices — see CacheOutcomes. Labeled by network.
 	MissBudgetExhausted *prometheus.CounterVec
-	// RedisErrors counts Redis operations from the prices service that
-	// failed (and were silently fallen-through). Labeled by op: "mget" or
-	// "set".
+	// RedisErrors counts Redis operations that failed and were silently
+	// fallen-through. Labeled by op: "mget" or "set".
+	//
+	// Written by the prices service AND the price-history service, which
+	// serves both /token-price-history and /token-stats — so three routes
+	// drive this one series.
+	//
+	// Caller cancellation is deliberately excluded: a client closing the tab
+	// is not Redis degrading. An eighth increment site must preserve that,
+	// either by guarding with !errors.Is(err, context.Canceled) as the mget
+	// sites do, or by running under a context.Background()-derived ctx as
+	// the singleflight set sites do.
 	RedisErrors *prometheus.CounterVec
 	// SkippedTokens counts token-prices request entries that failed to parse
 	// into a canonical asset id and were skipped-and-nulled (entry present in
@@ -302,19 +316,19 @@ func NewPrices(reg prometheus.Registerer) *Prices {
 	p := &Prices{
 		CacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_cache_outcomes_total",
-			Help: "Per-token cache outcomes for the token-prices endpoint (hit, negative_hit, miss).",
+			Help: "Per-token cache outcomes of the shared spot-price cache (hit, negative_hit, miss). Driven by /token-prices AND by /token-price-history, which resolves its spot anchor through the same service.",
 		}, []string{"network", "outcome"}),
 		MissBudgetExhausted: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_miss_budget_exhausted_total",
-			Help: "Requests whose miss-fetch budget elapsed before all misses resolved.",
+			Help: "Requests whose spot-price miss-fetch budget elapsed before all misses resolved. Driven by /token-prices and by /token-price-history's spot lookup.",
 		}, []string{"network"}),
 		RedisErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_redis_errors_total",
-			Help: "Redis operation failures observed by the prices service.",
+			Help: "Redis operation failures, shared by three routes: /token-prices, /token-price-history and /token-stats (the last two both served by the price-history service). Caller cancellations are excluded.",
 		}, []string{"op"}),
 		SkippedTokens: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_skipped_tokens_total",
-			Help: "Unparseable token-prices request entries skipped-and-nulled instead of failing the batch.",
+			Help: "Unparseable /token-prices request entries skipped-and-nulled instead of failing the batch. This series is that route only, unlike its neighbours here.",
 		}, []string{"network"}),
 		HistoryCacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_price_history_cache_outcomes_total",

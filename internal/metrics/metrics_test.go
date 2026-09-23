@@ -12,6 +12,7 @@ import (
 	"github.com/creachadair/jrpc2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -318,4 +319,61 @@ func TestNewPrices_PriceHistoryMetricNames(t *testing.T) {
 	} {
 		assert.True(t, names[want], "expected metric family %s to be registered", want)
 	}
+}
+
+// The Help strings are the operator-facing contract — they render on /metrics
+// and in Grafana tooltips, where the Go doc comments above the fields are not
+// visible. They drifted once already: the field comments were corrected to say
+// these series are driven by two endpoints while the Help strings still said
+// "for the token-prices endpoint", so the exported metadata contradicted the
+// instrumentation. This pins the claim that actually reaches operators.
+func TestPrices_HelpStringsNameEveryDrivingEndpoint(t *testing.T) {
+	t.Parallel()
+
+	reg := prometheus.NewRegistry()
+	p := NewPrices(reg)
+
+	// Gather() only returns families with at least one observation, so touch
+	// each vec with a throwaway label set first.
+	p.CacheOutcomes.WithLabelValues(types.PUBLIC, "hit").Inc()
+	p.MissBudgetExhausted.WithLabelValues(types.PUBLIC).Inc()
+	p.RedisErrors.WithLabelValues("mget").Inc()
+	p.SkippedTokens.WithLabelValues(types.PUBLIC).Inc()
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+
+	help := map[string]string{}
+	for _, f := range families {
+		help[f.GetName()] = f.GetHelp()
+	}
+
+	// Every driver must be named, not just the one most recently added —
+	// otherwise trimming the string to mention only the new endpoint, and
+	// dropping the majority driver, still passes.
+	for name, drivers := range map[string][]string{
+		// Written by the prices service, but /token-price-history resolves
+		// its spot anchor through it, so both drive these two.
+		"freighter_prices_cache_outcomes_total":        {"/token-prices", "/token-price-history"},
+		"freighter_prices_miss_budget_exhausted_total": {"/token-prices", "/token-price-history"},
+		// Incremented directly by the prices service and by the
+		// price-history service, which serves two routes of its own.
+		"freighter_prices_redis_errors_total": {"/token-prices", "/token-price-history", "/token-stats"},
+		// Genuinely single-route; pinned so it is not "corrected" to match
+		// its neighbours.
+		"freighter_prices_skipped_tokens_total": {"/token-prices"},
+	} {
+		h, ok := help[name]
+		require.True(t, ok, name)
+		for _, d := range drivers {
+			assert.Contains(t, h, d,
+				"%s is driven by %s; an operator reading /metrics must see that", name, d)
+		}
+	}
+
+	// The leading slash matters: "price-history" alone is a substring of
+	// "token-price-history", so a Help naming only the history endpoint
+	// would satisfy a bare substring check for the prices service too.
+	assert.NotContains(t, help["freighter_prices_skipped_tokens_total"], "/token-price-history",
+		"this series really is token-prices only")
 }
