@@ -229,10 +229,24 @@ func NewService(reg prometheus.Registerer) *Service {
 // degraded-mode signals, plus the price-history and token-stats series.
 //
 // NOT prices-only, despite the name, and NOT one-per-service: api/serve.go
-// deliberately passes a SINGLE *Prices to both the prices and price-history
-// services. Several series below are shared across them, so registering a
-// second instance would split each shared series into two registrations and
-// silently halve every rate computed from it.
+// deliberately passes a SINGLE *Prices to THREE consumers — the prices
+// service, the price-history service, and the token-prices HANDLER, which is
+// what actually writes SkippedTokens — and NewPrices is called exactly once.
+//
+// Counting caveat for ALL THREE cache-outcome series: every one records its
+// outcome BEFORE joining the singleflight group, so concurrent cold requests
+// for the same key each log a miss against one shared upstream fetch. The
+// token detail view makes that routine — it issues /token-price-history and
+// /token-stats together, and they share the tokenstats:v1 key. Miss count is
+// therefore not fetch count on any of them; derive upstream volume from the
+// service-call metrics instead.
+//
+// Building a second instance against the app registry does not silently
+// double-count — NewPrices ends in MustRegister, so the duplicate Desc
+// panics the process at startup. The dangerous shape is a second instance
+// against a DIFFERENT registry: it registers cleanly, and that service's
+// increments then land somewhere nothing scrapes, so the series simply
+// under-reports with no error anywhere.
 type Prices struct {
 	// CacheOutcomes counts per-token cache outcomes by network and outcome.
 	//
@@ -293,7 +307,7 @@ type Prices struct {
 	// never reported as false, so this metric is how operators see that
 	// quadrant.
 	//
-	// It deliberately does NOT count every null verdict. Four other
+	// It deliberately does NOT count every null verdict. FIVE other
 	// conditions produce one without upstream having failed, and folding
 	// them in would bury the signal under traffic-shaped noise:
 	//
@@ -303,7 +317,9 @@ type Prices struct {
 	//   - an authoritative malformed-id (400) — upstream rejecting an id,
 	//     which is likewise an answer rather than a failure;
 	//   - a caller that cancelled mid-request;
-	//   - the shipped divisor-disabled config, which every response shares.
+	//   - an absent volume7d — upstream reported no usable reading, so
+	//     there is nothing to compare;
+	//   - an unset conversion divisor, which every response then shares.
 	//
 	// A fleet-wide 404/400 storm is a real outage, and it stays visible on
 	// freighter_service_errors_total{error_type="http_error:404"} rather
@@ -316,7 +332,7 @@ func NewPrices(reg prometheus.Registerer) *Prices {
 	p := &Prices{
 		CacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_cache_outcomes_total",
-			Help: "Per-token cache outcomes of the shared spot-price cache (hit, negative_hit, miss). Driven by /token-prices AND by /token-price-history, which resolves its spot anchor through the same service.",
+			Help: "Per-token cache outcomes of the shared spot-price cache (hit, negative_hit, miss). Driven by /token-prices AND by /token-price-history, which resolves its spot anchor through the same service. Miss is not fetch: concurrent cold requests for one key each record a miss against a single coalesced upstream call.",
 		}, []string{"network", "outcome"}),
 		MissBudgetExhausted: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_miss_budget_exhausted_total",
@@ -332,15 +348,15 @@ func NewPrices(reg prometheus.Registerer) *Prices {
 		}, []string{"network"}),
 		HistoryCacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_price_history_cache_outcomes_total",
-			Help: "Series-cache outcomes for the token-price-history endpoint.",
+			Help: "Series-cache outcomes for the token-price-history endpoint. Miss is not fetch: concurrent cold requests for one key each record a miss against a single coalesced upstream call.",
 		}, []string{"network", "range", "outcome"}),
 		TokenStatsCacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_token_stats_cache_outcomes_total",
-			Help: "Asset-payload cache outcomes for the token-stats path (shared with the history service's volume verdict).",
+			Help: "Asset-payload cache outcomes. Driven by /token-stats AND by /token-price-history, which resolves the same payload on EVERY request — not only when the volume verdict is enabled — so an unset conversion divisor, which nulls every verdict, does not stop history driving this series. Miss is not fetch: concurrent cold requests for one key each record a miss against a single coalesced upstream call.",
 		}, []string{"network", "outcome"}),
 		VolumeVerdictNull: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_price_history_volume_verdict_null_total",
-			Help: "History responses whose lowVolume verdict was null because the asset-payload call failed while candles succeeded.",
+			Help: "/token-price-history responses whose lowVolume verdict was null because UPSTREAM DEGRADED. Deliberately excludes the other four routes to a null verdict — an authoritative 404/400, a caller that cancelled, an absent volume7d, and an unset conversion divisor — so ordinary traffic cannot bury the signal.",
 		}, []string{"network"}),
 	}
 	reg.MustRegister(p.CacheOutcomes, p.MissBudgetExhausted, p.RedisErrors, p.SkippedTokens,
