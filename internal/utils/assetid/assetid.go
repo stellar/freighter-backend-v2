@@ -70,6 +70,16 @@ func ToStellarExpert(canonical string) string {
 	return fmt.Sprintf("%s-%s-%d", code, issuer, assetType)
 }
 
+// SplitStellarExpert is the inverse of ToStellarExpert for a classic asset: it
+// splits "CODE-ISSUER-{1|2}" into its code and issuer.
+func SplitStellarExpert(id string) (code, issuer string, ok bool) {
+	parts := strings.Split(id, "-")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
 func isValidAssetCode(code string) bool {
 	n := len(code)
 	if n < 1 || n > maxCodeLen {

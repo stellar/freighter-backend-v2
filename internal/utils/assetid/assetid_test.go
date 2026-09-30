@@ -75,3 +75,17 @@ func TestToStellarExpert(t *testing.T) {
 		})
 	}
 }
+
+func TestSplitStellarExpert(t *testing.T) {
+	t.Parallel()
+
+	code, issuer, ok := SplitStellarExpert("USDC-" + validIssuer + "-1")
+	assert.True(t, ok)
+	assert.Equal(t, "USDC", code)
+	assert.Equal(t, validIssuer, issuer)
+
+	for _, bad := range []string{"USDC", "-G-1", "USDC--1", "A-B-C-D"} {
+		_, _, ok := SplitStellarExpert(bad)
+		assert.False(t, ok, bad)
+	}
+}

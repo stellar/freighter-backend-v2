@@ -21,6 +21,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.37.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.37.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.37.0
+	github.com/xoxno/sdk-go v0.1.1
 	golang.org/x/sync v0.20.0
 )
 

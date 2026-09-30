@@ -86,3 +86,9 @@ type PricesService interface {
 	Service
 	GetPrices(ctx context.Context, tokens []string, network string) (map[string]*PriceEntry, error)
 }
+
+// SwapQuoteService quotes the best swap route across the configured sources.
+type SwapQuoteService interface {
+	Service
+	GetBestQuote(ctx context.Context, req SwapQuoteRequest) (*SwapQuote, error)
+}

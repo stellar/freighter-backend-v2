@@ -223,6 +223,10 @@ github.com/vektah/gqlparser/v2 v2.5.32 h1:k9QPJd4sEDTL+qB4ncPLflqTJ3MmjB9SrVzJra
 github.com/vektah/gqlparser/v2 v2.5.32/go.mod h1:c1I28gSOVNzlfc4WuDlqU7voQnsqI6OG2amkBAFmgts=
 github.com/xdrpp/goxdr v0.1.1 h1:E1B2c6E8eYhOVyd7yEpOyopzTPirUeF6mVOfXfGyJyc=
 github.com/xdrpp/goxdr v0.1.1/go.mod h1:dXo1scL/l6s7iME1gxHWo2XCppbHEKZS7m/KyYWkNzA=
+github.com/xoxno/sdk-go v0.1.0 h1:IpwA0ghCGSeJHEj0tgNpL4S1NVU3ChYnNyA3hGJgkuE=
+github.com/xoxno/sdk-go v0.1.0/go.mod h1:x7iOBWOvG7wKC9XqIusuox0bTcf4//ootwNxYwZU2CU=
+github.com/xoxno/sdk-go v0.1.1 h1:xkR6gveJqj+SQB4Ngee2QzUYiopHNHFtxnJAHbCDJ70=
+github.com/xoxno/sdk-go v0.1.1/go.mod h1:x7iOBWOvG7wKC9XqIusuox0bTcf4//ootwNxYwZU2CU=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=

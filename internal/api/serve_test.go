@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,6 +27,7 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/auth/authtest"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
+	"github.com/stellar/freighter-backend-v2/internal/services/swap"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
@@ -470,4 +474,79 @@ func TestApiServer_initHandlers_AllUserFacingRoutesGatedInStrict(t *testing.T) {
 			rt.method, rt.pattern)
 	}
 	require.Positive(t, gated, "expected routes() to contain at least one gated route")
+}
+
+func TestApiServer_xoxnoSwapNetworks(t *testing.T) {
+	t.Parallel()
+
+	s := &ApiServer{cfg: &config.Config{SwapConfig: config.SwapConfig{
+		XoxnoEnabled:         true,
+		XoxnoPubnetQuoteURL:  "https://quote.example",
+		XoxnoPubnetRouter:    "CPUBROUTER",
+		XoxnoTestnetQuoteURL: "https://testnet-quote.example",
+		XoxnoTestnetRouter:   "CTESTROUTER",
+	}}}
+	assert.Equal(t, map[string]swap.Network{
+		types.PUBLIC:  {QuoteURL: "https://quote.example", Router: "CPUBROUTER"},
+		types.TESTNET: {QuoteURL: "https://testnet-quote.example", Router: "CTESTROUTER"},
+	}, s.xoxnoSwapNetworks())
+}
+
+func TestApiServer_SwapWithTheXoxnoSourceOffAsksOnlyHorizon(t *testing.T) {
+	t.Parallel()
+
+	// One counter serves as both the XOXNO and the Stellar Expert host.
+	var xoxnoCalls, horizonCalls atomic.Int32
+	xoxno := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		xoxnoCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(xoxno.Close)
+	horizon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/transactions/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		horizonCalls.Add(1)
+		_, _ = w.Write([]byte(`{"_embedded":{"records":[{"destination_amount":"12.3456789","path":[]}]}}`))
+	}))
+	t.Cleanup(horizon.Close)
+
+	cfg := testCfg("permissive")
+	cfg.AppConfig.WalletBackendBalanceConcurrency = 10
+	cfg.PricesConfig = config.PricesConfig{StellarExpertAPIKey: "test-key", StellarExpertPubnetURL: xoxno.URL, StellarExpertTestnetURL: xoxno.URL}
+	cfg.HorizonConfig = config.HorizonConfig{HorizonPubnetURL: horizon.URL, HorizonTestnetURL: horizon.URL}
+	cfg.SwapConfig = config.SwapConfig{
+		XoxnoEnabled:         false,
+		XoxnoPubnetQuoteURL:  xoxno.URL,
+		XoxnoPubnetRouter:    "CPUBROUTER",
+		XoxnoTestnetQuoteURL: xoxno.URL,
+		XoxnoTestnetRouter:   "CTESTROUTER",
+		SourceTimeout:        time.Second,
+	}
+	s := newTestAPIServer(t, cfg)
+	require.NoError(t, s.initServices())
+	mux, err := s.initHandlers()
+	require.NoError(t, err)
+
+	body := `{"sourceAsset":"XLM","destAsset":"USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN","sourceAmount":"100","sender":"GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H","slippagePercent":1}`
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/v1/swap/quote?network=PUBLIC", strings.NewReader(body)))
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var quote struct {
+		Data types.SwapQuote `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &quote))
+	require.Len(t, quote.Data.Alternatives, 1)
+	assert.Equal(t, "horizon", quote.Data.Alternatives[0].Source)
+	assert.Positive(t, horizonCalls.Load())
+
+	assert.Zero(t, xoxnoCalls.Load(), "no request reaches an XOXNO or Stellar Expert host")
+
+}
+
+func TestSwapHandlerTimeoutsFitTheServerWriteTimeout(t *testing.T) {
+	t.Parallel()
+
+	assert.Less(t, handlers.SwapContextTimeout, DefaultWriteTimeout)
 }

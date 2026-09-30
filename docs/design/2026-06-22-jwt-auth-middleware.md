@@ -126,7 +126,7 @@ guard test enumerates the same `routes()`, so a newly-added route is auto-covere
 
 - **Gated (user-facing):** `/api/v1/protocols`, `/api/v1/collectibles`,
   `/api/v1/ledger-key/accounts`, `/api/v1/feature-flags`, `/api/v1/accounts/balances`,
-  `/api/v1/token-prices`, `/api/v1/accounts/{address}/transactions`, `/api/v1/auth/whoami`.
+  `/api/v1/accounts/{address}/transactions`, `/api/v1/auth/whoami`.
 - **Anonymous in every mode (registered bare, never wrapped):** the infra liveness/readiness
   probes `/api/v1/ping`, `/api/v1/db-health`, `/api/v1/rpc-health`. K8s and the docker-compose
   healthcheck cannot present per-request JWTs, and `db-health` is designed never to fail the

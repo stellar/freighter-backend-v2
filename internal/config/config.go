@@ -13,6 +13,7 @@ type Config struct {
 	RedisConfig         RedisConfig
 	DatabaseConfig      DatabaseConfig
 	HorizonConfig       HorizonConfig
+	SwapConfig          SwapConfig
 	PricesConfig        PricesConfig
 	BlockaidConfig      BlockaidConfig
 	CoinbaseConfig      CoinbaseConfig
@@ -134,6 +135,18 @@ func (c DatabaseConfig) ValidatePoolConfig() error {
 type HorizonConfig struct {
 	HorizonPubnetURL  string
 	HorizonTestnetURL string
+}
+
+// SwapConfig configures the swap quote route. Horizon is always a source; the
+// aggregators are independently opt-in. XOXNO needs network URLs and routers;
+// LI.FI uses its pinned pubnet deployment and a backend-only API key.
+type SwapConfig struct {
+	XoxnoEnabled         bool
+	XoxnoPubnetQuoteURL  string
+	XoxnoPubnetRouter    string
+	XoxnoTestnetQuoteURL string
+	XoxnoTestnetRouter   string
+	SourceTimeout        time.Duration
 }
 
 type PricesConfig struct {

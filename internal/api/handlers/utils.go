@@ -42,10 +42,11 @@ func isValidNetwork(network string) bool {
 
 // translateServiceError maps a service-layer error to a typed HttpError per
 // the spec's REST-honest mapping. Logs all non-404 errors with context;
-// account-not-found is a normal client outcome and is not logged.
+// account-not-found and no-route are normal client outcomes and are not logged.
 //
 // Status mapping:
 //   - wbclient.ErrAccountNotFound       -> 404
+//   - types.ErrSwapNoRoute              -> 404
 //   - context.DeadlineExceeded          -> 504 (server-side timeout)
 //   - context.Canceled                  -> 503 (client disconnect / parent abort)
 //   - *metrics.UpstreamError (any Kind) -> 502 (graphql_error, http_error)
@@ -55,6 +56,8 @@ func translateServiceError(ctx context.Context, err error, resource, address, ne
 	switch {
 	case errors.Is(err, wbclient.ErrAccountNotFound):
 		return httperror.NotFound(fmt.Sprintf("%s not found", resource), err)
+	case errors.Is(err, types.ErrSwapNoRoute):
+		return httperror.NotFound("no swap route found", err)
 	case errors.Is(err, context.DeadlineExceeded):
 		logger.ErrorWithContext(ctx, "wallet-backend call timed out", "resource", resource, "address", address, "network", network, "error", err)
 		return httperror.GatewayTimeout(fmt.Sprintf("Failed to get %s", resource), err)

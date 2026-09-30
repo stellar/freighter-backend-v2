@@ -23,6 +23,7 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/services"
+	"github.com/stellar/freighter-backend-v2/internal/services/swap"
 	"github.com/stellar/freighter-backend-v2/internal/store"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
@@ -45,6 +46,7 @@ type ApiServer struct {
 	rpcService           types.RPCService
 	walletBackendService types.WalletBackendService
 	pricesService        types.PricesService
+	swapQuoteService     types.SwapQuoteService
 	registry             *prometheus.Registry
 	appMetrics           *metrics.Metrics
 	authMode             auth.Mode
@@ -135,7 +137,27 @@ func (s *ApiServer) initServices() error {
 		MaxConcurrent:    s.cfg.PricesConfig.MaxConcurrentPriceFetches,
 	}, s.appMetrics.Service, s.appMetrics.Prices)
 
+	networks := s.xoxnoSwapNetworks()
+	s.swapQuoteService = swap.NewQuoteService(swap.Config{
+		HorizonPubnetURL:  s.cfg.HorizonConfig.HorizonPubnetURL,
+		HorizonTestnetURL: s.cfg.HorizonConfig.HorizonTestnetURL,
+		Networks:          networks,
+		SourceTimeout:     s.cfg.SwapConfig.SourceTimeout,
+	}, s.appMetrics.Service)
+
 	return nil
+}
+
+// xoxnoSwapNetworks returns the aggregator's per-network settings, or none when
+// the source is switched off.
+func (s *ApiServer) xoxnoSwapNetworks() map[string]swap.Network {
+	if !s.cfg.SwapConfig.XoxnoEnabled {
+		return nil
+	}
+	return map[string]swap.Network{
+		types.PUBLIC:  {QuoteURL: s.cfg.SwapConfig.XoxnoPubnetQuoteURL, Router: s.cfg.SwapConfig.XoxnoPubnetRouter},
+		types.TESTNET: {QuoteURL: s.cfg.SwapConfig.XoxnoTestnetQuoteURL, Router: s.cfg.SwapConfig.XoxnoTestnetRouter},
+	}
 }
 
 // initDatabase opens the long-lived connection pool and pings it so a
@@ -226,6 +248,7 @@ func (s *ApiServer) routes() ([]route, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init account-history handler: %w", err)
 	}
+	swapQuoteHandler := handlers.NewSwapQuoteHandler(s.swapQuoteService)
 	whoamiHandler := handlers.NewWhoamiHandler()
 
 	return []route{
@@ -262,6 +285,7 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
 
 		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true, true},
+		{http.MethodPost, "/api/v1/swap/quote", handlers.CustomHandler(swapQuoteHandler.GetSwapQuote), true, true},
 		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, true},
 	}, nil
 }

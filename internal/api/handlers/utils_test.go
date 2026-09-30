@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
+	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
@@ -191,6 +192,7 @@ func TestTranslateServiceError(t *testing.T) {
 		wantStatus int
 	}{
 		{"account not found -> 404", wbclient.ErrAccountNotFound, http.StatusNotFound},
+		{"no swap route -> 404", types.ErrSwapNoRoute, http.StatusNotFound},
 		{"ctx deadline -> 504", context.DeadlineExceeded, http.StatusGatewayTimeout},
 		{"ctx canceled -> 503", context.Canceled, http.StatusServiceUnavailable},
 		{"graphql_error -> 502", &metrics.UpstreamError{Kind: "graphql_error", Err: errors.New("schema bug")}, http.StatusBadGateway},
