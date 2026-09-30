@@ -1,6 +1,12 @@
 # freighter-backend-v2
 Freighter's next generation of backend system written in Go
 
+## Contributing
+
+Bug reports, feature requests, documentation fixes, and code from outside the team are welcome.
+Start by reading [CONTRIBUTING.md](CONTRIBUTING.md), which covers the issue-first workflow, what
+makes a pull request ready for review, and how to use LLMs responsibly here.
+
 ## Database
 
 The service requires a PostgreSQL database (`DATABASE_URL`). For local setup,
