@@ -7,6 +7,10 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"reflect"
+	"regexp"
+	"sort"
+	"strconv"
 	"testing"
 
 	"github.com/creachadair/jrpc2"
@@ -292,3 +296,152 @@ func TestClassifyError(t *testing.T) {
 		})
 	}
 }
+
+// Pins the wire names of the price-history/token-stats metric families (B.4)
+// — runbooks and alerts reference these strings.
+func TestNewPrices_PriceHistoryMetricNames(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	p := NewPrices(reg)
+
+	p.HistoryCacheOutcomes.WithLabelValues("PUBLIC", "1D", "miss").Inc()
+	p.TokenStatsCacheOutcomes.WithLabelValues("PUBLIC", "hit").Inc()
+	p.VolumeVerdictNull.WithLabelValues("PUBLIC").Inc()
+	p.SkippedTokens.WithLabelValues("PUBLIC").Inc()
+
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	names := make(map[string]bool, len(families))
+	for _, f := range families {
+		names[f.GetName()] = true
+	}
+	for _, want := range []string{
+		"freighter_price_history_cache_outcomes_total",
+		"freighter_token_stats_cache_outcomes_total",
+		"freighter_price_history_volume_verdict_null_total",
+		"freighter_prices_skipped_tokens_total",
+	} {
+		assert.True(t, names[want], "expected metric family %s to be registered", want)
+	}
+}
+
+// The Help strings are the operator-facing contract — they render on /metrics
+// and in Grafana tooltips, where the Go doc comments above the fields are not
+// visible. They have drifted repeatedly: the field comments were corrected and
+// the Help strings were not; a sweep then fixed four series and missed three;
+// and successive versions of THIS test pinned needles the pre-fix strings
+// already satisfied, so they protected nothing.
+//
+// Hence the shape below. Descriptors come from the REGISTRY and from the
+// struct, and the two sets must match — which pins three things at once: every
+// series is registered (a forgotten MustRegister is otherwise invisible, and
+// makes the series silently absent from /metrics), every series is pinned, and
+// no pin names a series that no longer exists.
+//
+// Needle style: a leading slash is load-bearing wherever the pre-fix text used
+// the bare route name. "the token-stats path" contains "token-stats", so only
+// "/token-stats" discriminates. Do not normalise the slashes away.
+func TestPrices_HelpStringsNameEveryDrivingEndpoint(t *testing.T) {
+	t.Parallel()
+
+	// must: every route that drives the series, so trimming to the most
+	// recently added driver fails. mustNot: for single-route series, the
+	// neighbour it would plausibly be broadened to name.
+	type pin struct{ must, mustNot []string }
+	pins := map[string]pin{
+		// Written by the prices service; /token-price-history resolves its
+		// spot anchor through it, so both drive these two.
+		"freighter_prices_cache_outcomes_total":        {must: []string{"/token-prices", "/token-price-history"}},
+		"freighter_prices_miss_budget_exhausted_total": {must: []string{"/token-prices", "/token-price-history"}},
+		// Incremented directly by the prices service and by the price-history
+		// service, which serves two routes of its own.
+		"freighter_prices_redis_errors_total": {must: []string{"/token-prices", "/token-price-history", "/token-stats"}},
+		// getAssetMeta resolves the asset payload on EVERY history request.
+		"freighter_token_stats_cache_outcomes_total": {must: []string{"/token-stats", "/token-price-history"}},
+		// Single-route. The mustNot is the neighbour each would wrongly gain:
+		// all three share a service or a request with /token-stats.
+		"freighter_prices_skipped_tokens_total":        {must: []string{"/token-prices"}, mustNot: []string{"token-price-history"}},
+		"freighter_price_history_cache_outcomes_total": {must: []string{"token-price-history"}, mustNot: []string{"token-stats"}},
+		// Keyed on the exclusion list, not the phrasing: deleting that
+		// sentence is the regression, and a needle on the headline wording
+		// would survive it.
+		"freighter_price_history_volume_verdict_null_total": {
+			must:    []string{"token-price-history", "volume7d", "cancelled"},
+			mustNot: []string{"token-stats"},
+		},
+	}
+
+	reg := prometheus.NewRegistry()
+	p := NewPrices(reg)
+
+	// Registered set — catches a field built but never handed to MustRegister,
+	// which would otherwise be absent from /metrics with nothing to say so.
+	registered := describeHelp(t, reg)
+
+	// Declared set — read straight off the struct, so a collector describes
+	// itself whether or not it has observations. No touch list to drift.
+	declared := map[string]string{}
+	v := reflect.ValueOf(*p)
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Type().Field(i)
+		require.True(t, f.IsExported(),
+			"unexported field %s: reflection cannot read it — teach this test about it", f.Name)
+		c, ok := v.Field(i).Interface().(prometheus.Collector)
+		require.True(t, ok, "%s is not a prometheus.Collector — teach this test about it", f.Name)
+		for k, h := range describeHelp(t, c) {
+			declared[k] = h
+		}
+	}
+
+	assert.Equal(t, keysOf(declared), keysOf(registered),
+		"every series Prices declares must also be registered, or it never reaches /metrics")
+	assert.Equal(t, keysOf(pins), keysOf(declared),
+		"every series Prices declares needs a pin here, and every pin needs a series")
+
+	for name, want := range pins {
+		h, ok := declared[name]
+		require.True(t, ok, name)
+		for _, d := range want.must {
+			assert.Contains(t, h, d, "%s: Help must name %q — an operator reading /metrics has only this", name, d)
+		}
+		for _, d := range want.mustNot {
+			assert.NotContains(t, h, d, "%s: Help must NOT name %q; this series is not driven by it", name, d)
+		}
+	}
+}
+
+// describeHelp maps fqName to Help for everything c describes. Desc exposes no
+// accessors, so this parses String() — and UNQUOTES the result, because it is
+// %q-formatted and a needle containing a quote would otherwise never match.
+func describeHelp(t *testing.T, c prometheus.Collector) map[string]string {
+	t.Helper()
+	ch := make(chan *prometheus.Desc)
+	go func() {
+		c.Describe(ch)
+		close(ch)
+	}()
+	out := map[string]string{}
+	for d := range ch {
+		m := descRE.FindStringSubmatch(d.String())
+		require.Len(t, m, 3, "could not parse descriptor: %s", d)
+		name, err := strconv.Unquote(`"` + m[1] + `"`)
+		require.NoError(t, err)
+		help, err := strconv.Unquote(`"` + m[2] + `"`)
+		require.NoError(t, err)
+		out[name] = help
+	}
+	return out
+}
+
+func keysOf[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// descRE pulls fqName and help out of Desc.String(), which has no accessors.
+// Both are %q-formatted, so the captures are escape-aware and the caller
+// unquotes them.
+var descRE = regexp.MustCompile(`fqName: "((?:[^"\\]|\\.)*)", help: "((?:[^"\\]|\\.)*)"`)

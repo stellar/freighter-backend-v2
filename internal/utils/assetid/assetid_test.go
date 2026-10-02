@@ -9,6 +9,9 @@ import (
 
 const validIssuer = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
 
+// A real SEP-41 contract id (SolvBTC on pubnet, Appendix A.7).
+const validContract = "CBIJBDNZNF4X35BJ4FFZWCDBSCKOP5NB4PLG4SNENRMLAPYG4P5FM6VN"
+
 func TestNormalize(t *testing.T) {
 	t.Parallel()
 
@@ -35,6 +38,19 @@ func TestNormalize(t *testing.T) {
 		{"too many colons", "USDC:" + validIssuer + ":foo", "", true},
 		{"malformed issuer", "USDC:NOT-A-STELLAR-KEY", "", true},
 		{"surrounding whitespace trimmed", "  XLM ", "XLM", false},
+
+		// SEP-41 contract tokens: the canonical (and upstream) form is the
+		// bare contract id. Clients also send SYMBOL:CONTRACTID; the symbol
+		// half is opaque contract metadata — no alphanumeric or length
+		// validation — and is stripped.
+		{"bare contract id", validContract, validContract, false},
+		{"symbol:contract strips symbol", "SolvBTC:" + validContract, validContract, false},
+		{"long symbol accepted", "averylongtokensymbolover12chars:" + validContract, validContract, false},
+		{"non-alphanumeric symbol accepted", "Solv-BTC!.x:" + validContract, validContract, false},
+		{"colon in symbol accepted", "Solv:BTC:" + validContract, validContract, false},
+		{"contract id casing not normalized away", "xlm2:" + validContract, validContract, false},
+		{"invalid contract id still malformed", "SolvBTC:CINVALIDCONTRACTIDXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", "", true},
+		{"bare C-prefixed junk rejected", "CNOTREAL", "", true},
 	}
 
 	for _, tc := range cases {
@@ -65,6 +81,9 @@ func TestToStellarExpert(t *testing.T) {
 		{"1-char code uses type 1", "X:" + validIssuer, "X-" + validIssuer + "-1"},
 		{"5-char code uses type 2", "yXLM2:" + validIssuer, "yXLM2-" + validIssuer + "-2"},
 		{"12-char code uses type 2", "ABCDEFGHIJKL:" + validIssuer, "ABCDEFGHIJKL-" + validIssuer + "-2"},
+		// The verified SEP-41 wire format is the raw contract id, verbatim
+		// (Appendix A.7): colon-less input passes through unchanged.
+		{"contract id passes through", validContract, validContract},
 	}
 
 	for _, tc := range cases {

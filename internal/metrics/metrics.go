@@ -225,22 +225,106 @@ func NewService(reg prometheus.Registerer) *Service {
 	return s
 }
 
-// Prices holds metrics specific to the token-prices service: cache outcomes,
-// degraded-mode signals (miss-budget exhaustion), and
-// Redis-from-this-service-POV errors.
+// Prices holds the price-family metrics — the prices service's own cache and
+// degraded-mode signals, plus the price-history and token-stats series.
+//
+// NOT prices-only, despite the name, and NOT one-per-service: api/serve.go
+// deliberately passes a SINGLE *Prices to THREE consumers — the prices
+// service, the price-history service, and the token-prices HANDLER, which is
+// what actually writes SkippedTokens — and NewPrices is called exactly once.
+//
+// Counting caveat for ALL THREE cache-outcome series: every one records its
+// outcome BEFORE joining the singleflight group, so concurrent cold requests
+// for the same key each log a miss against one shared upstream fetch. The
+// token detail view makes that routine — it issues /token-price-history and
+// /token-stats together, and they share the tokenstats:v1 key. Miss count is
+// therefore not fetch count on any of them; derive upstream volume from the
+// service-call metrics instead.
+//
+// Building a second instance against the app registry does not silently
+// double-count — NewPrices ends in MustRegister, so the duplicate Desc
+// panics the process at startup. The dangerous shape is a second instance
+// against a DIFFERENT registry: it registers cleanly, and that service's
+// increments then land somewhere nothing scrapes, so the series simply
+// under-reports with no error anywhere.
 type Prices struct {
-	// CacheOutcomes counts per-token cache outcomes by network and outcome:
-	// "hit" (live entry within --price-cache-ttl-seconds) or "miss" (no
-	// entry, expired, or upstream-only path).
+	// CacheOutcomes counts per-token cache outcomes by network and outcome.
+	//
+	// NOT only /token-prices any more: every /token-price-history request
+	// resolves its spot anchor through this service, so token-detail-view
+	// traffic lands in these series too. A hit-rate panel built from them
+	// mixes the two endpoints; use the route label on the HTTP metrics to
+	// separate them.
+	//
+	// The outcome label is a closed enum:
+	//   "hit"          — live priced entry within --price-cache-ttl-seconds
+	//   "negative_hit" — live cached null within negativeCacheTTL; we
+	//                    served an unpriceable token from cache. Counted
+	//                    separately so a mass negative-caching incident does
+	//                    not read as an improving hit rate.
+	//   "miss"         — no entry, expired, or upstream-only path
 	CacheOutcomes *prometheus.CounterVec
 	// MissBudgetExhausted counts requests whose miss-fetch budget
 	// (--price-fetch-timeout-seconds) tripped before all misses resolved.
-	// Labeled by network.
+	// Also driven by /token-price-history's spot lookup, not just
+	// /token-prices — see CacheOutcomes. Labeled by network.
 	MissBudgetExhausted *prometheus.CounterVec
-	// RedisErrors counts Redis operations from the prices service that
-	// failed (and were silently fallen-through). Labeled by op: "mget" or
-	// "set".
+	// RedisErrors counts Redis operations that failed and were silently
+	// fallen-through. Labeled by op: "mget" or "set".
+	//
+	// Written by the prices service AND the price-history service, which
+	// serves both /token-price-history and /token-stats — so three routes
+	// drive this one series.
+	//
+	// Caller cancellation is deliberately excluded: a client closing the tab
+	// is not Redis degrading. Do NOT hand-roll that — every increment goes
+	// through services.reportRedisFailure, which owns the guard, the op
+	// label and the nil check. A new site means one more call to it, not
+	// one more copy of the block.
 	RedisErrors *prometheus.CounterVec
+	// SkippedTokens counts token-prices request entries that failed to parse
+	// into a canonical asset id and were skipped-and-nulled (entry present in
+	// the response with a null price) instead of failing the batch; 400 is
+	// returned only when nothing in the batch parses. Skips are counted
+	// before any 400 is returned, so they are recorded on the rejected
+	// batches too — both the nothing-parsed 400 (the loudest instance of
+	// skipping) and the too-many-tokens 400, where some inputs had already
+	// been skipped before the size check ran. Labeled by network.
+	SkippedTokens *prometheus.CounterVec
+	// HistoryCacheOutcomes counts pricehistory:v1 series-cache outcomes.
+	// range is the closed 1H|1D|1W|1M|1Y|ALL enum (cardinality-safe: the
+	// handler 400s anything else before the service runs).
+	HistoryCacheOutcomes *prometheus.CounterVec
+	// TokenStatsCacheOutcomes counts tokenstats:v1 asset-payload cache
+	// outcomes (the cache entry shared by the history service's volume
+	// verdict and the token-stats endpoint). The outcome
+	// label is the same closed enum as CacheOutcomes: "hit",
+	// "negative_hit" (a cached authoritative asset-not-found), "miss".
+	TokenStatsCacheOutcomes *prometheus.CounterVec
+	// VolumeVerdictNull counts history responses whose lowVolume verdict was
+	// null BECAUSE UPSTREAM DEGRADED: the candles call succeeded but the
+	// asset-payload call (the verdict's input) failed. A failed lookup is
+	// never reported as false, so this metric is how operators see that
+	// quadrant.
+	//
+	// It deliberately does NOT count every null verdict. FIVE other
+	// conditions produce one without upstream having failed, and folding
+	// them in would bury the signal under traffic-shaped noise:
+	//
+	//   - an authoritative asset-not-found (404) — the designed common case
+	//     for unpriced SEP-41 tokens, and served from cache on repeat with
+	//     no upstream call at all;
+	//   - an authoritative malformed-id (400) — upstream rejecting an id,
+	//     which is likewise an answer rather than a failure;
+	//   - a caller that cancelled mid-request;
+	//   - an absent volume7d — upstream reported no usable reading, so
+	//     there is nothing to compare;
+	//   - an unset conversion divisor, which every response then shares.
+	//
+	// A fleet-wide 404/400 storm is a real outage, and it stays visible on
+	// freighter_service_errors_total{error_type="http_error:404"} rather
+	// than here. Labeled by network.
+	VolumeVerdictNull *prometheus.CounterVec
 }
 
 // NewPrices creates and registers prices-service metrics with the given registerer.
@@ -248,18 +332,35 @@ func NewPrices(reg prometheus.Registerer) *Prices {
 	p := &Prices{
 		CacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_cache_outcomes_total",
-			Help: "Per-token cache outcomes for the token-prices endpoint.",
+			Help: "Per-token cache outcomes of the shared spot-price cache (hit, negative_hit, miss). Driven by /token-prices AND by /token-price-history, which resolves its spot anchor through the same service. Miss is not fetch: concurrent cold requests for one key each record a miss against a single coalesced upstream call.",
 		}, []string{"network", "outcome"}),
 		MissBudgetExhausted: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_miss_budget_exhausted_total",
-			Help: "Requests whose miss-fetch budget elapsed before all misses resolved.",
+			Help: "Requests whose spot-price miss-fetch budget elapsed before all misses resolved. Driven by /token-prices and by /token-price-history's spot lookup.",
 		}, []string{"network"}),
 		RedisErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_redis_errors_total",
-			Help: "Redis operation failures observed by the prices service.",
+			Help: "Redis operation failures, shared by three routes: /token-prices, /token-price-history and /token-stats (the last two both served by the price-history service). Caller cancellations are excluded.",
 		}, []string{"op"}),
+		SkippedTokens: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_prices_skipped_tokens_total",
+			Help: "Unparseable /token-prices request entries skipped-and-nulled instead of failing the batch. This series is that route only, unlike its neighbours here.",
+		}, []string{"network"}),
+		HistoryCacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_price_history_cache_outcomes_total",
+			Help: "Series-cache outcomes for the token-price-history endpoint. Miss is not fetch: concurrent cold requests for one key each record a miss against a single coalesced upstream call.",
+		}, []string{"network", "range", "outcome"}),
+		TokenStatsCacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_token_stats_cache_outcomes_total",
+			Help: "Asset-payload cache outcomes. Driven by /token-stats AND by /token-price-history, which resolves the same payload on EVERY request — not only when the volume verdict is enabled — so an unset conversion divisor, which nulls every verdict, does not stop history driving this series. Miss is not fetch: concurrent cold requests for one key each record a miss against a single coalesced upstream call.",
+		}, []string{"network", "outcome"}),
+		VolumeVerdictNull: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_price_history_volume_verdict_null_total",
+			Help: "/token-price-history responses whose lowVolume verdict was null because UPSTREAM DEGRADED. Deliberately excludes the other four routes to a null verdict — an authoritative 404/400, a caller that cancelled, an absent volume7d, and an unset conversion divisor — so ordinary traffic cannot bury the signal.",
+		}, []string{"network"}),
 	}
-	reg.MustRegister(p.CacheOutcomes, p.MissBudgetExhausted, p.RedisErrors)
+	reg.MustRegister(p.CacheOutcomes, p.MissBudgetExhausted, p.RedisErrors, p.SkippedTokens,
+		p.HistoryCacheOutcomes, p.TokenStatsCacheOutcomes, p.VolumeVerdictNull)
 	return p
 }
 

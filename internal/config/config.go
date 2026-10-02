@@ -14,6 +14,7 @@ type Config struct {
 	DatabaseConfig      DatabaseConfig
 	HorizonConfig       HorizonConfig
 	PricesConfig        PricesConfig
+	PriceHistoryConfig  PriceHistoryConfig
 	BlockaidConfig      BlockaidConfig
 	CoinbaseConfig      CoinbaseConfig
 	WalletBackendConfig WalletBackendConfig
@@ -145,6 +146,36 @@ type PricesConfig struct {
 	PriceFetchTimeoutSeconds  int
 	MaxTokensPerRequest       int
 	MaxConcurrentPriceFetches int
+}
+
+// PriceHistoryConfig tunes the token-price-history and token-stats
+// endpoints. All values are env-var backed (flag-name upper-snake) and
+// fail-fast validated in the serve command's PersistentPreRunE.
+type PriceHistoryConfig struct {
+	// Per-range Redis TTLs (seconds) for pricehistory:v1 series entries.
+	// The defaults come from services.DefaultRangeCacheTTLSeconds rather
+	// than being restated here, and are pinned by the serve flag-default
+	// test; that function's doc comment carries the design-doc rationale.
+	CacheTTL1HSeconds  int
+	CacheTTL1DSeconds  int
+	CacheTTL1WSeconds  int
+	CacheTTL1MSeconds  int
+	CacheTTL1YSeconds  int
+	CacheTTLALLSeconds int
+	// FetchTimeoutSeconds bounds each upstream Stellar Expert fetch.
+	FetchTimeoutSeconds int
+	// MinVolume7dUSD is the §4.4 low-volume warning threshold in USD
+	// (0 disables the guard).
+	MinVolume7dUSD float64
+	// Volume7dConversionDivisor converts the raw upstream volume7d into USD
+	// (raw ÷ divisor). The raw units are UNCONFIRMED, so the default 0
+	// leaves the conversion disabled, which makes the lowVolume verdict
+	// NULL — with no conversion there is no check to pass, and a false
+	// would assert one that never ran. Enabling the guard once units are
+	// confirmed is a config change, not a code change.
+	Volume7dConversionDivisor float64
+	// TokenStatsCacheTTLSeconds is the tokenstats:v1 asset-payload cache TTL.
+	TokenStatsCacheTTLSeconds int
 }
 
 type BlockaidConfig struct {

@@ -30,12 +30,40 @@ const (
 var (
 	// ErrAssetNotFound is returned when Stellar Expert reports the asset is
 	// unknown (HTTP 404). Callers should map this to a per-token null in the
-	// client response, not a request-wide failure.
+	// client response, not a request-wide failure. Straight from upstream it
+	// arrives wrapped in a *metrics.UpstreamError, like ErrUpstreamAuth, so
+	// the dependency metric labels it http_error:404 — but the history
+	// service also returns it BARE from a negative-cache hit, where no HTTP
+	// call happened and there is no status to carry. Always match it with
+	// errors.Is, never == and never a type assertion on the wrapper.
 	ErrAssetNotFound = errors.New("asset not found in Stellar Expert")
 
 	// ErrAssetMalformed is returned when Stellar Expert rejects the asset id
-	// (HTTP 400). Treated like ErrAssetNotFound at the response layer.
+	// (HTTP 400). Treated like ErrAssetNotFound at the response layer, and
+	// wrapped the same way — match it with errors.Is.
+	//
+	// It does NOT have ErrAssetNotFound's bare-from-cache case, for a
+	// sharper reason: getAssetMeta stores a 400 as
+	// cachedAssetMeta{NotFound: true}, which replays as ErrAssetNotFound.
+	// So a malformed id surfaces as ErrAssetMalformed on the cold request
+	// and as ErrAssetNotFound for the cached lifetime after it. Every
+	// caller today treats the two identically, which is why that is
+	// invisible — anything that ever needs to tell them apart must not rely
+	// on this error alone.
 	ErrAssetMalformed = errors.New("asset id rejected by Stellar Expert")
+
+	// ErrUpstreamAuth is returned when Stellar Expert rejects our
+	// CREDENTIALS rather than the asset: 401, 403, or 402 (verified as "no
+	// API key", §8.4). It is split out of the transient catch-all because it
+	// is categorically different from a blip — a rotated, expired, or
+	// misconfigured key fails EVERY request for EVERY asset until someone
+	// changes config, so it never self-heals and must never be mistaken for
+	// an authoritative answer about an asset.
+	//
+	// It stays wrapped in a *metrics.UpstreamError, so the service-error
+	// metric still labels it http_error:401 / :402 / :403 and the exact code
+	// remains visible on the dependency panels.
+	ErrUpstreamAuth = errors.New("stellar expert rejected our credentials")
 
 	// ErrNetworkNotConfigured indicates we have no base URL for the
 	// requested Stellar network.
@@ -137,11 +165,14 @@ func (s *stellarExpertService) GetAssetCandles(ctx context.Context, network, ass
 	return candles, nil
 }
 
-// doJSON issues a GET to reqURL and decodes a 200 response body into dest. It
-// maps 404 → ErrAssetNotFound and 400 → ErrAssetMalformed so callers treat
-// unknown/invalid assets as unpriceable without retry, and any other non-200
-// to an UpstreamError. label ("asset"/"candles") disambiguates the endpoint in
-// decode/status error messages.
+// doJSON issues a GET to reqURL and decodes a 200 response body into dest.
+// Every non-200 becomes an *UpstreamError so the service-error metric always
+// carries the real status rather than "internal"; 404, 400 and the three
+// credential codes additionally wrap a sentinel, so callers keep branching on
+// errors.Is — 404 → ErrAssetNotFound and 400 → ErrAssetMalformed for
+// "unpriceable, do not retry", 401/402/403 → ErrUpstreamAuth. label
+// ("asset"/"candles") disambiguates the endpoint in decode/status error
+// messages.
 func (s *stellarExpertService) doJSON(ctx context.Context, reqURL, label string, dest any) error {
 	req, err := s.newRequest(ctx, reqURL)
 	if err != nil {
@@ -160,12 +191,41 @@ func (s *stellarExpertService) doJSON(ctx context.Context, reqURL, label string,
 			return fmt.Errorf("decoding stellar expert %s response: %w", label, err)
 		}
 		return nil
-	case http.StatusNotFound:
+	case http.StatusNotFound, http.StatusBadRequest:
+		// Authoritative answers about this asset, not failures of ours.
+		// Wrapped for the same reason the credential case below is: the
+		// sentinel still matches through Unwrap, so every caller keeps
+		// branching on it, while the metric gets http_error:404 /
+		// http_error:400 instead of "internal" — a label this repo reserves
+		// for encoding/decoding/validation bugs in our own code.
+		//
+		// The labelling matters more here than the slander does. These two
+		// statuses are the DESIGNED common case for unpriced SEP-41 tokens,
+		// so mislabelled they bury freighter_service_errors_total under
+		// ordinary traffic — and that series is what
+		// FreighterBackendV2StellarExpertDependencyErrors watches, which is
+		// the only outage signal /token-stats has left now that it degrades
+		// to an empty 200.
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return ErrAssetNotFound
-	case http.StatusBadRequest:
+		sentinel := ErrAssetNotFound
+		if resp.StatusCode == http.StatusBadRequest {
+			sentinel = ErrAssetMalformed
+		}
+		return &metrics.UpstreamError{
+			Kind: "http_error",
+			Code: resp.StatusCode,
+			Err:  fmt.Errorf("%w: stellar expert %s status %d", sentinel, label, resp.StatusCode),
+		}
+	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden:
+		// Our credentials, not this asset. Wrapped so errors.Is finds the
+		// sentinel (UpstreamError implements Unwrap) while the metric keeps
+		// the precise http_error:<code> label.
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return ErrAssetMalformed
+		return &metrics.UpstreamError{
+			Kind: "http_error",
+			Code: resp.StatusCode,
+			Err:  fmt.Errorf("%w: stellar expert %s status %d", ErrUpstreamAuth, label, resp.StatusCode),
+		}
 	default:
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return &metrics.UpstreamError{Kind: "http_error", Code: resp.StatusCode, Err: fmt.Errorf("stellar expert %s status %d", label, resp.StatusCode)}

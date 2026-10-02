@@ -115,6 +115,56 @@ func TestStellarExpert_GetAsset_Malformed(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrAssetMalformed))
 }
 
+// 401/402/403 are our credentials failing, not an answer about the asset.
+// They must be distinguishable from both the asset sentinels (which are
+// authoritative and get negatively cached) and the transient catch-all
+// (which self-heals) — a rotated key fails every asset until config changes.
+func TestStellarExpert_CredentialFailuresAreTheirOwnSentinel(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []int{http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			t.Parallel()
+			svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, `nope`, code)
+			}))
+
+			_, err := svc.GetAsset(context.Background(), types.PUBLIC, "XLM")
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrUpstreamAuth), "must match the credential sentinel")
+
+			// Never confusable with an authoritative answer about the asset:
+			// those two are what trigger negative caching.
+			assert.False(t, errors.Is(err, ErrAssetNotFound))
+			assert.False(t, errors.Is(err, ErrAssetMalformed))
+
+			// Still an UpstreamError carrying the exact code, so the
+			// dependency panels keep labelling it http_error:<code>.
+			var upErr *metrics.UpstreamError
+			require.True(t, errors.As(err, &upErr), "must stay wrapped for the metric")
+			assert.Equal(t, "http_error", upErr.Kind)
+			assert.Equal(t, code, upErr.Code)
+		})
+	}
+}
+
+// A transient 5xx must NOT match the credential sentinel — the whole point of
+// the split is that one self-heals and the other does not.
+func TestStellarExpert_ServerErrorIsNotACredentialFailure(t *testing.T) {
+	t.Parallel()
+
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `boom`, http.StatusBadGateway)
+	}))
+
+	_, err := svc.GetAsset(context.Background(), types.PUBLIC, "XLM")
+	require.Error(t, err)
+	assert.False(t, errors.Is(err, ErrUpstreamAuth))
+	var upErr *metrics.UpstreamError
+	require.True(t, errors.As(err, &upErr))
+	assert.Equal(t, http.StatusBadGateway, upErr.Code)
+}
+
 func TestStellarExpert_GetAsset_ServerError(t *testing.T) {
 	t.Parallel()
 
@@ -223,4 +273,65 @@ func TestStellarExpert_Name(t *testing.T) {
 	t.Parallel()
 	svc := NewStellarExpertService("a", "b", "test-key", "", nil)
 	assert.Equal(t, "stellar-expert", svc.Name())
+}
+
+// The regression this guards is not in the stats fields, it is in
+// /token-prices. GetAsset decodes one struct shared by all three endpoints,
+// so while every field decoded strictly, a single drifted stats field failed
+// the whole payload here, surfaced to fetchFromUpstream as a generic error,
+// and nulled the price of every token on the home screen — over a field
+// /token-prices never reads.
+func TestStellarExpert_GetAsset_StatsDriftStillYieldsAPrice(t *testing.T) {
+	t.Parallel()
+
+	// `trustlines` as an array: upstream has shipped both shapes for it.
+	body := `{"price":0.15968,"supply":"1054439020873472865","trustlines":[{"funded":9926520}]}`
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+
+	asset, err := svc.GetAsset(context.Background(), types.PUBLIC, "XLM")
+	require.NoError(t, err, "a drifted stats field must not fail the asset call")
+	assert.Equal(t, 0.15968, asset.Price)
+	assert.Nil(t, asset.Trustlines.Funded, "the drifted field is reported as absent")
+}
+
+// error_type="internal" is reserved for OUR defects — encoding, decoding,
+// validation. A 404 or 400 from upstream is neither, and on this service they
+// are not even rare: an unpriced SEP-41 contract token 404s by design, which
+// is why /token-price-history and /token-stats negatively cache the answer.
+//
+// Leaving them unwrapped classified every one of them as "internal", which
+// both slanders our own code and puts routine traffic onto
+// freighter_service_errors_total — the series
+// FreighterBackendV2StellarExpertDependencyErrors watches, and the only
+// outage signal /token-stats has left now that it degrades to an empty 200.
+// The 401/403 case already wraps for exactly this reason.
+func TestStellarExpert_NotFoundAndMalformedCarryTheirHTTPStatus(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		status    int
+		sentinel  error
+		wantLabel string
+	}{
+		{"404 is not-found", http.StatusNotFound, ErrAssetNotFound, "http_error:404"},
+		{"400 is malformed", http.StatusBadRequest, ErrAssetMalformed, "http_error:400"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, `nope`, tc.status)
+			}))
+
+			_, err := svc.GetAsset(context.Background(), types.PUBLIC, "BOGUS-G...-1")
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, tc.sentinel),
+				"the sentinel must still match through the wrapper — every caller branches on it")
+			assert.Equal(t, tc.wantLabel, metrics.ClassifyError(err),
+				"an upstream status must never be labelled as our own internal failure")
+		})
+	}
 }

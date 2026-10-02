@@ -4,12 +4,18 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/services"
 )
@@ -340,4 +346,184 @@ func TestServeCmd_AcceptsAuthClockSkewLeewayBoundaries(t *testing.T) {
 
 		require.NoErrorf(t, cmd.Execute(), "leeway %s should be accepted", leeway)
 	}
+}
+
+// The defaults: 1H=5m, 1D=15m, 1W=1h, 1M=6h, 1Y=24h, ALL=7d; fetch
+// budget 9s (matching prices); $7k volume threshold with the unit conversion
+// shipped DISABLED (divisor 0 → verdict null); stats TTL 1h.
+func TestServeCmd_PriceHistoryFlagDefaults(t *testing.T) {
+	t.Parallel()
+
+	cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
+
+	intDefaults := map[string]int{
+		"price-history-cache-ttl-1h-seconds":  300,
+		"price-history-cache-ttl-1d-seconds":  900,
+		"price-history-cache-ttl-1w-seconds":  3600,
+		"price-history-cache-ttl-1m-seconds":  21600,
+		"price-history-cache-ttl-1y-seconds":  86400,
+		"price-history-cache-ttl-all-seconds": 604800,
+		"token-stats-cache-ttl-seconds":       3600,
+	}
+	for flag, want := range intDefaults {
+		got, err := cmd.Flags().GetInt(flag)
+		require.NoError(t, err, flag)
+		assert.Equal(t, want, got, flag)
+	}
+
+	// Pinned to the handler's request cap rather than to a literal 9: the
+	// flag's default is derived from that constant, and this is the
+	// assertion that keeps the two from drifting apart if it moves.
+	fetchTimeout, err := cmd.Flags().GetInt("price-history-fetch-timeout-seconds")
+	require.NoError(t, err)
+	assert.Equal(t, int(handlers.TokenPriceHistoryContextTimeout/time.Second), fetchTimeout,
+		"the fetch budget defaults to the handler's request cap; past that a caller has already been answered 503 and the fetch only warms the cache")
+
+	minVolume, err := cmd.Flags().GetFloat64("price-history-min-volume-7d-usd")
+	require.NoError(t, err)
+	assert.Equal(t, float64(7000), minVolume)
+
+	divisor, err := cmd.Flags().GetFloat64("price-history-volume-7d-conversion-divisor")
+	require.NoError(t, err)
+	assert.Equal(t, float64(0), divisor, "the volume7d unit conversion ships disabled — enabling it is a config change")
+}
+
+func TestServeCmd_PriceHistoryValidation(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{"zero range TTL", []string{"--price-history-cache-ttl-1d-seconds", "0"}, "--price-history-cache-ttl-1d-seconds=0 must be positive"},
+		{"negative range TTL", []string{"--price-history-cache-ttl-all-seconds", "-1"}, "--price-history-cache-ttl-all-seconds=-1 must be positive"},
+		{"zero fetch timeout", []string{"--price-history-fetch-timeout-seconds", "0"}, "--price-history-fetch-timeout-seconds=0 must be positive"},
+		{"negative volume threshold", []string{"--price-history-min-volume-7d-usd", "-5"}, "--price-history-min-volume-7d-usd=-5 must be >= 0"},
+		{"negative conversion divisor", []string{"--price-history-volume-7d-conversion-divisor", "-1"}, "--price-history-volume-7d-conversion-divisor=-1 must be >= 0"},
+		{"zero token stats TTL", []string{"--token-stats-cache-ttl-seconds", "0"}, "--token-stats-cache-ttl-seconds=0 must be positive"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			serveCmd := &ServeCmd{Cfg: &config.Config{}}
+			cmd := serveCmd.Command()
+			cmd.RunE = func(*cobra.Command, []string) error { return nil }
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(tc.args)
+
+			err := cmd.Execute()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+func TestServeCmd_PriceHistoryAcceptsValidConfig(t *testing.T) {
+	t.Parallel()
+
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{
+		"--price-history-cache-ttl-1h-seconds", "60",
+		"--price-history-min-volume-7d-usd", "0", // 0 disables the guard — valid
+		"--price-history-volume-7d-conversion-divisor", "10000000",
+		"--database-url", "postgres://localhost/test",
+	})
+
+	require.NoError(t, cmd.Execute())
+	assert.Equal(t, 60, serveCmd.Cfg.PriceHistoryConfig.CacheTTL1HSeconds)
+	assert.Equal(t, float64(0), serveCmd.Cfg.PriceHistoryConfig.MinVolume7dUSD)
+	assert.Equal(t, float64(10000000), serveCmd.Cfg.PriceHistoryConfig.Volume7dConversionDivisor)
+}
+
+// NaN and ±Inf parse fine as float flags and satisfy no ordered comparison,
+// so a `< 0` check lets both through. Neither is academic: a NaN divisor makes
+// every volume comparison false and reports lowVolume:false for every token,
+// and an infinite threshold flags every token — silently, fleet-wide, with the
+// service claiming a check it never performed.
+func TestServeCmd_RejectsNonFiniteVolumeFlags(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ name, flag, value string }{
+		{"NaN divisor", "--price-history-volume-7d-conversion-divisor", "NaN"},
+		{"Inf divisor", "--price-history-volume-7d-conversion-divisor", "+Inf"},
+		{"NaN threshold", "--price-history-min-volume-7d-usd", "NaN"},
+		{"Inf threshold", "--price-history-min-volume-7d-usd", "+Inf"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
+			cmd.RunE = func(*cobra.Command, []string) error { return nil }
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs([]string{tc.flag, tc.value})
+
+			err := cmd.Execute()
+			require.Error(t, err, "a non-finite value must not boot")
+			assert.Contains(t, err.Error(), "must be a finite number")
+		})
+	}
+}
+
+// execServe parses args and runs PersistentPreRunE with RunE stubbed out,
+// returning the command so tests can assert on the populated config.
+func execServe(t *testing.T, args ...string) (*ServeCmd, error) {
+	t.Helper()
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs(args)
+	return serveCmd, cmd.Execute()
+}
+
+// Every int flag named *-seconds is multiplied by time.Second in
+// internal/api/serve.go, so each needs both bounds: past maxDurationSeconds
+// the multiply wraps and the override is silently dropped, and a negative
+// value is either silently replaced by a default or wraps to a positive
+// duration of centuries. The list is derived from the registered flags, not
+// written out, so a new -seconds flag missing from the serve.go table fails
+// here the moment it exists.
+func TestServeCmd_RejectsDurationSecondsThatOverflow(t *testing.T) {
+	t.Parallel()
+
+	var durationFlags []string
+	(&ServeCmd{Cfg: &config.Config{}}).Command().Flags().VisitAll(func(f *pflag.Flag) {
+		if strings.HasSuffix(f.Name, "-seconds") && f.Value.Type() == "int" {
+			durationFlags = append(durationFlags, f.Name)
+		}
+	})
+	require.NotEmpty(t, durationFlags)
+
+	for _, flag := range durationFlags {
+		t.Run("rejects overflow "+flag, func(t *testing.T) {
+			t.Parallel()
+			_, err := execServe(t, "--"+flag, strconv.FormatInt(math.MaxInt64, 10))
+			require.Error(t, err, "a value that cannot become a duration must not boot")
+			assert.Contains(t, err.Error(), "overflows when converted to a duration")
+		})
+		t.Run("rejects negative "+flag, func(t *testing.T) {
+			t.Parallel()
+			_, err := execServe(t, "--"+flag, "-1")
+			require.Error(t, err, "a negative duration must not boot")
+			assert.Contains(t, err.Error(), fmt.Sprintf("--%s=-1 must be", flag))
+		})
+	}
+
+	t.Run("accepts the boundary", func(t *testing.T) {
+		t.Parallel()
+		serveCmd, err := execServe(t,
+			"--price-history-cache-ttl-1d-seconds", strconv.FormatInt(maxDurationSeconds, 10),
+			"--database-url", "postgres://localhost/test",
+		)
+		require.NoError(t, err, "the boundary is the largest value that survives the multiply")
+		assert.EqualValues(t, maxDurationSeconds, serveCmd.Cfg.PriceHistoryConfig.CacheTTL1DSeconds)
+	})
 }

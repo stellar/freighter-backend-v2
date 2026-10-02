@@ -15,11 +15,14 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
-	"github.com/stellar/freighter-backend-v2/internal/store"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/freighter-backend-v2/internal/utils/assetid"
 )
+
+// The Dn / A.n / §n.n markers below refer to the token-price-graphs design doc.
+// See the header comment in price_history.go for its path and what each marker
+// form means.
 
 const (
 	pricesServiceName = "prices"
@@ -28,21 +31,67 @@ const (
 	defaultCacheTTL      = 30 * time.Second
 	defaultMissFetchTTL  = 9 * time.Second
 
-	cacheKeyPrefix = "prices:v1"
+	// cacheKeyPrefix carries the cached-entry SCHEMA version, not the
+	// service version. It rotated v1→v2 when cachedPriceEntry gained the
+	// `unpriced` marker: a negative entry carries no `currentPrice`, so a
+	// pod still running the old binary would decode one as a positive hit
+	// and serve currentPrice: "". Rotating the segment keeps the two
+	// schemas in disjoint keyspaces during a rollout; the cost is a cold
+	// cache on deploy, which is exactly what the segment is for.
+	cacheKeyPrefix = "prices:v2"
 
-	// candlesWindow / candlesResolutionSec define the rolling 24h window used
-	// to compute percentagePriceChange24h from /asset/{id}/candles. Hourly
-	// resolution yields ~25 records, well under Stellar Expert's 200-record cap.
-	candlesWindow        = 24 * time.Hour
-	candlesResolutionSec = 3600
+	// negativeCacheTTL is the TTL for cached null entries — tokens Stellar
+	// Expert reports as unpriceable (not found, malformed, zero price).
+	// Negative caching deliberately breaks the positive-only convention
+	// (§6.2): once clients stop filtering custom tokens, an unpriced token
+	// in a balance list would otherwise hit upstream on every 30-second
+	// poll cycle, uncacheably. Transient transport failures and 5xx are
+	// NOT cached.
+	//
+	// 120s, and deliberately not the 15m the history endpoint uses for
+	// empty series. The signals that land here are not all authoritative: a
+	// degraded 200 with `price` omitted decodes to 0, and a transient
+	// upstream 404/400 maps to ErrAssetNotFound/ErrAssetMalformed. Those
+	// blips self-heal in ~30s, but the cache entry is shared across every
+	// pod, so a long TTL turns a momentary upstream wobble into a price
+	// blackout of that length. 120s still dedupes four 30s poll cycles per
+	// blip while bounding the blast radius to about two minutes.
+	negativeCacheTTL = 2 * time.Minute
+
+	// candlesWindow is the rolling window used to compute
+	// percentagePriceChange24h from /asset/{id}/candles.
+	candlesWindow = 24 * time.Hour
+
+	// candlesResolutionSec is the bucket size that window is
+	// requested at. 900 (15m) is REQUIRED by D8: it is the chart's 1D
+	// resolution, so the list row, the detail header and the 1D chart share
+	// one formula over one bucket grid.
+	//
+	// "One number" holds on identical inputs, not identically at every
+	// instant. This path re-derives `from` every 30s while the 1D series
+	// caches for 15m — one bucket — so for part of each cache window the
+	// header anchors one bucket earlier than the row and the two differ by
+	// that bucket's move. That residue is a cache artefact rather than the
+	// formula split D8 removed, and it is documented as such in the
+	// price-change-24h-null runbook. Raising
+	// --price-history-cache-ttl-1d-seconds widens it proportionally.
+	//
+	// A constant, not a knob: the only thing another value buys is a detail
+	// header that visibly disagrees with the list row, and a redeploy
+	// reverts the formula if it ever has to be. ~97 records per token, well
+	// clear of the ~200-bucket coarsening ceiling noted on
+	// priceHistoryRanges.
+	candlesResolutionSec = 900
 
 	// minCandleWindow / maxCandleWindow bound how far before `to` the
-	// oldest returned candle must open. With hourly resolution and a
-	// truncated `to`, an asset trading continuously yields candles[0] at
-	// exactly 24h ago; sparse trading or upstream truncation can shift it
-	// later (closer to now) or rarely earlier. ±1h around 24h covers
-	// normal bucket-boundary slack while rejecting sparse-data drift that
-	// would make the result not represent a 24h window.
+	// oldest returned candle must open. With a truncated `to`, an asset
+	// trading continuously yields candles[0] at exactly 24h ago; sparse
+	// trading or upstream truncation can shift it later (closer to now) or
+	// rarely earlier. ±1h around 24h covers normal bucket-boundary slack
+	// while rejecting sparse-data drift that would make the result not
+	// represent a 24h window. Kept verbatim through the D8 resolution
+	// change: finer buckets only shrink the boundary slack (60 → 15
+	// minutes), so the guard fires less, and any flips are null → value.
 	minCandleWindow = 23 * time.Hour
 	maxCandleWindow = 25 * time.Hour
 )
@@ -55,9 +104,58 @@ type PricesServiceConfig struct {
 	MaxConcurrent    int
 }
 
+// reportRedisFailure records one failed Redis operation on the shared
+// RedisErrors series and logs it — unless the failure is the caller walking
+// away, which is not Redis degrading.
+//
+// Single owner for every increment of that series, across both services. The
+// message and its detail vary per site and stay with the caller; what must not
+// vary — the cancellation predicate, the nil-metrics check, the op label —
+// lives here. Add a site by calling this, not by copying the block: both
+// services share one *metrics.Prices, so a site that skips the guard makes the
+// series mean something different depending on which endpoint produced it.
+//
+// ctx is the context the failed operation ran under. Reads run under the
+// request context, where a cancelled client is excluded; writes run under
+// cacheWriteContext, whose only possible error is Redis itself being slow, so
+// every write failure counts.
+func reportRedisFailure(ctx context.Context, m *metrics.Prices, op, msg string, err error, logArgs ...any) {
+	if isCallerCancellation(ctx, err) {
+		return
+	}
+	logger.Warn(msg, append(logArgs, "error", err)...)
+	if m != nil {
+		m.RedisErrors.WithLabelValues(op).Inc()
+	}
+}
+
+// cacheWriteTimeout bounds pool acquisition, dial and retry back-off for one
+// cache SET; socket I/O is bounded by the client's own read/write timeouts.
+// A healthy SET is sub-millisecond; anything approaching this is Redis
+// degrading.
+const cacheWriteTimeout = 2 * time.Second
+
+// cacheWriteContext detaches a cache write from the fetch budget it arrives
+// on. That budget is shared with upstream, so by the time a fetched value is
+// ready to store it may already be spent — and a SET issued under a spent
+// context fails before it dials, throwing away a value we just paid upstream
+// for and reporting a healthy Redis as failing. The write gets a short budget
+// of its own instead.
+func cacheWriteContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), cacheWriteTimeout)
+}
+
+// JSONCache is the subset of *store.RedisStore the prices services depend
+// on, factored as an interface so tests can substitute an in-memory cache.
+// Implementations must tolerate concurrent use.
+type JSONCache interface {
+	MGetJSON(ctx context.Context, keys []string, makeDest func() any) (map[string]any, error)
+	SetJSON(ctx context.Context, key string, value any, ttl time.Duration) error
+}
+
 type pricesService struct {
 	stellarExpert types.StellarExpertService
-	redis         *store.RedisStore
+	redis         JSONCache
 	cfg           PricesServiceConfig
 	svcMetrics    *metrics.Service
 	pricesMetrics *metrics.Prices
@@ -70,7 +168,7 @@ type pricesService struct {
 // NewPricesService wires the orchestrator. redis may be nil; if so, every
 // request bypasses the cache and hits Stellar Expert. pricesMetrics may be
 // nil for tests; counters become no-ops in that case.
-func NewPricesService(stellarExpert types.StellarExpertService, redis *store.RedisStore, cfg PricesServiceConfig, metricsService *metrics.Service, pricesMetrics *metrics.Prices) types.PricesService {
+func NewPricesService(stellarExpert types.StellarExpertService, redis JSONCache, cfg PricesServiceConfig, metricsService *metrics.Service, pricesMetrics *metrics.Prices) types.PricesService {
 	if cfg.MaxConcurrent <= 0 {
 		cfg.MaxConcurrent = defaultMaxConcurrent
 	}
@@ -85,12 +183,16 @@ func NewPricesService(stellarExpert types.StellarExpertService, redis *store.Red
 
 func (p *pricesService) Name() string { return pricesServiceName }
 
-// cachedPriceEntry is the on-disk shape in Redis. Only positive results are
-// cached; Redis expiry (CacheTTL) alone governs freshness, so any entry that
-// MGET returns is a live hit.
+// cachedPriceEntry is the on-disk shape in Redis. Redis expiry alone governs
+// freshness, so any entry that MGET returns is a live hit. Positive results
+// cache at CacheTTL; authoritative nulls (Unpriced) cache at the flat
+// negativeCacheTTL so unpriced tokens don't hit upstream per poll.
 type cachedPriceEntry struct {
 	CurrentPrice             string  `json:"currentPrice,omitempty"`
 	PercentagePriceChange24h *string `json:"percentagePriceChange24h,omitempty"`
+	// Unpriced marks a cached authoritative null: Stellar Expert doesn't
+	// know the asset, rejected its id, or reports no usable price.
+	Unpriced bool `json:"unpriced,omitempty"`
 }
 
 // GetPrices fetches a snapshot for each canonical token id. The returned map
@@ -134,7 +236,14 @@ func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network 
 
 	p.resolveMisses(fetchCtx, network, cacheNet, misses, result, &resultMu)
 	unresolved := len(missingTokens(canonical, result))
-	if unresolved > 0 && fetchCtx.Err() != nil && ctx.Err() == nil {
+	// The caller-walked-away test is errors.Is(ctx.Err(), context.Canceled),
+	// NOT ctx.Err() == nil. The two are identical only while this handler
+	// passes r.Context() with no cap of its own; the moment /token-prices
+	// gains a request cap the way /token-price-history has one, a plain
+	// nil-check would read OUR expired budget as the client leaving and
+	// silently stop counting the exhaustion this metric exists for. That
+	// is the bug isCallerCancellation was just fixed for in price_history.go.
+	if unresolved > 0 && fetchCtx.Err() != nil && !errors.Is(ctx.Err(), context.Canceled) {
 		logger.Warn("prices: miss fetch budget exhausted; returning best-effort results", "network", network, "misses", len(misses), "unresolved", unresolved)
 		if p.pricesMetrics != nil {
 			p.pricesMetrics.MissBudgetExhausted.WithLabelValues(network).Inc()
@@ -159,10 +268,18 @@ func (p *pricesService) loadCachedPrices(ctx context.Context, cacheKeys []string
 
 	cached, mgetErr := p.redis.MGetJSON(ctx, cacheKeys, func() any { return new(cachedPriceEntry) })
 	if mgetErr != nil {
-		logger.Warn("prices: redis MGet failed; bypassing cache", "error", mgetErr)
-		if p.pricesMetrics != nil {
-			p.pricesMetrics.RedisErrors.WithLabelValues("mget").Inc()
-		}
+		// A caller who walked away is not a Redis fault. This matters more
+		// than the history service's matching guard: both services share one
+		// *metrics.Prices (api/serve.go wires the same object into each), so
+		// RedisErrors{op="mget"} is a SINGLE series. Guarding one site and
+		// not the other would make that series mean "Redis health" from
+		// /token-price-history and "Redis health plus however often clients
+		// close the tab" from /token-prices.
+		//
+		// DeadlineExceeded deliberately still counts: this MGet is issued at
+		// t≈0 of the request, so a deadline here means Redis itself took the
+		// whole budget to answer one MGET — real degradation.
+		reportRedisFailure(ctx, p.pricesMetrics, "mget", "prices: redis MGet failed; bypassing cache", mgetErr)
 		p.recordCacheOutcome(network, "miss", len(cacheKeys))
 		return hits
 	}
@@ -172,6 +289,17 @@ func (p *pricesService) loadCachedPrices(ctx context.Context, cacheKeys []string
 		entry, _ := v.(*cachedPriceEntry)
 		if !present || entry == nil {
 			p.recordCacheOutcome(network, "miss", 1)
+			continue
+		}
+		if entry.Unpriced {
+			// A cached null: the token stays in the result map as an
+			// explicit nil so it is not re-fetched as a miss. It is counted
+			// as its own outcome, never as a "hit" — otherwise a mass
+			// negative-caching incident (an upstream wobble turning every
+			// token unpriceable) would make the cache dashboards improve
+			// while the product broke.
+			hits[tokenByCacheKey[k]] = nil
+			p.recordCacheOutcome(network, "negative_hit", 1)
 			continue
 		}
 		hits[tokenByCacheKey[k]] = &types.PriceEntry{
@@ -250,7 +378,8 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 	// Truncate to the candle resolution so `from` and `to` align to bucket
 	// boundaries; otherwise upstream may return a window 23–25h wide with
 	// no consistent rule. The current price is still as-of-now via
-	// /asset/{id}, so the actual price comparison is at most ~1h off 24h.
+	// /asset/{id}, so the actual price comparison is at most one bucket off
+	// 24h — a flat ~15m, since candlesResolutionSec is a constant.
 	resolution := time.Duration(candlesResolutionSec) * time.Second
 	to := time.Now().UTC().Truncate(resolution)
 	from := to.Add(-candlesWindow)
@@ -282,9 +411,18 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 
 	if assetErr != nil {
 		if errors.Is(assetErr, ErrAssetNotFound) || errors.Is(assetErr, ErrAssetMalformed) {
+			p.cacheNegative(ctx, cacheNet, canonical)
 			return nil, true
 		}
 		if errors.Is(assetErr, context.DeadlineExceeded) || errors.Is(assetErr, context.Canceled) {
+			return nil, false
+		}
+		if errors.Is(assetErr, ErrUpstreamAuth) {
+			// Not a blip: this fails every asset on every network until
+			// someone changes config. At Warn it would be indistinguishable
+			// from ordinary per-token transient noise, which is exactly the
+			// wrong signal for a total, non-self-healing outage.
+			logger.Error("prices: stellar expert rejected our credentials; every price will be null until this is fixed — check STELLAR_EXPERT_API_KEY and --stellar-expert-origin", "asset", canonical, "error", assetErr)
 			return nil, false
 		}
 		logger.Warn("prices: upstream fetch failed", "asset", canonical, "error", assetErr)
@@ -297,17 +435,21 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 	// "0" string. Resolves to (nil, true) like not-found/malformed so it caches
 	// as an authoritative miss.
 	if asset.Price == 0 {
+		p.cacheNegative(ctx, cacheNet, canonical)
 		return nil, true
 	}
 
-	// The 24h change comes only from the hourly candles window, which can pin
+	// The 24h change comes only from the candles window, which can pin
 	// a true trailing 24h (±1h). When candles are unavailable or can't cover
 	// ~24h we return null rather than a mislabeled day-over-day delta from the
 	// daily price7d series.
 	var change24h *string
 	if candlesErr != nil {
-		if !errors.Is(candlesErr, context.DeadlineExceeded) && !errors.Is(candlesErr, context.Canceled) &&
-			!errors.Is(candlesErr, ErrAssetNotFound) && !errors.Is(candlesErr, ErrAssetMalformed) {
+		switch {
+		case errors.Is(candlesErr, ErrUpstreamAuth):
+			logger.Error("prices: stellar expert rejected our credentials on candles; every 24h change will be null until this is fixed — check STELLAR_EXPERT_API_KEY and --stellar-expert-origin", "asset", stellarExpertID, "error", candlesErr)
+		case !errors.Is(candlesErr, context.DeadlineExceeded) && !errors.Is(candlesErr, context.Canceled) &&
+			!errors.Is(candlesErr, ErrAssetNotFound) && !errors.Is(candlesErr, ErrAssetMalformed):
 			logger.Warn("prices: candles fetch failed; 24h change unavailable", "asset", stellarExpertID, "error", candlesErr)
 		}
 	} else {
@@ -323,10 +465,11 @@ func (p *pricesService) fetchFromUpstream(ctx context.Context, network, cacheNet
 }
 
 // change24hFromCandles computes the 24h percentage delta between currentPrice
-// and the open of the oldest candle. Returns nil when the upstream is empty,
-// the open is zero, or the oldest returned candle is too far from 24h before
-// `to` to credibly represent a 24h window (sparse trading or anomalous
-// upstream return).
+// and the close of the oldest candle — the first point the chart plots, so
+// the list row, detail header, and 1D chart share one anchor (D8).
+// Returns nil when the upstream is empty, the close is zero, or the oldest
+// returned candle is too far from 24h before `to` to credibly represent a
+// 24h window (sparse trading or anomalous upstream return).
 func change24hFromCandles(currentPrice float64, candles []types.StellarExpertCandle, to time.Time) *string {
 	if len(candles) == 0 {
 		return nil
@@ -335,11 +478,11 @@ func change24hFromCandles(currentPrice float64, candles []types.StellarExpertCan
 	if oldestAge < minCandleWindow || oldestAge > maxCandleWindow {
 		return nil
 	}
-	openPrice := candles[0].Open()
-	if openPrice == 0 {
+	startPrice := candles[0].Close()
+	if startPrice == 0 {
 		return nil
 	}
-	percentChange := (currentPrice - openPrice) / openPrice * 100
+	percentChange := (currentPrice - startPrice) / startPrice * 100
 	rounded := math.Round(percentChange*100) / 100
 	if rounded == 0 {
 		// Collapse negative zero to "0" so the JSON is byte-stable.
@@ -357,11 +500,24 @@ func (p *pricesService) cachePositive(ctx context.Context, cacheNet, canonical s
 		CurrentPrice:             entry.CurrentPrice,
 		PercentagePriceChange24h: entry.PercentagePriceChange24h,
 	}
-	if err := p.redis.SetJSON(ctx, cacheKey(cacheNet, canonical), value, p.cfg.CacheTTL); err != nil {
-		logger.Warn("prices: redis SET failed", "asset", canonical, "error", err)
-		if p.pricesMetrics != nil {
-			p.pricesMetrics.RedisErrors.WithLabelValues("set").Inc()
-		}
+	wctx, cancel := cacheWriteContext(ctx)
+	defer cancel()
+	if err := p.redis.SetJSON(wctx, cacheKey(cacheNet, canonical), value, p.cfg.CacheTTL); err != nil {
+		reportRedisFailure(wctx, p.pricesMetrics, "set", "prices: redis SET failed", err, "asset", canonical)
+	}
+}
+
+// cacheNegative stores an unpriceable marker at the flat negativeCacheTTL so
+// unpriceable tokens are not re-fetched on every poll cycle.
+// Transient transport failures and 5xx never reach this path.
+func (p *pricesService) cacheNegative(ctx context.Context, cacheNet, canonical string) {
+	if p.redis == nil {
+		return
+	}
+	wctx, cancel := cacheWriteContext(ctx)
+	defer cancel()
+	if err := p.redis.SetJSON(wctx, cacheKey(cacheNet, canonical), cachedPriceEntry{Unpriced: true}, negativeCacheTTL); err != nil {
+		reportRedisFailure(wctx, p.pricesMetrics, "set", "prices: redis SET (negative) failed", err, "asset", canonical)
 	}
 }
 
