@@ -1,0 +1,12 @@
+{
+  "workspace": ".",
+  "go_sast_enabled": true,
+  "go_disabled_rules": "go-error-not-checked",
+  "sast_ignore_overrides": "go-file-path-traversal:internal/api/handlers/protocols.go,go-hardcoded-credentials:internal/api/handlers/collectibles.go",
+  "secret_scanning_enabled": true,
+  "console_tabular_enabled": true,
+  "dockerfiles": "deployments/Dockerfile",
+  "socket_tier_1_enabled": false,
+  "trivy_vuln_enabled": false,
+  "trufflehog_exclude_dir": "vendor,.git,internal/integrationtests/infrastructure/containers.go,deployments/docker-compose.yml,internal/db/README.md"
+}
