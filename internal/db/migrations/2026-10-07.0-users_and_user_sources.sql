@@ -9,7 +9,7 @@
 
 CREATE TABLE users (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    canonical_source_id TEXT NOT NULL, -- the root source: the sub that created this user; THE user id, as exposed; never changes
+    canonical_source_id TEXT NOT NULL UNIQUE, -- the root source: the sub that created this user; THE user id, as exposed; never changes. UNIQUE doubles as its lookup index.
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

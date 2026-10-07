@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	migrate "github.com/rubenv/sql-migrate"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -73,6 +74,9 @@ var userSchemaTables = []string{"users", "user_sources"}
 
 const userSchemaIndex = "user_sources_user_id_idx"
 
+// The UNIQUE constraint on users.canonical_source_id doubles as its lookup index.
+const usersCanonicalSourceIndex = "users_canonical_source_id_key"
+
 func TestMigrate_UsersSchema_UpCreatesTablesAndIndex(t *testing.T) {
 	dsn := startPostgres(t)
 	ctx := context.Background()
@@ -88,6 +92,7 @@ func TestMigrate_UsersSchema_UpCreatesTablesAndIndex(t *testing.T) {
 		assert.True(t, tableExists(t, ctx, conn, table), "table %q should exist after up", table)
 	}
 	assert.True(t, indexExists(t, ctx, conn, userSchemaIndex), "index %q should exist after up", userSchemaIndex)
+	assert.True(t, indexExists(t, ctx, conn, usersCanonicalSourceIndex), "unique index %q should exist after up", usersCanonicalSourceIndex)
 
 	// users.id defaults to a generated UUID and canonical_source_id is required.
 	var userID string
@@ -95,6 +100,13 @@ func TestMigrate_UsersSchema_UpCreatesTablesAndIndex(t *testing.T) {
 		`INSERT INTO users (canonical_source_id) VALUES ('aa') RETURNING id::text`).Scan(&userID)
 	require.NoError(t, err)
 	assert.Len(t, userID, 36, "users.id should default to a UUID")
+
+	// canonical_source_id is the exposed user id, so two users can't share one.
+	_, err = conn.Exec(ctx, `INSERT INTO users (canonical_source_id) VALUES ('aa')`)
+	require.Error(t, err, "duplicate canonical_source_id should be rejected")
+	var pgErr *pgconn.PgError
+	require.ErrorAs(t, err, &pgErr)
+	assert.Equal(t, "23505", pgErr.Code, "expected unique_violation")
 
 	// user_sources rows hang off users(id) and are removed with their user.
 	_, err = conn.Exec(ctx,
