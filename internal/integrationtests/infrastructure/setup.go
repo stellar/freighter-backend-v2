@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"testing"
 
+	migrate "github.com/rubenv/sql-migrate"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/redis"
 	"github.com/testcontainers/testcontainers-go/network"
+
+	"github.com/stellar/freighter-backend-v2/internal/db"
 )
 
 // SharedContainers holds all containers used across integration test suites.
@@ -61,6 +64,15 @@ func (s *SharedContainers) initializeContainerInfrastructure(ctx context.Context
 		return fmt.Errorf("creating app DB container: %w", err)
 	}
 
+	// Migrate the app database before serve starts. serve never migrates (it
+	// only pings on boot), so without this the suite would run against an empty
+	// schema. This mirrors the compose stack and deploy Jobs, which run
+	// `migrate up` as a one-shot step ahead of the API; here we call the same
+	// embedded migrations in-process over the host-mapped port.
+	if err = migrateAppDatabase(ctx, s.AppPostgresContainer); err != nil {
+		return fmt.Errorf("migrating app DB: %w", err)
+	}
+
 	// Start Stellar Core
 	s.StellarCoreContainer, err = createStellarCoreContainer(ctx, s.TestNetwork)
 	if err != nil {
@@ -73,6 +85,19 @@ func (s *SharedContainers) initializeContainerInfrastructure(ctx context.Context
 		return fmt.Errorf("creating RPC container: %w", err)
 	}
 
+	return nil
+}
+
+// migrateAppDatabase applies all embedded migrations to the app Postgres.
+// Migrations are idempotent, so this is safe against a reused container.
+func migrateAppDatabase(ctx context.Context, appPostgres *TestContainer) error {
+	dsn, err := AppDatabaseHostURL(ctx, appPostgres)
+	if err != nil {
+		return err
+	}
+	if _, err = db.Migrate(ctx, dsn, migrate.Up, 0); err != nil {
+		return err
+	}
 	return nil
 }
 
