@@ -15,11 +15,11 @@ import (
 
 // MaxLinkSources bounds how many sources one link request may carry. A wallet
 // links one phrase plus its account keys, so 128 is far above any real client
-// and small enough that the advisory-lock loop and the IN list stay cheap.
+// and small enough that the multi-row INSERT and the IN list stay cheap.
 const MaxLinkSources = 128
 
 // Per-transaction timeouts, applied with SET LOCAL so they end with the
-// transaction. The advisory locks below block indefinitely by default, and a
+// transaction. The advisory lock below blocks indefinitely by default, and a
 // blocked link transaction pins a pool connection that every DB-backed route
 // shares, so a wait that outlives the HTTP write timeout (10s) helps nobody.
 // lockTimeout bounds each lock wait; statementTimeout bounds every statement.
@@ -63,7 +63,7 @@ type LinkResult struct {
 }
 
 // TxBeginner is the subset of pgxpool.Pool the Linker needs: it owns the
-// transaction that scopes the advisory locks, so it must begin one itself.
+// transaction that scopes the advisory lock, so it must begin one itself.
 type TxBeginner interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
@@ -83,28 +83,37 @@ func NewLinker(db TxBeginner) *Linker {
 // every entry of sources carries a consent signed by its own key and bound to
 // signerID, and signerID is itself one of sources. Link trusts its arguments on
 // that basis and does no signature work. It enforces only the structural rules
-// it needs for its own correctness (bounds, no repeated id, signer present) so
-// a misuse cannot reach the database.
+// it needs for its own correctness (bounds, canonical ids, no repeated id,
+// signer present) so a misuse cannot reach the database.
 //
-// Resolution runs inside one transaction:
+// Resolution runs inside one transaction with lock and statement timeouts:
 //
-//  1. Take pg_advisory_xact_lock on hashtext(id) for every submitted id, with
-//     the actual lock keys deduplicated and sorted numerically. Ordering the
-//     keys rather than the ids is what prevents a lock-order reversal when two
-//     ids hash to the same key. Two concurrent calls that share any source
-//     therefore serialize, which is what makes "exactly one users row" hold when
-//     two callers sign as the same unclaimed source at once.
-//  2. Read every submitted id's existing row.
-//  3. Resolve the signer with ResolveUser on the transaction. If it has a row,
-//     the caller is that user. If not, the signer is the root of a new cluster:
-//     insert a users row with canonical_source_id = signerID (or adopt one that
-//     already carries that canonical id but lost its source row, so a repaired
-//     or partially restored table cannot lock a wallet out forever) and the
-//     signer's row under it.
-//  4. For every other source: no row, insert it under the caller's user; a row
-//     under the caller's user, nothing; a row under another user, report it in
-//     Conflicts and leave it untouched. New rows go in with one multi-row
-//     INSERT.
+//  1. Take ONE pg_advisory_xact_lock, on hashtext(signerID). Two callers
+//     signing as the same source serialize here, which is what makes "exactly
+//     one users row" hold when both are the first to claim it. No lock is taken
+//     per source: who wins a contested source is decided by the user_sources
+//     primary key in step 3, so per-source locks would add lock-table pressure
+//     (up to 128 held entries per transaction, against a shared table every
+//     transaction in the database draws from) without adding a guarantee.
+//  2. Resolve the signer with ResolveUser on the transaction. If it has a row,
+//     the caller is that user. If not, the signer roots a new cluster: under a
+//     savepoint, insert a users row with canonical_source_id = signerID (or
+//     adopt one that already carries that canonical id but lost its source row,
+//     so a repaired or partially restored table cannot lock a wallet out) and
+//     go to step 3 with the signer among the rows to write. If step 3 reports
+//     that the signer's row was NOT written, another caller linked the signer
+//     as one of its sources in the window since ResolveUser; roll back to the
+//     savepoint, which discards the never-committed users row, and re-resolve:
+//     the signer is now a member of that caller's cluster, exactly as if that
+//     request had arrived first, which it did.
+//  3. Write every source that has no row with one multi-row
+//     INSERT ... ON CONFLICT (source_id) DO NOTHING RETURNING source_id, in
+//     sorted id order. Sorting is what keeps two concurrent inserts with
+//     overlapping ids from deadlocking each other. A conflicting row that
+//     another transaction is still inserting makes this statement wait for it,
+//     so an id that comes back unwritten has a committed row.
+//  4. Re-read the unwritten ids. A row under the caller's user needs nothing; a
+//     row under another user goes in Conflicts and is left untouched.
 //
 // Invariants this preserves: a claimed source is never moved, two populated
 // clusters never combine, no row is ever retired, no users row is ever deleted,
@@ -129,58 +138,64 @@ func (l *Linker) Link(ctx context.Context, signerID string, sources []Source) (*
 		return nil, fmt.Errorf("setting link transaction timeouts: %w", err)
 	}
 
-	ids := make([]string, len(sources))
-	for i, s := range sources {
-		ids[i] = s.ID
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, signerID); err != nil {
+		return nil, fmt.Errorf("locking signer %s: %w", signerID, err)
 	}
 
-	if err = lockSources(ctx, tx, ids); err != nil {
-		return nil, err
+	// others is every source but the signer, in sorted id order; the signer is
+	// prepended when it needs a row so the whole batch stays sorted (signerID
+	// is canonical hex like the rest, so it sorts with them).
+	others := make([]Source, 0, len(sources))
+	for _, s := range sources {
+		if s.ID != signerID {
+			others = append(others, s)
+		}
 	}
+	sortSources(others)
 
-	existing, err := selectSources(ctx, tx, ids)
-	if err != nil {
-		return nil, err
-	}
-
-	// Resolve the signer to a user, creating the cluster if the signer is new.
-	// newRows collects every source this call writes; the signer is one of them
-	// when it is new, so a single INSERT covers both cases.
-	var newRows []Source
 	userID, canonical, err := NewStore(tx).ResolveUser(ctx, signerID)
+	var written map[string]struct{}
 	switch {
 	case err == nil:
 		// The caller is an existing user.
-	case errors.Is(err, ErrSourceNotFound):
-		userID, err = createOrAdoptUser(ctx, tx, signerID)
+		written, err = insertSources(ctx, tx, userID, others)
 		if err != nil {
 			return nil, err
 		}
-		canonical = signerID
-		newRows = append(newRows, Source{ID: signerID, Kind: kindOf(sources, signerID)})
+	case errors.Is(err, ErrSourceNotFound):
+		userID, canonical, written, err = createCluster(ctx, tx, signerID, kindOf(sources, signerID), others)
+		if err != nil {
+			return nil, err
+		}
 	default:
 		return nil, err
 	}
 
+	// Classify what the INSERT skipped.
 	conflicts := []string{}
-	for _, s := range sources {
-		if s.ID == signerID {
-			continue
-		}
-		row, ok := existing[s.ID]
-		switch {
-		case !ok:
-			newRows = append(newRows, s)
-		case row.userID == userID:
-			// Already in the caller's cluster: nothing to do. The stored kind is the
-			// one proven when the row was first written; it is not rewritten.
-		default:
-			conflicts = append(conflicts, s.ID)
+	var unwritten []string
+	for _, s := range others {
+		if _, ok := written[s.ID]; !ok {
+			unwritten = append(unwritten, s.ID)
 		}
 	}
-
-	if err = insertSources(ctx, tx, userID, newRows); err != nil {
-		return nil, err
+	if len(unwritten) > 0 {
+		var owners map[string]uuid.UUID
+		owners, err = selectOwners(ctx, tx, unwritten)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range unwritten {
+			owner, ok := owners[id]
+			if !ok {
+				// ON CONFLICT DO NOTHING skipped it, so a row existed and rows are
+				// never deleted; not finding it now is an invariant violation.
+				return nil, fmt.Errorf("source %s was skipped by insert but has no row", id)
+			}
+			if owner != userID {
+				conflicts = append(conflicts, id)
+			}
+		}
 	}
 
 	cluster, err := selectCluster(ctx, tx, userID)
@@ -217,11 +232,11 @@ func validateLinkRequest(signerID string, sources []Source) error {
 	if len(sources) > MaxLinkSources {
 		return fmt.Errorf("%w: %d > %d", ErrTooManySources, len(sources), MaxLinkSources)
 	}
-	seen := make(map[string]struct{}, len(sources))
-	signerPresent := false
 	if !auth.IsCanonicalSourceID(signerID) {
 		return fmt.Errorf("%w: signer %q", ErrNonCanonicalSourceID, signerID)
 	}
+	seen := make(map[string]struct{}, len(sources))
+	signerPresent := false
 	for _, s := range sources {
 		// The JWT parser lowercases sub, and ResolveUser is keyed by that form, so
 		// a row written under any other spelling would never resolve again.
@@ -254,33 +269,65 @@ func kindOf(sources []Source, id string) string {
 	return ""
 }
 
-// lockSources takes a transaction-scoped advisory lock per distinct hashtext of
-// the submitted ids, in ascending key order. hashtext is int4; the lock takes a
-// bigint, and the implicit widening is stable, so the same id always maps to the
-// same key across callers.
-func lockSources(ctx context.Context, tx pgx.Tx, ids []string) error {
-	rows, err := tx.Query(ctx, `SELECT hashtext(s) FROM unnest($1::text[]) AS s`, ids)
+func sortSources(sources []Source) {
+	slices.SortFunc(sources, func(a, b Source) int {
+		switch {
+		case a.ID < b.ID:
+			return -1
+		case a.ID > b.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
+}
+
+// createCluster handles a signer with no user_sources row: it creates (or
+// adopts) the users row and writes the signer's row together with others in
+// one sorted INSERT, all under a savepoint. If the signer's own row comes back
+// unwritten, another caller claimed the signer meanwhile; the savepoint is
+// rolled back so the provisional users row never commits, and the signer is
+// re-resolved as a member of that caller's cluster.
+func createCluster(ctx context.Context, tx pgx.Tx, signerID, signerKind string, others []Source) (userID uuid.UUID, canonical string, written map[string]struct{}, err error) {
+	sp, err := tx.Begin(ctx) // a nested Begin is a SAVEPOINT in pgx
 	if err != nil {
-		return fmt.Errorf("hashing source ids: %w", err)
+		return uuid.Nil, "", nil, fmt.Errorf("creating savepoint: %w", err)
 	}
-	keys, err := pgx.CollectRows(rows, pgx.RowTo[int32])
+	defer sp.Rollback(ctx) //nolint:errcheck // rollback on the error path; no-op after commit
+
+	userID, err = createOrAdoptUser(ctx, sp, signerID)
 	if err != nil {
-		return fmt.Errorf("collecting lock keys: %w", err)
+		return uuid.Nil, "", nil, err
 	}
-	slices.Sort(keys)
-	keys = slices.Compact(keys)
-	// One round trip for all the locks. A batch executes its queries in queue
-	// order, which is what the sorted keys rely on; an ORDER BY inside a single
-	// SELECT pg_advisory_xact_lock(...) FROM ... would not guarantee the order
-	// the function is evaluated in.
-	batch := &pgx.Batch{}
-	for _, k := range keys {
-		batch.Queue(`SELECT pg_advisory_xact_lock($1)`, int64(k))
+	rows := make([]Source, 0, len(others)+1)
+	rows = append(rows, Source{ID: signerID, Kind: signerKind})
+	rows = append(rows, others...)
+	sortSources(rows)
+	written, err = insertSources(ctx, sp, userID, rows)
+	if err != nil {
+		return uuid.Nil, "", nil, err
 	}
-	if err = tx.SendBatch(ctx, batch).Close(); err != nil {
-		return fmt.Errorf("locking source keys: %w", err)
+	if _, ok := written[signerID]; ok {
+		if err = sp.Commit(ctx); err != nil {
+			return uuid.Nil, "", nil, fmt.Errorf("releasing savepoint: %w", err)
+		}
+		return userID, signerID, written, nil
 	}
-	return nil
+
+	// Lost the race for the signer's own row. Discard everything done under the
+	// savepoint and join the cluster that claimed the signer.
+	if err = sp.Rollback(ctx); err != nil {
+		return uuid.Nil, "", nil, fmt.Errorf("rolling back savepoint: %w", err)
+	}
+	userID, canonical, err = NewStore(tx).ResolveUser(ctx, signerID)
+	if err != nil {
+		return uuid.Nil, "", nil, fmt.Errorf("re-resolving signer %s after losing its insert: %w", signerID, err)
+	}
+	written, err = insertSources(ctx, tx, userID, others)
+	if err != nil {
+		return uuid.Nil, "", nil, err
+	}
+	return userID, canonical, written, nil
 }
 
 // createOrAdoptUser returns the users.id for a signer that has no user_sources
@@ -307,11 +354,13 @@ func createOrAdoptUser(ctx context.Context, tx pgx.Tx, signerID string) (uuid.UU
 	return userID, nil
 }
 
-// insertSources writes rows under userID in one statement. A nil or empty slice
-// is a no-op.
-func insertSources(ctx context.Context, tx pgx.Tx, userID uuid.UUID, rows []Source) error {
+// insertSources writes rows under userID in one statement, skipping any id
+// that already has a row, and returns the set of ids actually written. rows
+// must be sorted by id (see Link). A nil or empty slice is a no-op.
+func insertSources(ctx context.Context, tx pgx.Tx, userID uuid.UUID, rows []Source) (map[string]struct{}, error) {
+	written := make(map[string]struct{}, len(rows))
 	if len(rows) == 0 {
-		return nil
+		return written, nil
 	}
 	ids := make([]string, len(rows))
 	kinds := make([]string, len(rows))
@@ -319,38 +368,48 @@ func insertSources(ctx context.Context, tx pgx.Tx, userID uuid.UUID, rows []Sour
 		ids[i] = r.ID
 		kinds[i] = r.Kind
 	}
-	if _, err := tx.Exec(ctx,
+	// WITH ORDINALITY pins the insert order to the sorted input: a bare unnest
+	// in a SELECT carries no ordering guarantee once the planner is involved.
+	res, err := tx.Query(ctx,
 		`INSERT INTO user_sources (source_id, user_id, kind)
-		 SELECT s.id, $2, s.kind FROM unnest($1::text[], $3::text[]) AS s(id, kind)`,
-		ids, userID, kinds); err != nil {
-		return fmt.Errorf("inserting %d sources: %w", len(rows), err)
-	}
-	return nil
-}
-
-type sourceRow struct {
-	userID uuid.UUID
-	kind   string
-}
-
-func selectSources(ctx context.Context, tx pgx.Tx, ids []string) (map[string]sourceRow, error) {
-	rows, err := tx.Query(ctx,
-		`SELECT source_id, user_id, kind FROM user_sources WHERE source_id = ANY($1::text[])`, ids)
+		 SELECT s.id, $2, s.kind
+		 FROM unnest($1::text[], $3::text[]) WITH ORDINALITY AS s(id, kind, n)
+		 ORDER BY s.n
+		 ON CONFLICT (source_id) DO NOTHING
+		 RETURNING source_id`,
+		ids, userID, kinds)
 	if err != nil {
-		return nil, fmt.Errorf("reading submitted sources: %w", err)
+		return nil, fmt.Errorf("inserting %d sources: %w", len(rows), err)
+	}
+	insertedIDs, err := pgx.CollectRows(res, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("collecting inserted sources: %w", err)
+	}
+	for _, id := range insertedIDs {
+		written[id] = struct{}{}
+	}
+	return written, nil
+}
+
+// selectOwners returns user_id by source_id for the given ids.
+func selectOwners(ctx context.Context, tx pgx.Tx, ids []string) (map[string]uuid.UUID, error) {
+	rows, err := tx.Query(ctx,
+		`SELECT source_id, user_id FROM user_sources WHERE source_id = ANY($1::text[])`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("reading owners of submitted sources: %w", err)
 	}
 	defer rows.Close()
-	out := make(map[string]sourceRow, len(ids))
+	out := make(map[string]uuid.UUID, len(ids))
 	for rows.Next() {
 		var id string
-		var r sourceRow
-		if err = rows.Scan(&id, &r.userID, &r.kind); err != nil {
-			return nil, fmt.Errorf("scanning submitted source: %w", err)
+		var owner uuid.UUID
+		if err = rows.Scan(&id, &owner); err != nil {
+			return nil, fmt.Errorf("scanning source owner: %w", err)
 		}
-		out[id] = r
+		out[id] = owner
 	}
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("reading submitted sources: %w", err)
+		return nil, fmt.Errorf("reading owners of submitted sources: %w", err)
 	}
 	return out, nil
 }

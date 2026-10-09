@@ -208,14 +208,26 @@ one consent; the format is a cross-platform contract pinned by fixture vectors (
 change needs a new domain prefix, not an edit.
 
 Resolution (`users.Linker.Link`) runs in one transaction with `SET LOCAL` lock and statement
-timeouts: take `pg_advisory_xact_lock` on `hashtext(source_id)` for every submitted id in one batch,
-with the *lock keys* deduplicated and sorted so a hash collision cannot reverse lock order; read
-the submitted rows; resolve `sub` with `ResolveUser` on the transaction (an existing row is the
-caller's user, otherwise a new `users` row with `canonical_source_id = sub`, adopting an existing
-`users` row with that canonical id if its source row was ever lost); then for every
-other source insert it under the caller if unclaimed, do nothing if already the caller's, and report
-it in `conflicts` if it belongs to another user. A claimed source is never moved, two populated
-clusters never combine, no row is retired, and `canonical_source_id` is never updated.
+timeouts and takes **one** `pg_advisory_xact_lock`, on `hashtext(sub)`, so two callers signing as the
+same source serialize. It then resolves `sub` with `ResolveUser` on the transaction (an existing row
+is the caller's user; otherwise, under a savepoint, a new `users` row with `canonical_source_id =
+sub`, adopting an existing `users` row with that canonical id if its source row was ever lost) and
+writes every source that has no row with one sorted multi-row
+`INSERT ... ON CONFLICT (source_id) DO NOTHING RETURNING source_id`. An id that comes back unwritten
+has a committed row: under the caller it needs nothing, under anyone else it goes in `conflicts`
+and is left untouched. If the *signer's* own row comes back unwritten, another caller linked it as
+one of their sources in the meantime; the savepoint is rolled back and the signer is re-resolved as
+a member of that cluster, exactly as if that request had arrived first. A claimed source is never
+moved, two populated clusters never combine, no row is retired, and `canonical_source_id` is never
+updated.
+
+This departs from the v2 design's *Resolution* step as written, which takes a per-source advisory
+lock on every submitted id. Those locks decided who wins a contested source, which the
+`user_sources` primary key already decides; what they added was up to 128 entries per transaction
+in Postgres's shared lock table (`max_locks_per_transaction × max_connections`, about 6400 at
+defaults), which a handful of pods under concurrent full-size requests could exhaust and take every
+transaction in the database down with them. Sorting the batch is what keeps two concurrent inserts
+with overlapping ids from deadlocking.
 
 Status codes: `400` for a malformed body (empty, more than 128 sources, a repeated id, a non-
 canonical id, an unknown kind, or a body missing `sub`); `403` for a consent that does not verify;
