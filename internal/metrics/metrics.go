@@ -50,19 +50,21 @@ func (e *UpstreamError) Unwrap() error { return e.Err }
 
 // Metrics groups all Prometheus metrics. Must be created via NewMetrics.
 type Metrics struct {
-	HTTP    *HTTP
-	Service *Service
-	Auth    *Auth
-	Prices  *Prices
+	HTTP     *HTTP
+	Service  *Service
+	Auth     *Auth
+	Prices   *Prices
+	UserLink *UserLink
 }
 
 // NewMetrics creates and registers all application metrics with the given registerer.
 func NewMetrics(reg prometheus.Registerer) *Metrics {
 	return &Metrics{
-		HTTP:    NewHTTP(reg),
-		Service: NewService(reg),
-		Auth:    NewAuth(reg),
-		Prices:  NewPrices(reg),
+		HTTP:     NewHTTP(reg),
+		Service:  NewService(reg),
+		Auth:     NewAuth(reg),
+		Prices:   NewPrices(reg),
+		UserLink: NewUserLink(reg),
 	}
 }
 
@@ -158,6 +160,74 @@ func RecordAuth(a *Auth, result, reason, client string) {
 		return
 	}
 	a.RequestsTotal.WithLabelValues(result, reason, client).Inc()
+}
+
+// UserLink label values. Both sets are closed: every value is assigned by the
+// handler or the store from its own outcome, never from a request field, so a
+// caller cannot grow cardinality.
+const (
+	// Request results.
+	LinkResultCreated    = "created"     // a new users row: the signer rooted a new cluster
+	LinkResultResolved   = "resolved"    // the signer already belonged to a user
+	LinkResultBadRequest = "bad_request" // 400: malformed body, cap exceeded, repeated or non-canonical id, unknown kind, sub absent
+	LinkResultBadConsent = "bad_consent" // 403: a consent did not verify
+	LinkResultError      = "error"       // 5xx or 503/504: database disabled, timeout, store failure
+
+	// Per-source outcomes.
+	LinkSourceWritten  = "written"  // a user_sources row this call inserted
+	LinkSourceConflict = "conflict" // a submitted id that belongs to another user, left untouched
+)
+
+// UserLink holds metrics for POST /api/v1/user/link, the only write to the
+// identity tables. A valid JWT proves possession of some keypair and anyone can
+// mint one, so every request can create permanent rows that are never retired;
+// these series are how a storage-exhaustion attack is seen. The rate of
+// result="created" is the alert signal: a real wallet creates one user, once.
+type UserLink struct {
+	// RequestsTotal counts link requests by result.
+	//   result: "created" | "resolved" | "bad_request" | "bad_consent" | "error"
+	RequestsTotal *prometheus.CounterVec
+	// SourcesTotal counts submitted sources by what happened to them. Only the
+	// two outcomes that carry a signal are counted: rows written (the
+	// amplification of one request into permanent storage) and conflicts (a
+	// caller presenting sources another user owns). Sources already in the
+	// caller's cluster are not counted.
+	//   outcome: "written" | "conflict"
+	SourcesTotal *prometheus.CounterVec
+}
+
+// NewUserLink creates and registers user-link metrics with the given registerer.
+func NewUserLink(reg prometheus.Registerer) *UserLink {
+	m := &UserLink{
+		RequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_user_link_requests_total",
+			Help: "Total number of POST /api/v1/user/link requests, by result (created, resolved, bad_request, bad_consent, error). A rising created rate is a sybil storage-exhaustion signal.",
+		}, []string{"result"}),
+		SourcesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_user_link_sources_total",
+			Help: "Total number of sources submitted to POST /api/v1/user/link, by outcome (written: a new user_sources row; conflict: owned by another user, left untouched).",
+		}, []string{"outcome"}),
+	}
+	reg.MustRegister(m.RequestsTotal, m.SourcesTotal)
+	return m
+}
+
+// RecordUserLink records the result of one link request. Nil-safe so the
+// handler and its tests can run without a metrics registry.
+func RecordUserLink(m *UserLink, result string) {
+	if m == nil {
+		return
+	}
+	m.RequestsTotal.WithLabelValues(result).Inc()
+}
+
+// RecordUserLinkSources adds n sources with the given outcome. Nil-safe; a
+// non-positive n records nothing.
+func RecordUserLinkSources(m *UserLink, outcome string, n int) {
+	if m == nil || n <= 0 {
+		return
+	}
+	m.SourcesTotal.WithLabelValues(outcome).Add(float64(n))
 }
 
 // HTTP holds HTTP request metrics.

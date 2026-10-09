@@ -34,6 +34,7 @@ type UserLinkTestSuite struct {
 	freighterContainer   *infrastructure.FreighterBackendContainer
 	appPostgresContainer *infrastructure.TestContainer
 	baseURL              string
+	metricsURL           string
 	db                   *pgx.Conn
 }
 
@@ -41,6 +42,8 @@ func (s *UserLinkTestSuite) SetupSuite() {
 	ctx := context.Background()
 	var err error
 	s.baseURL, err = s.freighterContainer.GetConnectionString(ctx)
+	s.Require().NoError(err)
+	s.metricsURL, err = s.freighterContainer.GetMetricsConnectionString(ctx)
 	s.Require().NoError(err)
 
 	dsn, err := infrastructure.AppDatabaseHostURL(ctx, s.appPostgresContainer)
@@ -161,6 +164,23 @@ func (s *UserLinkTestSuite) TestLinkCreatesClusterThenAttachesAndReportsConflict
 	k2User, k2Canonical := s.ownerOf(k2.id)
 	require.NotEqual(t, pUser, k2User)
 	require.Equal(t, k2.id, k2Canonical)
+
+	// The link metrics are exposed on the internal metrics server with the
+	// pinned names and label values; other suites' link calls may have run too,
+	// so assert presence, not exact counts.
+	mresp, err := http.Get(s.metricsURL + "/metrics")
+	require.NoError(t, err)
+	defer func() { _ = mresp.Body.Close() }()
+	require.Equal(t, http.StatusOK, mresp.StatusCode)
+	mbody, err := io.ReadAll(mresp.Body)
+	require.NoError(t, err)
+	for _, want := range []string{
+		`freighter_user_link_requests_total{result="created"}`,
+		`freighter_user_link_sources_total{outcome="written"}`,
+		`freighter_user_link_sources_total{outcome="conflict"}`,
+	} {
+		require.Contains(t, string(mbody), want)
+	}
 }
 
 // A consent minted under a different token's iat fails: the server takes iat

@@ -137,6 +137,8 @@ func TestLink_Postgres(t *testing.T) {
 		res, err := linker.Link(ctx, root.ID, append([]Source{root}, extra...))
 		require.NoError(t, err)
 		require.Empty(t, res.Conflicts)
+		require.True(t, res.Created, "a seed always roots a new cluster")
+		require.Equal(t, 1+len(extra), res.Written)
 		return res.UserID
 	}
 
@@ -151,6 +153,8 @@ func TestLink_Postgres(t *testing.T) {
 			assert.Equal(t, P, res.CanonicalSourceID)
 			assert.Equal(t, []string{P}, idsOf(res.Sources))
 			assert.Equal(t, []string{K}, res.Conflicts)
+			assert.True(t, res.Created)
+			assert.Equal(t, 1, res.Written, "only P was written; K is a conflict")
 			assert.Equal(t, []string{K}, d.clusterIDs(u1), "U1 gained no row")
 			d.assertNoCrossClusterWrites(res, map[string]uuid.UUID{K: u1})
 		})
@@ -164,12 +168,16 @@ func TestLink_Postgres(t *testing.T) {
 			assert.Equal(t, u1, res.UserID)
 			assert.Equal(t, K, res.CanonicalSourceID)
 			assert.Empty(t, res.Conflicts)
+			assert.False(t, res.Created)
+			assert.Zero(t, res.Written)
 			assert.Equal(t, []string{K}, d.clusterIDs(u1))
 
 			res, err = linker.Link(ctx, K, []Source{secretKey(K), phrase(P2)})
 			require.NoError(t, err)
 			assert.Equal(t, u1, res.UserID)
 			assert.Empty(t, res.Conflicts)
+			assert.False(t, res.Created)
+			assert.Equal(t, 1, res.Written)
 			assert.ElementsMatch(t, []string{K, P2}, idsOf(res.Sources))
 			assert.Equal(t, u1, d.ownerOf(P2))
 			assert.Equal(t, K, d.canonicalOf(u1), "canonical id is unchanged by a later phrase")
@@ -377,12 +385,15 @@ func TestLink_Postgres(t *testing.T) {
 					assert.Equal(t, resP.UserID, resS.UserID, "iteration %d: S resolves to P's cluster", i)
 					assert.Equal(t, P, resS.CanonicalSourceID, "iteration %d", i)
 					assert.Empty(t, resP.Conflicts, "iteration %d", i)
+					assert.False(t, resS.Created, "iteration %d: the provisional users row was rolled back", i)
+					assert.Zero(t, resS.Written, "iteration %d", i)
 					assert.Zero(t, d.usersWithCanonical(S), "iteration %d: no orphan users row for S", i)
 				} else {
 					rooted++
 					// S got there first: it roots its own cluster and P sees a conflict.
 					require.Equal(t, resS.UserID, owner, "iteration %d: S must be under one of the two callers", i)
 					assert.Equal(t, S, resS.CanonicalSourceID, "iteration %d", i)
+					assert.True(t, resS.Created, "iteration %d", i)
 					assert.Equal(t, []string{S}, resP.Conflicts, "iteration %d", i)
 					assert.Equal(t, 1, d.usersWithCanonical(S), "iteration %d", i)
 				}
@@ -440,6 +451,8 @@ func TestLink_Postgres(t *testing.T) {
 		res, err := linker.Link(ctx, S, []Source{phrase(S), secretKey(K)})
 		require.NoError(t, err, "a users row with no source row must not make the signer unlinkable")
 		assert.Equal(t, orphan, res.UserID, "the existing users row is adopted so the exposed id stays stable")
+		assert.False(t, res.Created, "adoption inserted no users row")
+		assert.Equal(t, 2, res.Written)
 		assert.Equal(t, S, res.CanonicalSourceID)
 		assert.Equal(t, orphan, d.ownerOf(S), "the signer's source row is restored")
 		assert.Equal(t, orphan, d.ownerOf(K))
@@ -466,7 +479,7 @@ func TestLink_Postgres(t *testing.T) {
 			{"non-canonical source id", S, []Source{phrase(S), secretKey(strings.ToUpper(X))}, ErrNonCanonicalSourceID},
 			{"non-canonical signer", strings.ToUpper(S), []Source{phrase(strings.ToUpper(S))}, ErrNonCanonicalSourceID},
 			{"empty body", S, nil, ErrSignerNotInBody},
-			{"more than 128 sources", S, func() []Source {
+			{"more than MaxLinkSources sources", S, func() []Source {
 				out := []Source{phrase(S)}
 				for len(out) <= MaxLinkSources {
 					out = append(out, secretKey(newID(t)))
@@ -485,7 +498,7 @@ func TestLink_Postgres(t *testing.T) {
 		}
 	})
 
-	t.Run("full batch of 128 sources links in one call", func(t *testing.T) {
+	t.Run("full batch of MaxLinkSources sources links in one call", func(t *testing.T) {
 		P := newID(t)
 		sources := []Source{phrase(P)}
 		for len(sources) < MaxLinkSources {
