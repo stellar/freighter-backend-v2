@@ -349,8 +349,8 @@ func TestServeCmd_AcceptsAuthClockSkewLeewayBoundaries(t *testing.T) {
 }
 
 // The defaults: 1H=5m, 1D=15m, 1W=1h, 1M=6h, 1Y=24h, ALL=7d; fetch
-// budget 9s (matching prices); $7k volume threshold with the unit conversion
-// shipped DISABLED (divisor 0 → verdict null); stats TTL 1h.
+// budget 9s (matching prices); $7k volume threshold with volume7d converted
+// at 1e7 (USD scaled by 1e7); stats TTL 1h.
 func TestServeCmd_PriceHistoryFlagDefaults(t *testing.T) {
 	t.Parallel()
 
@@ -385,7 +385,7 @@ func TestServeCmd_PriceHistoryFlagDefaults(t *testing.T) {
 
 	divisor, err := cmd.Flags().GetFloat64("price-history-volume-7d-conversion-divisor")
 	require.NoError(t, err)
-	assert.Equal(t, float64(0), divisor, "the volume7d unit conversion ships disabled — enabling it is a config change")
+	assert.Equal(t, float64(10000000), divisor, "Stellar Expert's volume7d is USD scaled by 1e7, so the verdict works with no config")
 }
 
 func TestServeCmd_PriceHistoryValidation(t *testing.T) {

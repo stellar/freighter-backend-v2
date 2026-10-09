@@ -63,12 +63,11 @@ PRICE_HISTORY_CACHE_TTL_ALL_SECONDS = "604800"
 PRICE_HISTORY_FETCH_TIMEOUT_SECONDS = "not-set"
 # Low-volume warning threshold in USD 7-day volume; 0 disables the guard.
 PRICE_HISTORY_MIN_VOLUME_7D_USD = "7000"
-# Raw-volume7d → USD conversion divisor. Units are UNCONFIRMED upstream, so
-# this ships 0, which disables the conversion and makes the lowVolume
-# verdict null — with no conversion there is no check, and a false would
-# claim every token passed one.
-# Enabling the guard once units are confirmed is this one config change.
-PRICE_HISTORY_VOLUME_7D_CONVERSION_DIVISOR = "0"
+# Raw-volume7d → USD conversion divisor. Stellar Expert reports volume7d as
+# USD scaled by 1e7, the default. 0 disables the conversion and makes the
+# lowVolume verdict null — with no conversion there is no check, and a false
+# would claim every token passed one.
+PRICE_HISTORY_VOLUME_7D_CONVERSION_DIVISOR = "10000000"
 # TTL of the cached token-stats asset payload (shared with the volume verdict).
 TOKEN_STATS_CACHE_TTL_SECONDS = "3600"
 
