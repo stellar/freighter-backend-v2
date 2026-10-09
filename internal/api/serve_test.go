@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
@@ -470,4 +472,89 @@ func TestApiServer_initHandlers_AllUserFacingRoutesGatedInStrict(t *testing.T) {
 			rt.method, rt.pattern)
 	}
 	require.Positive(t, gated, "expected routes() to contain at least one gated route")
+}
+
+// TestApiServer_initHandlers_RequireAuthRoutesRejectAnonymousInBothModes proves
+// that every route declaring requireAuth in routes() runs auth.Required
+// REGARDLESS of the global --auth-mode. Production runs permissive, where the
+// shared gate serves anonymous requests and tolerates wrong-clock tokens; a
+// route that writes user-scoped data must do neither. Two probes per mode:
+//
+//   - no token at all: permissive would fall through anonymously, Required 401s;
+//   - an expired (signature-valid) token: permissive would serve it anonymously
+//     as a wrong-clock client, Required 401s.
+//
+// Either probe passing under permissive would mean the route picked up the
+// shared gate instead of its own. The test also pins that the table contains the
+// link route with requireAuth and that requireAuth implies gated, so the
+// strict-mode guard above keeps covering it too.
+func TestApiServer_initHandlers_RequireAuthRoutesRejectAnonymousInBothModes(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	sub := hex.EncodeToString(pub)
+
+	for _, mode := range []string{"permissive", "strict"} {
+		t.Run(mode, func(t *testing.T) {
+			s := newTestAPIServer(t, testCfg(mode))
+			mux, err := s.initHandlers()
+			require.NoError(t, err)
+			rts, err := s.routes()
+			require.NoError(t, err)
+
+			var covered []string
+			for _, rt := range rts {
+				if !rt.requireAuth {
+					continue
+				}
+				assert.True(t, rt.gated, "%s %s: requireAuth must imply gated", rt.method, rt.pattern)
+				assert.True(t, rt.enabled, "%s %s: a requireAuth route must be registered for this guard to probe it", rt.method, rt.pattern)
+				covered = append(covered, rt.method+" "+rt.pattern)
+				path := wildcardSegment.ReplaceAllString(rt.pattern, "probe")
+
+				rec := httptest.NewRecorder()
+				mux.ServeHTTP(rec, httptest.NewRequest(rt.method, path, nil))
+				assert.Equal(t, http.StatusUnauthorized, rec.Code,
+					"%s %s: anonymous must 401 under %s", rt.method, rt.pattern, mode)
+
+				// Expired by far more than the leeway, signed by a real key: the
+				// shared permissive gate would serve this anonymously.
+				expired := authtest.MintToken(t, priv, sub, rt.method+" "+path, auth.MaxTokenLifetime,
+					time.Now().Add(-24*time.Hour), nil)
+				req := httptest.NewRequest(rt.method, path, nil)
+				req.Header.Set("Authorization", "Bearer "+expired)
+				rec = httptest.NewRecorder()
+				mux.ServeHTTP(rec, req)
+				assert.Equal(t, http.StatusUnauthorized, rec.Code,
+					"%s %s: an expired token must 401 under %s (permissive fall-through must not apply)", rt.method, rt.pattern, mode)
+			}
+			assert.Contains(t, covered, "POST /api/v1/user/link", "the link route must declare requireAuth")
+		})
+	}
+}
+
+// A valid token reaches the link handler under permissive: the Required wrap
+// rejects the anonymous and wrong-clock cases above, not authenticated ones.
+// With no database in the test server the handler answers 503, which is past
+// the auth gate and proves the request was served by the handler itself.
+func TestApiServer_initHandlers_UserLinkValidTokenReachesHandler(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	sub := hex.EncodeToString(pub)
+
+	mux, err := newTestAPIServer(t, testCfg("permissive")).initHandlers()
+	require.NoError(t, err)
+
+	// The body must hash into the token; its consent is irrelevant here because
+	// the DB-disabled check runs after validation only when the consents verify,
+	// so sign a real one.
+	iat := time.Now()
+	sig := ed25519.Sign(priv, auth.LinkConsentMessage(sub, auth.SourceKindPhrase, sub, iat))
+	body := []byte(`{"sources":[{"id":"` + sub + `","kind":"phrase","sig":"` + base64.StdEncoding.EncodeToString(sig) + `"}]}`)
+	token := authtest.MintToken(t, priv, sub, "POST /api/v1/user/link", auth.MaxTokenLifetime, iat, body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/user/link", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "past auth, into the handler, which has no DB: %s", rec.Body.String())
 }

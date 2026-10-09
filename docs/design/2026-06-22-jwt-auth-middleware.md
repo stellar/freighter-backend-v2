@@ -1,6 +1,6 @@
 # JWT Authentication — Design
 
-- **Tickets:** [#88](https://github.com/stellar/freighter-backend-v2/issues/88) (verifier + middleware), [#114](https://github.com/stellar/freighter-backend-v2/issues/114) (applied to all user-facing routes), [#164](https://github.com/stellar/freighter-backend-v2/issues/164) (`sub` is a source id; lazy user resolution)
+- **Tickets:** [#88](https://github.com/stellar/freighter-backend-v2/issues/88) (verifier + middleware), [#114](https://github.com/stellar/freighter-backend-v2/issues/114) (applied to all user-facing routes), [#164](https://github.com/stellar/freighter-backend-v2/issues/164) (`sub` is a source id; lazy user resolution), [#165](https://github.com/stellar/freighter-backend-v2/issues/165) (`POST /api/v1/user/link` with signed consents)
 - **Reference:** [Freighter Unified User Model Storage](https://github.com/stellar/wallet-eng-monorepo/blob/main/design-docs/contact-lists/Freighter%20Unified%20User%20Model%20Storage.md) — user ID derivation, auth flow, JWT claims
 - **Last updated:** 2026-10-09
 - **Status:** Current
@@ -166,6 +166,12 @@ guard test enumerates the same `routes()`, so a newly-added route is auto-covere
 - **Gated (user-facing):** `/api/v1/protocols`, `/api/v1/collectibles`,
   `/api/v1/ledger-key/accounts`, `/api/v1/feature-flags`, `/api/v1/accounts/balances`,
   `/api/v1/token-prices`, `/api/v1/accounts/{address}/transactions`, `/api/v1/auth/whoami`.
+- **Always `auth.Required` (`requireAuth: true`, independent of `AUTH_MODE`):** `POST /api/v1/user/link`.
+  It is the only write to the identity tables and has no anonymous form, so it is wrapped with its
+  own `middleware.Auth(verifier, auth.Required, m)` value even while the global mode is permissive.
+  The `RequireAuthRoutesRejectAnonymousInBothModes` guard test probes every such route under both
+  modes with no token and with an expired-but-signed token, the two cases the permissive gate would
+  have served.
 - **Anonymous in every mode (registered bare, never wrapped):** the infra liveness/readiness
   probes `/api/v1/ping`, `/api/v1/db-health`, `/api/v1/rpc-health`. K8s and the docker-compose
   healthcheck cannot present per-request JWTs, and `db-health` is designed never to fail the
@@ -175,10 +181,40 @@ Because auth wraps the handler *inside* the mux, it runs **after** routing — s
 `Logging`/`Metrics` middleware (which are outer, wrapping the whole mux) capture auth 401s, and the
 HTTP metrics `handler` label (from `r.Pattern`) stays correct for authenticated requests.
 
-A future user-scoped route that needs a policy *different* from the global mode (e.g. always
-`auth.Required` regardless of `AUTH_MODE`) would wrap explicitly with its own `Auth` value —
-e.g. `middleware.Auth(verifier, auth.Required, m)(contactsHandler)` — rather than relying on the
-shared `authed` the table applies to every `gated` route.
+A user-scoped route that needs a policy *different* from the global mode (always `auth.Required`
+regardless of `AUTH_MODE`) declares `requireAuth: true` in the table. `initHandlers` wraps it with a
+second `Auth` value pinned to `auth.Required` (same verifier, same metrics) instead of the shared
+`authed`. `requireAuth` implies `gated`, so the strict-mode guard still enumerates it.
+
+## Linking sources: `POST /api/v1/user/link`
+
+A valid JWT proves possession of *some* keypair, and anyone can mint one, so the link endpoint
+accepts no claimed source or user id. Every source in the body carries a consent signed by that
+source's own key over a domain-separated, newline-delimited message that binds it to the caller:
+
+```
+freighter-user-link-v2 \n source \n <id> \n <kind> \n <signingSourceId> \n <iat as unix seconds>
+```
+
+`signingSourceId` is the JWT `sub`, and `iat` is the token's **verified** issued-at, read from the
+request context (`auth.IssuedAtFromContext`), never from the body. `kind` (`phrase` |
+`secret_key`) is read from the signed bytes and stored from there, so a kind edited after signing
+fails verification. `auth.LinkConsentMessage` builds the bytes and `auth.VerifyLinkConsent` checks
+one consent; the format is a cross-platform contract pinned by fixture vectors (#166), so a later
+change needs a new domain prefix, not an edit.
+
+Resolution (`users.Linker.Link`) runs in one transaction: take `pg_advisory_xact_lock` on
+`hashtext(source_id)` for every submitted id, with the *lock keys* deduplicated and sorted so a
+hash collision cannot reverse lock order; read the submitted rows; resolve `sub` (an existing row
+is the caller's user, otherwise a new `users` row with `canonical_source_id = sub`); then for every
+other source insert it under the caller if unclaimed, do nothing if already the caller's, and report
+it in `conflicts` if it belongs to another user. A claimed source is never moved, two populated
+clusters never combine, no row is retired, and `canonical_source_id` is never updated.
+
+Status codes: `400` for a malformed body (empty, more than 128 sources, a repeated id, a non-
+canonical id, an unknown kind, or a body missing `sub`); `403` for a consent that does not verify;
+`401` only as a backstop, since the route is always `auth.Required`; `503` with the database
+disabled. A conflict is a `200` with the id listed, not an error.
 
 ## Architecture
 
@@ -190,13 +226,16 @@ internal/auth/                     pure verifier primitive — no HTTP/config/me
   mode.go        Mode enum (Permissive|Required) + ParseMode("permissive"|"strict")
   errors.go      ErrNoToken (sentinel), ErrUnauthorized, VerificationError + Reason
   helpers.go     HashBody (SHA-256 hex)
+  linkproof.go   LinkConsentMessage / VerifyLinkConsent (the v2 consent contract); source kinds; IsCanonicalSourceID
   context.go     ContextWithSourceID / SourceIDFromContext; ContextWithIssuedAt / IssuedAtFromContext
 internal/users/users.go            ResolveUser(ctx, sourceID) → (userID, canonicalSourceID); ErrSourceNotFound; the user-scoped access rule
+internal/users/link.go             Linker.Link: the only write to users/user_sources, one transaction under ordered advisory locks
 internal/api/middleware/auth.go    Auth(verifier, mode, metrics) Middleware; 401 via httperror; injects sourceID + iat; no DB
 internal/api/handlers/whoami.go    echoes the authenticated sourceID (auth smoke-test surface; does not resolve the user)
+internal/api/handlers/user_link.go POST /api/v1/user/link: validates the body, verifies every consent, then calls Linker.Link
 internal/config/config.go          AuthMode field (permissive|strict), validated at load
 internal/metrics/metrics.go        auth counter (adoption/rejection signal)
-internal/api/serve.go              routes() table + per-route Auth wrapping in initHandlers; health routes gated=false (bare)
+internal/api/serve.go              routes() table + per-route Auth wrapping in initHandlers; health routes gated=false (bare); requireAuth routes pinned to Required
 ```
 
 **Boundaries:** `internal/auth` owns the *mechanism* (is this token cryptographically valid for its
@@ -317,6 +356,14 @@ logging middleware.
 
 - Config var: `AUTH_MODE` / `--auth-mode` (default `permissive`).
 - Route: `GET /api/v1/auth/whoami` (auth smoke-test surface).
+- Route: `POST /api/v1/user/link` (always `auth.Required`; the only identity write).
+- **link tests:** consent verifier vectors in `internal/auth` (both kinds, signer-as-subject, kind /
+  signer / iat altered after signing, wrong key, non-standard base64); the handler's rejection table
+  against a fake store that must never be reached; the resolve-by-signer matrix, canonical-root,
+  concurrency (same signer ×100, different signers sharing a key) and no-cross-cluster-writes cases
+  against Postgres in `internal/users` (`make integration-test`); and an end-to-end suite in
+  `internal/integrationtests` that proves the Required wrap under the container's permissive mode
+  and the consent's binding to the token's `iat`.
 - **`users` pkg tests:** `ResolveUser` returns the user for a known source (from either its
   canonical or a linked source) and `ErrSourceNotFound` for an unknown one, against a fake row
   (unit) and a migrated Postgres (`make integration-test`).
