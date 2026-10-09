@@ -16,7 +16,8 @@ import (
 // Unlike wallet-backend's JWTManager, there is no pre-configured/allowlisted
 // server key: the verification key is derived from the token's own subject, so
 // the token proves "whoever signed this controls the private key for pubkey
-// <sub>" — which is exactly the user identity. All validation failures wrap
+// <sub>" — which is exactly the source identity. Which user owns that source is
+// not decided here (see users.ResolveUser). All validation failures wrap
 // ErrUnauthorized; an expired token additionally surfaces as *ExpiredTokenError.
 func ParseJWT(tokenString, methodAndPath string, body []byte) (*Claims, error) {
 	return parseJWT(tokenString, methodAndPath, body, ClockSkewLeeway)
@@ -98,10 +99,10 @@ func parseJWT(tokenString, methodAndPath string, body []byte, leeway time.Durati
 		return nil, err
 	}
 
-	// Canonicalize the subject before exposing it as the user ID. hex.DecodeString
+	// Canonicalize the subject before exposing it as the source id. hex.DecodeString
 	// accepts upper/mixed-case, so the same key could otherwise arrive as distinct
 	// strings; re-encoding the decoded bytes yields the canonical lowercase form so
-	// callers that key storage/cache by the user ID never split one key into two.
+	// the user_sources lookup keyed by it never splits one key into two.
 	claims.Subject = hex.EncodeToString(pubKey)
 
 	return claims, nil

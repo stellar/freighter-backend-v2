@@ -93,10 +93,13 @@ func TestAuth_TruthTable(t *testing.T) {
 				reached    bool
 				gotUserID  string
 				gotHasUser bool
+				gotIat     time.Time
+				gotHasIat  bool
 			)
 			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				reached = true
-				gotUserID, gotHasUser = auth.UserIDFromContext(r.Context())
+				gotUserID, gotHasUser = auth.SourceIDFromContext(r.Context())
+				gotIat, gotHasIat = auth.IssuedAtFromContext(r.Context())
 				w.WriteHeader(http.StatusOK)
 			})
 
@@ -116,8 +119,13 @@ func TestAuth_TruthTable(t *testing.T) {
 				assert.False(t, reached, "handler must not be reached on 401")
 			}
 			assert.Equal(t, tc.wantUserID, gotHasUser)
+			// The verified iat travels with the source id: present exactly when the
+			// source id is, so a consent signed over it can never come from an
+			// anonymous (or permitted wrong-clock) request.
+			assert.Equal(t, tc.wantUserID, gotHasIat, "iat must be set iff the source id is")
 			if tc.wantUserID {
 				assert.Equal(t, tc.wantUserIDeq, gotUserID)
+				assert.Equal(t, now.Unix(), gotIat.Unix(), "iat must be the token's verified issued-at")
 			}
 		})
 	}
@@ -164,7 +172,7 @@ func TestAuth_PermissiveForgedTokenOutcomes(t *testing.T) {
 			reached := false
 			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				reached = true
-				_, hasUser = auth.UserIDFromContext(r.Context())
+				_, hasUser = auth.SourceIDFromContext(r.Context())
 				w.WriteHeader(http.StatusOK)
 			})
 			handler := Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, m)(next)
