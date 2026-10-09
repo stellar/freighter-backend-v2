@@ -46,8 +46,13 @@ func truncateForLog(s string) string { return truncate(s, maxLoggedIssuerLen) }
 //   - Required: any request without a valid token is rejected with 401, clock
 //     failures included.
 //
-// On success the authenticated user ID is attached to the request context
-// (retrieve it with auth.UserIDFromContext). authMetrics may be nil.
+// On success the authenticated SOURCE id (the JWT `sub`) and the token's verified
+// `iat` are attached to the request context (auth.SourceIDFromContext,
+// auth.IssuedAtFromContext). That is all this middleware produces: it is pure
+// signature verification with no database dependency, and it must stay that way.
+// A source id is not a user id; handlers that need the user resolve it lazily
+// with users.ResolveUser, so routes that never need one never pay for the
+// lookup. authMetrics may be nil.
 func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metrics.Auth) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -56,9 +61,11 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 			case err == nil:
 				metrics.RecordAuth(authMetrics, "authenticated", "ok", metrics.SanitizeClient(identity.Issuer))
 				f := logger.FieldsFromContext(r.Context())
-				f.Set("user_id", identity.UserID)
+				f.Set("source_id", identity.SourceID)
 				f.Set("iss", truncateForLog(identity.Issuer))
-				r = r.WithContext(auth.ContextWithUserID(r.Context(), identity.UserID))
+				ctx := auth.ContextWithSourceID(r.Context(), identity.SourceID)
+				ctx = auth.ContextWithIssuedAt(ctx, identity.IssuedAt)
+				r = r.WithContext(ctx)
 
 			case errors.Is(err, auth.ErrNoToken):
 				if mode == auth.Required {
@@ -168,7 +175,7 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 				logger.FieldsFromContext(r.Context()).Set("iss", loggedIss)
 				// iss_verified makes the trust level of iss self-describing. Without
 				// it, a permitted request logs a spoofable iss alongside a 200, and
-				// the only tell is the ABSENCE of user_id — so any aggregation by iss
+				// the only tell is the ABSENCE of source_id — so any aggregation by iss
 				// over 200s silently mixes verified and unverified issuers. Kept as a
 				// boolean beside iss rather than a renamed key so existing iss
 				// queries keep working and can filter on it.
@@ -183,7 +190,7 @@ func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, authMetrics *metric
 					"path", r.URL.Path)
 
 				if permitted {
-					// Fall through to next.ServeHTTP below — anonymous, no userID.
+					// Fall through to next.ServeHTTP below — anonymous, no source id.
 					break
 				}
 				httperror.Unauthorized("unauthorized", nil).Render(w)

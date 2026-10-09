@@ -103,7 +103,7 @@ unit-test-coverage: ## Run unit tests with coverage
 
 integration-test: ## Run integration tests
 	@echo "==> Running integration tests..."
-	ENABLE_INTEGRATION_TESTS=true go test -v ./internal/integrationtests/... ./internal/db/...
+	ENABLE_INTEGRATION_TESTS=true go test -v ./internal/integrationtests/... ./internal/db/... ./internal/users/...
 
 test-all: unit-test-coverage integration-test ## Run all tests
 	@echo "✅ All tests completed successfully"
