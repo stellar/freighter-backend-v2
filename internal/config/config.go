@@ -168,11 +168,10 @@ type PriceHistoryConfig struct {
 	// (0 disables the guard).
 	MinVolume7dUSD float64
 	// Volume7dConversionDivisor converts the raw upstream volume7d into USD
-	// (raw ÷ divisor). The raw units are UNCONFIRMED, so the default 0
-	// leaves the conversion disabled, which makes the lowVolume verdict
+	// (raw ÷ divisor). Stellar Expert reports it as USD scaled by 1e7, the
+	// default. 0 disables the conversion and makes the lowVolume verdict
 	// NULL — with no conversion there is no check to pass, and a false
-	// would assert one that never ran. Enabling the guard once units are
-	// confirmed is a config change, not a code change.
+	// would assert one that never ran.
 	Volume7dConversionDivisor float64
 	// TokenStatsCacheTTLSeconds is the tokenstats:v1 asset-payload cache TTL.
 	TokenStatsCacheTTLSeconds int
