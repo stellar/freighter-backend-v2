@@ -16,11 +16,12 @@ import (
 // POST /api/v1/user/link, so a consent can never be confused with an auth JWT
 // or any other message signed by the same key.
 //
-// The format is a cross-platform contract pinned by fixture vectors
-// (internal/auth/link_proof_vectors.json, #166) that the extension and mobile
-// clients replay in their own test suites. Changing the message in any way
-// invalidates every client, so a later format gets a NEW prefix and a new vector
-// file rather than an edit to this one. The retired three-field
+// The format is a cross-platform contract. #166 publishes fixture vectors
+// (internal/auth/link_proof_vectors.json) that the extension and mobile clients
+// replay in their own test suites; until that lands, this file and its tests are
+// the only pin. Changing the message in any way invalidates every client, so a
+// later format gets a NEW prefix and a new vector file rather than an edit to
+// this one. The retired three-field
 // `freighter-user-link-v1` message (no kind) must not be reintroduced.
 const LinkConsentDomain = "freighter-user-link-v2"
 
@@ -50,9 +51,13 @@ func IsValidSourceKind(kind string) bool {
 //
 // id is the hex public key of the source giving consent, kind is its
 // SourceKind, signingSourceID is the JWT `sub` of the caller the consent is
-// bound to, and iat is that JWT's verified issued-at. Binding the consent to
-// the signer and the token's issue time means a captured consent cannot be
-// replayed by another caller or under a later token.
+// bound to, and iat is that JWT's verified issued-at, floored to whole seconds
+// (clients must floor too, never round). Binding the consent to the signer
+// means only the holder of `sub` can present it. Binding it to iat bounds its
+// freshness: the server accepts a token's iat only within the clock-skew window
+// (see ClockSkewLeeway and MaxTokenLifetime), so a captured consent is usable
+// by that same signer for a few minutes and by nobody else, ever. It is a
+// freshness bound, not a binding to one specific token.
 func LinkConsentMessage(id, kind, signingSourceID string, iat time.Time) []byte {
 	return []byte(strings.Join([]string{
 		LinkConsentDomain,

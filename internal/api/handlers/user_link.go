@@ -91,7 +91,8 @@ type UserLinkedSource struct {
 //     behind auth.Required).
 //   - 403: a consent that does not verify: forged, signed by another key, or
 //     bound to a different signer, kind, or issue time than this request's.
-//   - 503: the database is disabled.
+//   - 503: the database is disabled, or the request was canceled.
+//   - 504: the request deadline passed inside the store.
 func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
@@ -126,11 +127,17 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 		case errors.Is(err, users.ErrTooManySources),
 			errors.Is(err, users.ErrRepeatedSource),
 			errors.Is(err, users.ErrSignerNotInBody),
-			errors.Is(err, users.ErrUnknownSourceKind):
+			errors.Is(err, users.ErrUnknownSourceKind),
+			errors.Is(err, users.ErrNonCanonicalSourceID):
 			// validateLinkSources already enforces these; reaching here means the
 			// two drifted. Still a client-visible 400, but log it as the bug it is.
 			logger.ErrorWithContext(ctx, "link store rejected a request the handler accepted", "error", err)
 			return httperror.BadRequest("invalid link request", err)
+		case errors.Is(err, context.DeadlineExceeded):
+			// The store's own lock/statement timeouts surface as a pgx error, not
+			// this; this is the request context's deadline. Same mapping as the
+			// wallet-backend handlers: a timeout is a 504, not an operational 500.
+			return httperror.GatewayTimeout("linking sources timed out", err)
 		case errors.Is(err, context.Canceled):
 			return httperror.ServiceUnavailable("request canceled", err)
 		default:
@@ -146,9 +153,6 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 	}
 	for _, s := range res.Sources {
 		out.Sources = append(out.Sources, UserLinkedSource{ID: s.ID, Kind: s.Kind, CreatedAt: s.CreatedAt})
-	}
-	if out.Conflicts == nil {
-		out.Conflicts = []string{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -18,6 +18,20 @@ import (
 // and small enough that the advisory-lock loop and the IN list stay cheap.
 const MaxLinkSources = 128
 
+// Per-transaction timeouts, applied with SET LOCAL so they end with the
+// transaction. The advisory locks below block indefinitely by default, and a
+// blocked link transaction pins a pool connection that every DB-backed route
+// shares, so a wait that outlives the HTTP write timeout (10s) helps nobody.
+// lockTimeout bounds each lock wait; statementTimeout bounds every statement.
+// Both are below the server write timeout so the client sees a clean error
+// rather than a dropped connection. Values are milliseconds; SET cannot take
+// bind parameters, so they are formatted into the statement from these
+// constants and never from input.
+const (
+	linkLockTimeoutMs      = 3000
+	linkStatementTimeoutMs = 5000
+)
+
 // Source is one entry of a link request after its consent has been verified:
 // the canonical hex source id and the kind read from the signed bytes.
 type Source struct {
@@ -81,12 +95,16 @@ func NewLinker(db TxBeginner) *Linker {
 //     therefore serialize, which is what makes "exactly one users row" hold when
 //     two callers sign as the same unclaimed source at once.
 //  2. Read every submitted id's existing row.
-//  3. Resolve the signer. If it has a row, the caller is that user. If not,
-//     insert a users row with canonical_source_id = signerID and the signer's
-//     row under it: the signer is the root of a new cluster.
+//  3. Resolve the signer with ResolveUser on the transaction. If it has a row,
+//     the caller is that user. If not, the signer is the root of a new cluster:
+//     insert a users row with canonical_source_id = signerID (or adopt one that
+//     already carries that canonical id but lost its source row, so a repaired
+//     or partially restored table cannot lock a wallet out forever) and the
+//     signer's row under it.
 //  4. For every other source: no row, insert it under the caller's user; a row
 //     under the caller's user, nothing; a row under another user, report it in
-//     Conflicts and leave it untouched.
+//     Conflicts and leave it untouched. New rows go in with one multi-row
+//     INSERT.
 //
 // Invariants this preserves: a claimed source is never moved, two populated
 // clusters never combine, no row is ever retired, no users row is ever deleted,
@@ -104,6 +122,13 @@ func (l *Linker) Link(ctx context.Context, signerID string, sources []Source) (*
 	// which is ignored here), so this is safe on every path.
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback on the error path; no-op after commit
 
+	// No bind parameters, so pgx uses the simple protocol and both statements go
+	// in one round trip.
+	if _, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL lock_timeout = %d; SET LOCAL statement_timeout = %d",
+		linkLockTimeoutMs, linkStatementTimeoutMs)); err != nil {
+		return nil, fmt.Errorf("setting link transaction timeouts: %w", err)
+	}
+
 	ids := make([]string, len(sources))
 	for i, s := range sources {
 		ids[i] = s.ID
@@ -119,24 +144,22 @@ func (l *Linker) Link(ctx context.Context, signerID string, sources []Source) (*
 	}
 
 	// Resolve the signer to a user, creating the cluster if the signer is new.
-	var userID uuid.UUID
-	var canonical string
-	if row, ok := existing[signerID]; ok {
-		userID = row.userID
-		if err = tx.QueryRow(ctx, `SELECT canonical_source_id FROM users WHERE id = $1`, userID).Scan(&canonical); err != nil {
-			return nil, fmt.Errorf("reading canonical source for user %s: %w", userID, err)
-		}
-	} else {
-		signerKind := kindOf(sources, signerID)
-		if err = tx.QueryRow(ctx,
-			`INSERT INTO users (canonical_source_id) VALUES ($1) RETURNING id`, signerID).Scan(&userID); err != nil {
-			return nil, fmt.Errorf("creating user for source %s: %w", signerID, err)
-		}
-		if _, err = tx.Exec(ctx,
-			`INSERT INTO user_sources (source_id, user_id, kind) VALUES ($1, $2, $3)`, signerID, userID, signerKind); err != nil {
-			return nil, fmt.Errorf("inserting signer source %s: %w", signerID, err)
+	// newRows collects every source this call writes; the signer is one of them
+	// when it is new, so a single INSERT covers both cases.
+	var newRows []Source
+	userID, canonical, err := NewStore(tx).ResolveUser(ctx, signerID)
+	switch {
+	case err == nil:
+		// The caller is an existing user.
+	case errors.Is(err, ErrSourceNotFound):
+		userID, err = createOrAdoptUser(ctx, tx, signerID)
+		if err != nil {
+			return nil, err
 		}
 		canonical = signerID
+		newRows = append(newRows, Source{ID: signerID, Kind: kindOf(sources, signerID)})
+	default:
+		return nil, err
 	}
 
 	conflicts := []string{}
@@ -147,16 +170,17 @@ func (l *Linker) Link(ctx context.Context, signerID string, sources []Source) (*
 		row, ok := existing[s.ID]
 		switch {
 		case !ok:
-			if _, err = tx.Exec(ctx,
-				`INSERT INTO user_sources (source_id, user_id, kind) VALUES ($1, $2, $3)`, s.ID, userID, s.Kind); err != nil {
-				return nil, fmt.Errorf("inserting source %s: %w", s.ID, err)
-			}
+			newRows = append(newRows, s)
 		case row.userID == userID:
 			// Already in the caller's cluster: nothing to do. The stored kind is the
 			// one proven when the row was first written; it is not rewritten.
 		default:
 			conflicts = append(conflicts, s.ID)
 		}
+	}
+
+	if err = insertSources(ctx, tx, userID, newRows); err != nil {
+		return nil, err
 	}
 
 	cluster, err := selectCluster(ctx, tx, userID)
@@ -182,10 +206,11 @@ func (l *Linker) Link(ctx context.Context, signerID string, sources []Source) (*
 // signature work), so hitting one here means a programming error, but the
 // store refuses to rely on that.
 var (
-	ErrTooManySources    = errors.New("too many sources")
-	ErrRepeatedSource    = errors.New("repeated source id")
-	ErrSignerNotInBody   = errors.New("signing source is not among the sources")
-	ErrUnknownSourceKind = errors.New("unknown source kind")
+	ErrTooManySources       = errors.New("too many sources")
+	ErrRepeatedSource       = errors.New("repeated source id")
+	ErrSignerNotInBody      = errors.New("signing source is not among the sources")
+	ErrUnknownSourceKind    = errors.New("unknown source kind")
+	ErrNonCanonicalSourceID = errors.New("source id is not a 64-character lowercase hex public key")
 )
 
 func validateLinkRequest(signerID string, sources []Source) error {
@@ -194,7 +219,15 @@ func validateLinkRequest(signerID string, sources []Source) error {
 	}
 	seen := make(map[string]struct{}, len(sources))
 	signerPresent := false
+	if !auth.IsCanonicalSourceID(signerID) {
+		return fmt.Errorf("%w: signer %q", ErrNonCanonicalSourceID, signerID)
+	}
 	for _, s := range sources {
+		// The JWT parser lowercases sub, and ResolveUser is keyed by that form, so
+		// a row written under any other spelling would never resolve again.
+		if !auth.IsCanonicalSourceID(s.ID) {
+			return fmt.Errorf("%w: %q", ErrNonCanonicalSourceID, s.ID)
+		}
 		if _, dup := seen[s.ID]; dup {
 			return fmt.Errorf("%w: %s", ErrRepeatedSource, s.ID)
 		}
@@ -236,10 +269,61 @@ func lockSources(ctx context.Context, tx pgx.Tx, ids []string) error {
 	}
 	slices.Sort(keys)
 	keys = slices.Compact(keys)
+	// One round trip for all the locks. A batch executes its queries in queue
+	// order, which is what the sorted keys rely on; an ORDER BY inside a single
+	// SELECT pg_advisory_xact_lock(...) FROM ... would not guarantee the order
+	// the function is evaluated in.
+	batch := &pgx.Batch{}
 	for _, k := range keys {
-		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(k)); err != nil {
-			return fmt.Errorf("locking source key %d: %w", k, err)
-		}
+		batch.Queue(`SELECT pg_advisory_xact_lock($1)`, int64(k))
+	}
+	if err = tx.SendBatch(ctx, batch).Close(); err != nil {
+		return fmt.Errorf("locking source keys: %w", err)
+	}
+	return nil
+}
+
+// createOrAdoptUser returns the users.id for a signer that has no user_sources
+// row. Normally that is a fresh INSERT. If a users row already carries this
+// canonical id, the signer's source row was lost (a manual repair, a partial
+// restore); adopting that row instead of tripping the UNIQUE constraint keeps
+// the wallet linkable and keeps the exposed user id stable, which is exactly
+// what canonical_source_id promises.
+func createOrAdoptUser(ctx context.Context, tx pgx.Tx, signerID string) (uuid.UUID, error) {
+	var userID uuid.UUID
+	err := tx.QueryRow(ctx, `SELECT id FROM users WHERE canonical_source_id = $1`, signerID).Scan(&userID)
+	switch {
+	case err == nil:
+		return userID, nil
+	case errors.Is(err, pgx.ErrNoRows):
+		// Fall through to insert.
+	default:
+		return uuid.Nil, fmt.Errorf("looking up user by canonical source %s: %w", signerID, err)
+	}
+	if err = tx.QueryRow(ctx,
+		`INSERT INTO users (canonical_source_id) VALUES ($1) RETURNING id`, signerID).Scan(&userID); err != nil {
+		return uuid.Nil, fmt.Errorf("creating user for source %s: %w", signerID, err)
+	}
+	return userID, nil
+}
+
+// insertSources writes rows under userID in one statement. A nil or empty slice
+// is a no-op.
+func insertSources(ctx context.Context, tx pgx.Tx, userID uuid.UUID, rows []Source) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	ids := make([]string, len(rows))
+	kinds := make([]string, len(rows))
+	for i, r := range rows {
+		ids[i] = r.ID
+		kinds[i] = r.Kind
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO user_sources (source_id, user_id, kind)
+		 SELECT s.id, $2, s.kind FROM unnest($1::text[], $3::text[]) AS s(id, kind)`,
+		ids, userID, kinds); err != nil {
+		return fmt.Errorf("inserting %d sources: %w", len(rows), err)
 	}
 	return nil
 }
