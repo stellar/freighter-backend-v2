@@ -344,6 +344,94 @@ func TestLink_Postgres(t *testing.T) {
 		})
 	})
 
+	t.Run("concurrency without per-source locks", func(t *testing.T) {
+		t.Run("new signer S races a caller P that links S as a source: S joins P or P conflicts, never both, never an orphan users row", func(t *testing.T) {
+			joined, rooted := 0, 0 // logged so a run shows both branches were exercised
+			defer func() { t.Logf("S joined P's cluster %d times, rooted its own %d times", joined, rooted) }()
+			for i := 0; i < 100; i++ {
+				P, S := newID(t), newID(t)
+				var (
+					resP, resS *LinkResult
+					errP, errS error
+					wg         sync.WaitGroup
+				)
+				wg.Add(2)
+				go func() {
+					defer wg.Done()
+					resP, errP = linker.Link(ctx, P, []Source{phrase(P), secretKey(S)})
+				}()
+				go func() {
+					defer wg.Done()
+					resS, errS = linker.Link(ctx, S, []Source{secretKey(S)})
+				}()
+				wg.Wait()
+				require.NoError(t, errP, "iteration %d", i)
+				require.NoError(t, errS, "iteration %d", i)
+
+				owner := d.ownerOf(S)
+				if owner == resP.UserID {
+					joined++
+					// P got there first: S consented to P's link, so S is a member of
+					// P's cluster and S's own call resolves to it, with no users row
+					// of S's own left behind.
+					assert.Equal(t, resP.UserID, resS.UserID, "iteration %d: S resolves to P's cluster", i)
+					assert.Equal(t, P, resS.CanonicalSourceID, "iteration %d", i)
+					assert.Empty(t, resP.Conflicts, "iteration %d", i)
+					assert.Zero(t, d.usersWithCanonical(S), "iteration %d: no orphan users row for S", i)
+				} else {
+					rooted++
+					// S got there first: it roots its own cluster and P sees a conflict.
+					require.Equal(t, resS.UserID, owner, "iteration %d: S must be under one of the two callers", i)
+					assert.Equal(t, S, resS.CanonicalSourceID, "iteration %d", i)
+					assert.Equal(t, []string{S}, resP.Conflicts, "iteration %d", i)
+					assert.Equal(t, 1, d.usersWithCanonical(S), "iteration %d", i)
+				}
+				assert.Equal(t, 1, d.usersWithCanonical(P), "iteration %d", i)
+			}
+		})
+
+		t.Run("two callers with overlapping batches in opposite order do not deadlock", func(t *testing.T) {
+			for i := 0; i < 50; i++ {
+				P, Q := newID(t), newID(t)
+				shared := []Source{secretKey(newID(t)), secretKey(newID(t)), secretKey(newID(t)), secretKey(newID(t))}
+				reversed := make([]Source, len(shared))
+				for j, s := range shared {
+					reversed[len(shared)-1-j] = s
+				}
+				var (
+					resP, resQ *LinkResult
+					errP, errQ error
+					wg         sync.WaitGroup
+				)
+				wg.Add(2)
+				go func() {
+					defer wg.Done()
+					resP, errP = linker.Link(ctx, P, append([]Source{phrase(P)}, shared...))
+				}()
+				go func() {
+					defer wg.Done()
+					resQ, errQ = linker.Link(ctx, Q, append([]Source{phrase(Q)}, reversed...))
+				}()
+				wg.Wait()
+				require.NoError(t, errP, "iteration %d", i)
+				require.NoError(t, errQ, "iteration %d", i)
+				// Every shared key ended up under exactly one of them and the other
+				// reports it; the split need not be all-or-nothing.
+				for _, s := range shared {
+					owner := d.ownerOf(s.ID)
+					switch owner {
+					case resP.UserID:
+						assert.Contains(t, resQ.Conflicts, s.ID, "iteration %d", i)
+					case resQ.UserID:
+						assert.Contains(t, resP.Conflicts, s.ID, "iteration %d", i)
+					default:
+						t.Fatalf("iteration %d: %s belongs to neither caller", i, s.ID)
+					}
+				}
+			}
+		})
+	})
+
 	t.Run("signer whose users row survived but whose source row was lost is adopted, not bricked", func(t *testing.T) {
 		S, K := newID(t), newID(t)
 		var orphan uuid.UUID
@@ -397,8 +485,6 @@ func TestLink_Postgres(t *testing.T) {
 		}
 	})
 
-	// hashtext collisions share a lock key; the sort+compact must not break on
-	// a real collision, so exercise the lock path with a large, mixed batch.
 	t.Run("full batch of 128 sources links in one call", func(t *testing.T) {
 		P := newID(t)
 		sources := []Source{phrase(P)}
