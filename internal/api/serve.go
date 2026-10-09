@@ -25,6 +25,7 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/services"
 	"github.com/stellar/freighter-backend-v2/internal/store"
 	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/users"
 )
 
 const (
@@ -209,6 +210,15 @@ type route struct {
 	pattern string
 	handler http.Handler
 	gated   bool
+	// requireAuth pins the route to auth.Required REGARDLESS of the global
+	// --auth-mode. The shared gate follows the configured mode, and production
+	// runs permissive, where an anonymous request falls through with no source
+	// id; a route that writes user-scoped data cannot serve that request, so it
+	// opts out of the mode here and is wrapped with its own Required Auth value.
+	// requireAuth implies gated: the route still counts as user-facing for the
+	// strict-mode guard test, and a second test proves it 401s anonymous callers
+	// under BOTH modes.
+	requireAuth bool
 	// enabled reports whether the route should be registered at all. A false entry
 	// stays in this table (so it remains visible and reviewable here, rather than
 	// vanishing behind a conditional append that would make the table's shape depend
@@ -251,6 +261,13 @@ func (s *ApiServer) routes() ([]route, error) {
 		return nil, fmt.Errorf("init account-history handler: %w", err)
 	}
 	whoamiHandler := handlers.NewWhoamiHandler()
+	// Same true-nil discipline as dbPinger: with the DB disabled the handler
+	// answers 503 instead of dereferencing a nil pool.
+	var linker handlers.SourceLinker
+	if s.dbPool != nil {
+		linker = users.NewLinker(s.dbPool)
+	}
+	userLinkHandler := handlers.NewUserLinkHandler(linker)
 
 	return []route{
 		// Health/liveness/readiness probes: gated=false, registered BARE — never
@@ -258,18 +275,18 @@ func (s *ApiServer) routes() ([]route, error) {
 		// per-request JWTs, and db-health is designed never to fail the request;
 		// gating any of these would 401 probes under `--auth-mode strict` and cause
 		// pod churn.
-		{http.MethodGet, "/api/v1/ping", handlers.CustomHandler(healthHandler.CheckHealth), false, true},
-		{http.MethodGet, "/api/v1/rpc-health", handlers.CustomHandler(rpcHealthHandler.CheckRPCHealth), false, true},
-		{http.MethodGet, "/api/v1/db-health", handlers.CustomHandler(dbHealthHandler.CheckDBHealth), false, true},
+		{http.MethodGet, "/api/v1/ping", handlers.CustomHandler(healthHandler.CheckHealth), false, false, true},
+		{http.MethodGet, "/api/v1/rpc-health", handlers.CustomHandler(rpcHealthHandler.CheckRPCHealth), false, false, true},
+		{http.MethodGet, "/api/v1/db-health", handlers.CustomHandler(dbHealthHandler.CheckDBHealth), false, false, true},
 
 		// User-facing routes: gated=true, wrapped in the shared Auth middleware.
 		// Flipping --auth-mode permissive<->strict moves all of these together.
 		// whoami reads the user ID from context and reports authenticated:false when
 		// absent (permissive anonymous).
-		{http.MethodGet, "/api/v1/protocols", handlers.CustomHandler(protocolsHandler.GetProtocols), true, true},
-		{http.MethodPost, "/api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles), true, true},
-		{http.MethodPost, "/api/v1/ledger-key/accounts", handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts), true, true},
-		{http.MethodGet, "/api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags), true, true},
+		{http.MethodGet, "/api/v1/protocols", handlers.CustomHandler(protocolsHandler.GetProtocols), true, false, true},
+		{http.MethodPost, "/api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles), true, false, true},
+		{http.MethodPost, "/api/v1/ledger-key/accounts", handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts), true, false, true},
+		{http.MethodGet, "/api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags), true, false, true},
 		// The wallet-backend-fronted routes, config-gated together by
 		// --wallet-backend-routes-enabled. These are the ONLY two routes that touch
 		// walletBackendService, and both fail identically when it is unconfigured:
@@ -282,13 +299,19 @@ func (s *ApiServer) routes() ([]route, error) {
 		// mode, so there is no state where enabling exactly one is correct. If a route
 		// is ever added here that can work without wallet-backend, give it its own
 		// gate rather than widening this one.
-		{http.MethodPost, "/api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
-		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
+		{http.MethodPost, "/api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances), true, false, s.cfg.AppConfig.WalletBackendRoutesEnabled},
+		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true, false, s.cfg.AppConfig.WalletBackendRoutesEnabled},
 
-		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true, true},
-		{http.MethodGet, "/api/v1/token-price-history", handlers.CustomHandler(tokenPriceHistoryHandler.GetTokenPriceHistory), true, true},
-		{http.MethodGet, "/api/v1/token-stats", handlers.CustomHandler(tokenStatsHandler.GetTokenStats), true, true},
-		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, true},
+		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true, false, true},
+		{http.MethodGet, "/api/v1/token-price-history", handlers.CustomHandler(tokenPriceHistoryHandler.GetTokenPriceHistory), true, false, true},
+		{http.MethodGet, "/api/v1/token-stats", handlers.CustomHandler(tokenStatsHandler.GetTokenStats), true, false, true},
+		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, false, true},
+
+		// The only write to the identity tables. Every source in the body carries a
+		// consent signed by its own key and bound to the JWT sub, so there is no
+		// anonymous form of this request: requireAuth pins it to auth.Required even
+		// while the global mode is permissive. See handlers.UserLinkHandler.
+		{http.MethodPost, "/api/v1/user/link", handlers.CustomHandler(userLinkHandler.Link), true, true, true},
 	}, nil
 }
 
@@ -303,6 +326,10 @@ func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 	// to routes() with gated=true.
 	verifier := auth.NewVerifier(s.cfg.AppConfig.AuthClockSkewLeeway)
 	authed := middleware.Auth(verifier, s.authMode, s.appMetrics.Auth)
+	// A second Auth value pinned to Required for routes that declare
+	// requireAuth. It shares the verifier and the metrics, so its rejections
+	// land in the same freighter_auth_requests_total series.
+	required := middleware.Auth(verifier, auth.Required, s.appMetrics.Auth)
 
 	mux := http.NewServeMux()
 	for _, rt := range rts {
@@ -313,7 +340,10 @@ func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 			continue
 		}
 		h := rt.handler
-		if rt.gated {
+		switch {
+		case rt.requireAuth:
+			h = required(h)
+		case rt.gated:
 			h = authed(h)
 		}
 		mux.Handle(rt.method+" "+rt.pattern, h)
