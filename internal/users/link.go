@@ -14,9 +14,14 @@ import (
 )
 
 // MaxLinkSources bounds how many sources one link request may carry. A wallet
-// links one phrase plus its account keys, so 128 is far above any real client
-// and small enough that the multi-row INSERT and the IN list stay cheap.
-const MaxLinkSources = 128
+// is one phrase plus a handful of account keys, so 32 covers any real client in
+// one call, and a client with more links them in several calls under the same
+// signer. The cap exists because every row this endpoint writes is permanent
+// and any self-minted key can write some: it bounds how far one request
+// amplifies into storage and into ed25519 verifies. #165 specified 128; it was
+// lowered for that reason, since nothing in a request justifies the larger
+// number.
+const MaxLinkSources = 32
 
 // Per-transaction timeouts, applied with SET LOCAL so they end with the
 // transaction. The advisory lock below blocks indefinitely by default, and a
@@ -60,6 +65,13 @@ type LinkResult struct {
 	// Conflicts is every submitted source id that belongs to ANOTHER user. Those
 	// rows are left where they are: a claimed source is never moved. Never nil.
 	Conflicts []string
+	// Created reports that this call inserted a users row: the signer rooted a
+	// new cluster. False when the signer already belonged to a user, when an
+	// orphaned users row was adopted, and when the signer lost the race for its
+	// own row and joined the cluster that claimed it.
+	Created bool
+	// Written is the number of user_sources rows this call inserted.
+	Written int
 }
 
 // TxBeginner is the subset of pgxpool.Pool the Linker needs: it owns the
@@ -93,8 +105,9 @@ func NewLinker(db TxBeginner) *Linker {
 //     one users row" hold when both are the first to claim it. No lock is taken
 //     per source: who wins a contested source is decided by the user_sources
 //     primary key in step 3, so per-source locks would add lock-table pressure
-//     (up to 128 held entries per transaction, against a shared table every
-//     transaction in the database draws from) without adding a guarantee.
+//     (up to MaxLinkSources held entries per transaction, against a shared
+//     table every transaction in the database draws from) without adding a
+//     guarantee.
 //  2. Resolve the signer with ResolveUser on the transaction. If it has a row,
 //     the caller is that user. If not, the signer roots a new cluster: under a
 //     savepoint, insert a users row with canonical_source_id = signerID (or
@@ -154,7 +167,10 @@ func (l *Linker) Link(ctx context.Context, signerID string, sources []Source) (*
 	sortSources(others)
 
 	userID, canonical, err := NewStore(tx).ResolveUser(ctx, signerID)
-	var written map[string]struct{}
+	var (
+		written map[string]struct{}
+		created bool
+	)
 	switch {
 	case err == nil:
 		// The caller is an existing user.
@@ -163,7 +179,7 @@ func (l *Linker) Link(ctx context.Context, signerID string, sources []Source) (*
 			return nil, err
 		}
 	case errors.Is(err, ErrSourceNotFound):
-		userID, canonical, written, err = createCluster(ctx, tx, signerID, kindOf(sources, signerID), others)
+		userID, canonical, written, created, err = createCluster(ctx, tx, signerID, kindOf(sources, signerID), others)
 		if err != nil {
 			return nil, err
 		}
@@ -212,6 +228,8 @@ func (l *Linker) Link(ctx context.Context, signerID string, sources []Source) (*
 		CanonicalSourceID: canonical,
 		Sources:           cluster,
 		Conflicts:         conflicts,
+		Created:           created,
+		Written:           len(written),
 	}, nil
 }
 
@@ -287,17 +305,18 @@ func sortSources(sources []Source) {
 // one sorted INSERT, all under a savepoint. If the signer's own row comes back
 // unwritten, another caller claimed the signer meanwhile; the savepoint is
 // rolled back so the provisional users row never commits, and the signer is
-// re-resolved as a member of that caller's cluster.
-func createCluster(ctx context.Context, tx pgx.Tx, signerID, signerKind string, others []Source) (userID uuid.UUID, canonical string, written map[string]struct{}, err error) {
+// re-resolved as a member of that caller's cluster. created reports whether a
+// users row was actually inserted and kept.
+func createCluster(ctx context.Context, tx pgx.Tx, signerID, signerKind string, others []Source) (userID uuid.UUID, canonical string, written map[string]struct{}, created bool, err error) {
 	sp, err := tx.Begin(ctx) // a nested Begin is a SAVEPOINT in pgx
 	if err != nil {
-		return uuid.Nil, "", nil, fmt.Errorf("creating savepoint: %w", err)
+		return uuid.Nil, "", nil, false, fmt.Errorf("creating savepoint: %w", err)
 	}
 	defer sp.Rollback(ctx) //nolint:errcheck // rollback on the error path; no-op after commit
 
-	userID, err = createOrAdoptUser(ctx, sp, signerID)
+	userID, created, err = createOrAdoptUser(ctx, sp, signerID)
 	if err != nil {
-		return uuid.Nil, "", nil, err
+		return uuid.Nil, "", nil, false, err
 	}
 	rows := make([]Source, 0, len(others)+1)
 	rows = append(rows, Source{ID: signerID, Kind: signerKind})
@@ -305,29 +324,29 @@ func createCluster(ctx context.Context, tx pgx.Tx, signerID, signerKind string, 
 	sortSources(rows)
 	written, err = insertSources(ctx, sp, userID, rows)
 	if err != nil {
-		return uuid.Nil, "", nil, err
+		return uuid.Nil, "", nil, false, err
 	}
 	if _, ok := written[signerID]; ok {
 		if err = sp.Commit(ctx); err != nil {
-			return uuid.Nil, "", nil, fmt.Errorf("releasing savepoint: %w", err)
+			return uuid.Nil, "", nil, false, fmt.Errorf("releasing savepoint: %w", err)
 		}
-		return userID, signerID, written, nil
+		return userID, signerID, written, created, nil
 	}
 
 	// Lost the race for the signer's own row. Discard everything done under the
 	// savepoint and join the cluster that claimed the signer.
 	if err = sp.Rollback(ctx); err != nil {
-		return uuid.Nil, "", nil, fmt.Errorf("rolling back savepoint: %w", err)
+		return uuid.Nil, "", nil, false, fmt.Errorf("rolling back savepoint: %w", err)
 	}
 	userID, canonical, err = NewStore(tx).ResolveUser(ctx, signerID)
 	if err != nil {
-		return uuid.Nil, "", nil, fmt.Errorf("re-resolving signer %s after losing its insert: %w", signerID, err)
+		return uuid.Nil, "", nil, false, fmt.Errorf("re-resolving signer %s after losing its insert: %w", signerID, err)
 	}
 	written, err = insertSources(ctx, tx, userID, others)
 	if err != nil {
-		return uuid.Nil, "", nil, err
+		return uuid.Nil, "", nil, false, err
 	}
-	return userID, canonical, written, nil
+	return userID, canonical, written, false, nil
 }
 
 // createOrAdoptUser returns the users.id for a signer that has no user_sources
@@ -335,23 +354,22 @@ func createCluster(ctx context.Context, tx pgx.Tx, signerID, signerKind string, 
 // canonical id, the signer's source row was lost (a manual repair, a partial
 // restore); adopting that row instead of tripping the UNIQUE constraint keeps
 // the wallet linkable and keeps the exposed user id stable, which is exactly
-// what canonical_source_id promises.
-func createOrAdoptUser(ctx context.Context, tx pgx.Tx, signerID string) (uuid.UUID, error) {
-	var userID uuid.UUID
-	err := tx.QueryRow(ctx, `SELECT id FROM users WHERE canonical_source_id = $1`, signerID).Scan(&userID)
+// what canonical_source_id promises. created is true only for a fresh INSERT.
+func createOrAdoptUser(ctx context.Context, tx pgx.Tx, signerID string) (userID uuid.UUID, created bool, err error) {
+	err = tx.QueryRow(ctx, `SELECT id FROM users WHERE canonical_source_id = $1`, signerID).Scan(&userID)
 	switch {
 	case err == nil:
-		return userID, nil
+		return userID, false, nil
 	case errors.Is(err, pgx.ErrNoRows):
 		// Fall through to insert.
 	default:
-		return uuid.Nil, fmt.Errorf("looking up user by canonical source %s: %w", signerID, err)
+		return uuid.Nil, false, fmt.Errorf("looking up user by canonical source %s: %w", signerID, err)
 	}
 	if err = tx.QueryRow(ctx,
 		`INSERT INTO users (canonical_source_id) VALUES ($1) RETURNING id`, signerID).Scan(&userID); err != nil {
-		return uuid.Nil, fmt.Errorf("creating user for source %s: %w", signerID, err)
+		return uuid.Nil, false, fmt.Errorf("creating user for source %s: %w", signerID, err)
 	}
-	return userID, nil
+	return userID, true, nil
 }
 
 // insertSources writes rows under userID in one statement, skipping any id

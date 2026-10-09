@@ -267,7 +267,7 @@ func (s *ApiServer) routes() ([]route, error) {
 	if s.dbPool != nil {
 		linker = users.NewLinker(s.dbPool)
 	}
-	userLinkHandler := handlers.NewUserLinkHandler(linker)
+	userLinkHandler := handlers.NewUserLinkHandler(linker, s.appMetrics.UserLink)
 
 	return []route{
 		// Health/liveness/readiness probes: gated=false, registered BARE — never

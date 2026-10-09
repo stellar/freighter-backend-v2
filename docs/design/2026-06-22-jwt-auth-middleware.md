@@ -223,13 +223,23 @@ updated.
 
 This departs from the v2 design's *Resolution* step as written, which takes a per-source advisory
 lock on every submitted id. Those locks decided who wins a contested source, which the
-`user_sources` primary key already decides; what they added was up to 128 entries per transaction
+`user_sources` primary key already decides; what they added was up to `MaxLinkSources` entries per transaction
 in Postgres's shared lock table (`max_locks_per_transaction × max_connections`, about 6400 at
 defaults), which a handful of pods under concurrent full-size requests could exhaust and take every
 transaction in the database down with them. Sorting the batch is what keeps two concurrent inserts
 with overlapping ids from deadlocking.
 
-Status codes: `400` for a malformed body (empty, more than 128 sources, a repeated id, a non-
+A request carries at most `users.MaxLinkSources` = 32 sources. #165 specified 128; it was lowered
+because every row this endpoint writes is permanent and any self-minted key can write some, so the
+cap is what bounds how far one request amplifies into storage and ed25519 work. A real wallet is one
+phrase plus a handful of keys; a client with more links in several calls under the same signer.
+The only rate limiter is per-IP at the ingress (#104, in `stellar/kube`), keyed on an
+X-Forwarded-For value that closure itself calls attacker-influenced, and per-`sub` limiting (#105)
+cannot help here since an attacker mints a fresh `sub` per request. A per-route ingress limit on
+this path is the real mitigation and is infra work; `freighter_user_link_requests_total` and
+`freighter_user_link_sources_total` (see Operational notes) are how an attack is seen meanwhile.
+
+Status codes: `400` for a malformed body (empty, more than `MaxLinkSources` sources, a repeated id, a non-
 canonical id, an unknown kind, or a body missing `sub`); `403` for a consent that does not verify;
 `401` only as a backstop, since the route is always `auth.Required`; `503` with the database
 disabled. A conflict is a `200` with the id listed, not an error.
@@ -375,6 +385,12 @@ logging middleware.
 - Config var: `AUTH_MODE` / `--auth-mode` (default `permissive`).
 - Route: `GET /api/v1/auth/whoami` (auth smoke-test surface).
 - Route: `POST /api/v1/user/link` (always `auth.Required`; the only identity write).
+- Metrics: `freighter_user_link_requests_total{result}` with `result` in `created` | `resolved` |
+  `bad_request` | `bad_consent` | `error`, and `freighter_user_link_sources_total{outcome}` with
+  `outcome` in `written` | `conflict`. Alert on the rate of `result="created"`: a real wallet creates
+  one user, once, so a sustained creation rate is a sybil storage-exhaustion attack, and
+  `outcome="written"` says how many permanent rows it is producing. Both label sets are closed and
+  never carry a source id. Reflect in `wallet-eng-runbooks` via the runbook reconcile step.
 - **link tests:** consent verifier vectors in `internal/auth` (both kinds, signer-as-subject, kind /
   signer / iat altered after signing, wrong key, non-standard base64); the handler's rejection table
   against a fake store that must never be reached; the resolve-by-signer matrix, canonical-root,

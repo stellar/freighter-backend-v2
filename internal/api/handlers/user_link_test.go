@@ -17,11 +17,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	"github.com/stellar/freighter-backend-v2/internal/auth"
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/users"
 )
 
@@ -63,14 +66,20 @@ func (f *fakeLinker) Link(_ context.Context, signer string, sources []users.Sour
 
 // doLink runs the handler as the auth middleware would present the request:
 // sub and iat in the context, body as JSON. A nil linker is passed through as a
-// true nil interface (the DB-disabled wiring).
+// true nil interface (the DB-disabled wiring). Metrics are nil, the path the
+// nil-safe record helpers must handle; doLinkWithMetrics covers the other.
 func doLink(t *testing.T, linker *fakeLinker, sub string, iat time.Time, body any) (*httptest.ResponseRecorder, error) {
+	t.Helper()
+	return doLinkWithMetrics(t, linker, nil, sub, iat, body)
+}
+
+func doLinkWithMetrics(t *testing.T, linker *fakeLinker, m *metrics.UserLink, sub string, iat time.Time, body any) (*httptest.ResponseRecorder, error) {
 	t.Helper()
 	var h *UserLinkHandler
 	if linker == nil {
-		h = NewUserLinkHandler(nil)
+		h = NewUserLinkHandler(nil, m)
 	} else {
-		h = NewUserLinkHandler(linker)
+		h = NewUserLinkHandler(linker, m)
 	}
 	var raw []byte
 	switch b := body.(type) {
@@ -206,7 +215,7 @@ func TestUserLink_RejectedWritesNothing(t *testing.T) {
 		{name: "sub not in sources", sub: other.id, iat: iat, body: UserLinkRequest{Sources: valid()}, wantStatus: http.StatusBadRequest, wantMsg: "must include the authenticated source"},
 		{name: "repeated id", sub: P.id, iat: iat, body: UserLinkRequest{Sources: []UserLinkSource{valid()[0], valid()[1], valid()[1]}}, wantStatus: http.StatusBadRequest, wantMsg: "sources[2].id is repeated"},
 		{name: "two consents for one id with different kinds", sub: P.id, iat: iat, body: UserLinkRequest{Sources: []UserLinkSource{valid()[0], K.consent(auth.SourceKindSecretKey, P.id, iat), K.consent(auth.SourceKindPhrase, P.id, iat)}}, wantStatus: http.StatusBadRequest, wantMsg: "sources[2].id is repeated"},
-		{name: "more than 128 sources", sub: P.id, iat: iat, body: UserLinkRequest{Sources: tooMany()}, wantStatus: http.StatusBadRequest, wantMsg: "too many sources"},
+		{name: "more than MaxLinkSources sources", sub: P.id, iat: iat, body: UserLinkRequest{Sources: tooMany()}, wantStatus: http.StatusBadRequest, wantMsg: "too many sources"},
 		{name: "unknown kind", sub: P.id, iat: iat, body: UserLinkRequest{Sources: []UserLinkSource{valid()[0], K.consent("hardware", P.id, iat)}}, wantStatus: http.StatusBadRequest, wantMsg: "sources[1].kind"},
 		{name: "uppercase id is not canonical", sub: P.id, iat: iat, body: UserLinkRequest{Sources: []UserLinkSource{valid()[0], {ID: strings.ToUpper(K.id), Kind: auth.SourceKindSecretKey, Sig: valid()[1].Sig}}}, wantStatus: http.StatusBadRequest, wantMsg: "sources[1].id must be"},
 		{name: "empty sources", sub: P.id, iat: iat, body: UserLinkRequest{}, wantStatus: http.StatusBadRequest, wantMsg: "must not be empty"},
@@ -243,6 +252,57 @@ func TestUserLink_StoreErrorIs500(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, http.StatusInternalServerError, statusOf(t, err))
 	assert.NotContains(t, err.Error(), "connection reset", "internal detail is not echoed to the client")
+}
+
+func TestUserLink_Metrics(t *testing.T) {
+	iat := time.Unix(1700000000, 0)
+	P, K, F := newLinkKey(t), newLinkKey(t), newLinkKey(t)
+	m := metrics.NewUserLink(prometheus.NewRegistry())
+	count := func(result string) float64 { return testutil.ToFloat64(m.RequestsTotal.WithLabelValues(result)) }
+	sources := func(outcome string) float64 { return testutil.ToFloat64(m.SourcesTotal.WithLabelValues(outcome)) }
+
+	// A fresh cluster: created, two rows written, one conflict.
+	linker := &fakeLinker{result: &users.LinkResult{
+		CanonicalSourceID: P.id,
+		Sources:           []users.LinkedSource{{ID: P.id, Kind: auth.SourceKindPhrase}, {ID: K.id, Kind: auth.SourceKindSecretKey}},
+		Conflicts:         []string{F.id},
+		Created:           true,
+		Written:           2,
+	}}
+	_, err := doLinkWithMetrics(t, linker, m, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{
+		P.consent(auth.SourceKindPhrase, P.id, iat),
+		K.consent(auth.SourceKindSecretKey, P.id, iat),
+		F.consent(auth.SourceKindSecretKey, P.id, iat),
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, float64(1), count(metrics.LinkResultCreated))
+	assert.Equal(t, float64(0), count(metrics.LinkResultResolved))
+	assert.Equal(t, float64(2), sources(metrics.LinkSourceWritten))
+	assert.Equal(t, float64(1), sources(metrics.LinkSourceConflict))
+
+	// An existing user re-linking: resolved, nothing written.
+	linker = &fakeLinker{result: &users.LinkResult{CanonicalSourceID: P.id, Sources: []users.LinkedSource{{ID: P.id}}, Conflicts: []string{}}}
+	_, err = doLinkWithMetrics(t, linker, m, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}})
+	require.NoError(t, err)
+	assert.Equal(t, float64(1), count(metrics.LinkResultResolved))
+	assert.Equal(t, float64(2), sources(metrics.LinkSourceWritten), "unchanged")
+
+	// Rejections: a 400, a 403, and a store error.
+	_, err = doLinkWithMetrics(t, &fakeLinker{}, m, P.id, iat, UserLinkRequest{})
+	require.Error(t, err)
+	assert.Equal(t, float64(1), count(metrics.LinkResultBadRequest))
+
+	_, err = doLinkWithMetrics(t, &fakeLinker{}, m, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, K.id, iat)}})
+	require.Error(t, err)
+	assert.Equal(t, float64(1), count(metrics.LinkResultBadConsent))
+
+	_, err = doLinkWithMetrics(t, &fakeLinker{err: errors.New("boom")}, m, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}})
+	require.Error(t, err)
+	assert.Equal(t, float64(1), count(metrics.LinkResultError))
+
+	_, err = doLinkWithMetrics(t, nil, m, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}})
+	require.Error(t, err)
+	assert.Equal(t, float64(2), count(metrics.LinkResultError), "database disabled is an error result too")
 }
 
 func TestUserLink_DeadlineIs504AndCancelIs503(t *testing.T) {

@@ -94,6 +94,40 @@ func TestNewService_MetricCount(t *testing.T) {
 	assert.Equal(t, 3, count)
 }
 
+func TestNewUserLink_MetricCountAndNames(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewUserLink(reg)
+
+	RecordUserLink(m, LinkResultCreated)
+	RecordUserLinkSources(m, LinkSourceWritten, 3)
+	RecordUserLinkSources(m, LinkSourceConflict, 0) // non-positive records nothing
+
+	// 2 metric families: requests_total, sources_total
+	assert.Equal(t, 2, testutil.CollectAndCount(reg))
+
+	// Pin the wire names: runbooks and alerts reference these strings.
+	families, err := reg.Gather()
+	require.NoError(t, err)
+	names := make(map[string]bool, len(families))
+	for _, f := range families {
+		names[f.GetName()] = true
+	}
+	for _, want := range []string{
+		"freighter_user_link_requests_total",
+		"freighter_user_link_sources_total",
+	} {
+		assert.True(t, names[want], "expected metric family %s to be registered", want)
+	}
+
+	assert.Equal(t, float64(1), testutil.ToFloat64(m.RequestsTotal.WithLabelValues(LinkResultCreated)))
+	assert.Equal(t, float64(3), testutil.ToFloat64(m.SourcesTotal.WithLabelValues(LinkSourceWritten)))
+	assert.Equal(t, float64(0), testutil.ToFloat64(m.SourcesTotal.WithLabelValues(LinkSourceConflict)))
+
+	// Nil-safe, like RecordAuth.
+	RecordUserLink(nil, LinkResultError)
+	RecordUserLinkSources(nil, LinkSourceWritten, 1)
+}
+
 func TestRecord_IncrementsCallsAndDuration(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	svc := NewService(reg)
