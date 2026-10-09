@@ -197,16 +197,22 @@ freighter-user-link-v2 \n source \n <id> \n <kind> \n <signingSourceId> \n <iat 
 ```
 
 `signingSourceId` is the JWT `sub`, and `iat` is the token's **verified** issued-at, read from the
-request context (`auth.IssuedAtFromContext`), never from the body. `kind` (`phrase` |
+request context (`auth.IssuedAtFromContext`), never from the body. The signer binding is what
+matters for security: only the holder of `sub` can use a consent. The `iat` binding is a freshness
+bound rather than a binding to one token, since any token whose `iat` falls inside the clock-skew
+window (about `2 × ClockSkewLeeway + MaxTokenLifetime`) rebuilds the same message; it limits how
+long a captured consent stays usable by its own signer and nothing more. `kind` (`phrase` |
 `secret_key`) is read from the signed bytes and stored from there, so a kind edited after signing
 fails verification. `auth.LinkConsentMessage` builds the bytes and `auth.VerifyLinkConsent` checks
 one consent; the format is a cross-platform contract pinned by fixture vectors (#166), so a later
 change needs a new domain prefix, not an edit.
 
-Resolution (`users.Linker.Link`) runs in one transaction: take `pg_advisory_xact_lock` on
-`hashtext(source_id)` for every submitted id, with the *lock keys* deduplicated and sorted so a
-hash collision cannot reverse lock order; read the submitted rows; resolve `sub` (an existing row
-is the caller's user, otherwise a new `users` row with `canonical_source_id = sub`); then for every
+Resolution (`users.Linker.Link`) runs in one transaction with `SET LOCAL` lock and statement
+timeouts: take `pg_advisory_xact_lock` on `hashtext(source_id)` for every submitted id in one batch,
+with the *lock keys* deduplicated and sorted so a hash collision cannot reverse lock order; read
+the submitted rows; resolve `sub` with `ResolveUser` on the transaction (an existing row is the
+caller's user, otherwise a new `users` row with `canonical_source_id = sub`, adopting an existing
+`users` row with that canonical id if its source row was ever lost); then for every
 other source insert it under the caller if unclaimed, do nothing if already the caller's, and report
 it in `conflicts` if it belongs to another user. A claimed source is never moved, two populated
 clusters never combine, no row is retired, and `canonical_source_id` is never updated.

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -242,6 +243,23 @@ func TestUserLink_StoreErrorIs500(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, http.StatusInternalServerError, statusOf(t, err))
 	assert.NotContains(t, err.Error(), "connection reset", "internal detail is not echoed to the client")
+}
+
+func TestUserLink_DeadlineIs504AndCancelIs503(t *testing.T) {
+	iat := time.Unix(1700000000, 0)
+	P := newLinkKey(t)
+	for _, tc := range []struct {
+		err  error
+		want int
+	}{
+		{context.DeadlineExceeded, http.StatusGatewayTimeout},
+		{context.Canceled, http.StatusServiceUnavailable},
+	} {
+		linker := &fakeLinker{err: fmt.Errorf("link: %w", tc.err)}
+		_, err := doLink(t, linker, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}})
+		require.Error(t, err)
+		assert.Equal(t, tc.want, statusOf(t, err), "%v", tc.err)
+	}
 }
 
 // The body is never a source of the signer or the issue time: a body that

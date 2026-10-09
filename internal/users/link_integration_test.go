@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -343,6 +344,25 @@ func TestLink_Postgres(t *testing.T) {
 		})
 	})
 
+	t.Run("signer whose users row survived but whose source row was lost is adopted, not bricked", func(t *testing.T) {
+		S, K := newID(t), newID(t)
+		var orphan uuid.UUID
+		require.NoError(t, pool.QueryRow(ctx, `INSERT INTO users (canonical_source_id) VALUES ($1) RETURNING id`, S).Scan(&orphan))
+
+		res, err := linker.Link(ctx, S, []Source{phrase(S), secretKey(K)})
+		require.NoError(t, err, "a users row with no source row must not make the signer unlinkable")
+		assert.Equal(t, orphan, res.UserID, "the existing users row is adopted so the exposed id stays stable")
+		assert.Equal(t, S, res.CanonicalSourceID)
+		assert.Equal(t, orphan, d.ownerOf(S), "the signer's source row is restored")
+		assert.Equal(t, orphan, d.ownerOf(K))
+		assert.Equal(t, 1, d.usersWithCanonical(S))
+
+		// And it is idempotent: linking again resolves normally.
+		res, err = linker.Link(ctx, S, []Source{phrase(S)})
+		require.NoError(t, err)
+		assert.Equal(t, orphan, res.UserID)
+	})
+
 	t.Run("rejected, writing nothing", func(t *testing.T) {
 		S, X := newID(t), newID(t)
 		cases := []struct {
@@ -355,6 +375,8 @@ func TestLink_Postgres(t *testing.T) {
 			{"two consents for one id with different kinds", S, []Source{phrase(S), secretKey(S)}, ErrRepeatedSource},
 			{"signer not in sources", S, []Source{phrase(X)}, ErrSignerNotInBody},
 			{"unknown kind", S, []Source{{ID: S, Kind: "hardware"}}, ErrUnknownSourceKind},
+			{"non-canonical source id", S, []Source{phrase(S), secretKey(strings.ToUpper(X))}, ErrNonCanonicalSourceID},
+			{"non-canonical signer", strings.ToUpper(S), []Source{phrase(strings.ToUpper(S))}, ErrNonCanonicalSourceID},
 			{"empty body", S, nil, ErrSignerNotInBody},
 			{"more than 128 sources", S, func() []Source {
 				out := []Source{phrase(S)}
