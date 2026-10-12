@@ -72,9 +72,9 @@ type StellarExpertAsset struct {
 	// does makes "no volume signal" indistinguishable from "genuinely zero
 	// volume", and once the conversion is enabled the second reports
 	// lowVolume:true — accusing a token of manipulation on data we never
-	// received. Its units are UNCONFIRMED (~1e7 times larger than USD for
-	// classic assets); it must never be compared against a USD threshold
-	// without an explicit, config-enabled conversion.
+	// received. It is USD scaled by 1e7, whatever the token's decimals; it
+	// must never be compared against a USD threshold without the divisor
+	// conversion.
 	Volume7d *float64 `json:"volume7d"`
 	// Trustlines.Funded is the funded-trustline count ("Holders"); nil when
 	// upstream omits it.
@@ -241,7 +241,7 @@ type PriceChange struct {
 //     echoed from the request (upstream silently coarsens).
 //   - LowVolume is true|false|null and answers "did the check run?".
 //     null means it could not: the asset payload was unavailable, the
-//     volume7d unit conversion is not enabled (the shipped default), or
+//     volume7d unit conversion is disabled (divisor 0), or
 //     upstream omitted volume7d. false means it ran and the token passed,
 //     or the operator disabled the guard. While the guard is enabled,
 //     absence of a signal is never reported as false.

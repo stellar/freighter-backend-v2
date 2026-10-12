@@ -371,16 +371,16 @@ func TestPriceHistory_VolumeVerdict(t *testing.T) {
 		require.NotNil(t, got.Change, "delta still returns — the banner is the entire intervention")
 	})
 
-	// A token that WOULD be flagged once units are confirmed must not be
-	// reported as false in the meantime: with no conversion there is no
-	// check, and false would assert a passing verdict this token fails.
-	t.Run("verdict is null while the conversion is unconfirmed", func(t *testing.T) {
+	// A token that WOULD be flagged must not be reported as false while the
+	// conversion is disabled: with no conversion there is no check, and
+	// false would assert a passing verdict this token fails.
+	t.Run("verdict is null while the conversion is disabled", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
 		expert.Set("THIN-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 0.01, Volume7d: float64Ptr(lowRawVolume7d)})
 		expert.SetCandles("THIN-"+testIssuer+"-1", historyCandles(now, 24*time.Hour, 900, 0.009, 0.01))
 
-		// Default config: divisor 0 → no conversion → the check cannot run.
+		// Zero-value config: divisor 0 → no conversion → the check cannot run.
 		svc := newHistoryService(expert, nil, spotPrices("0.01"), PriceHistoryServiceConfig{MinVolume7dUSD: 7000}, nil)
 		got, err := svc.GetPriceHistory(context.Background(), "THIN:"+testIssuer, types.PUBLIC, "1D")
 		require.NoError(t, err)
@@ -389,7 +389,7 @@ func TestPriceHistory_VolumeVerdict(t *testing.T) {
 
 	// The config-state null is NOT the upstream-degradation null, so it must
 	// not move the counter that means "the asset call failed".
-	t.Run("the unconfirmed-conversion null does not count as upstream degradation", func(t *testing.T) {
+	t.Run("the disabled-conversion null does not count as upstream degradation", func(t *testing.T) {
 		t.Parallel()
 		expert := newFakeStellarExpert()
 		expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
@@ -404,7 +404,7 @@ func TestPriceHistory_VolumeVerdict(t *testing.T) {
 		assert.Equal(t, float64(0), testutil.ToFloat64(pm.VolumeVerdictNull.WithLabelValues(types.PUBLIC)))
 	})
 
-	// Distinct from the unconfirmed-conversion case above: the conversion
+	// Distinct from the disabled-conversion case above: the conversion
 	// works, so the check runs — the operator has just chosen to flag
 	// nothing. That is a real passing verdict, not an unknown.
 	t.Run("threshold 0 disables the guard and stays false", func(t *testing.T) {

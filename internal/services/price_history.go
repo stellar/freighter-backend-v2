@@ -158,10 +158,9 @@ type PriceHistoryServiceConfig struct {
 	// the guard.
 	MinVolume7dUSD float64
 	// Volume7dConversionDivisor converts the raw upstream volume7d into USD
-	// (raw ÷ divisor). The units are UNCONFIRMED (§13), so the default 0
-	// means "conversion not enabled", which makes the verdict null: with no
-	// conversion there is no check to pass. Enabling the guard is a config
-	// change, never a code change. A failed asset lookup is null too.
+	// (raw ÷ divisor); Stellar Expert reports it as USD scaled by 1e7. 0 means
+	// "conversion not enabled", which makes the verdict null: with no
+	// conversion there is no check to pass. A failed asset lookup is null too.
 	Volume7dConversionDivisor float64
 	// TokenStatsCacheTTL is the TTL of the tokenstats:v1 asset-payload cache
 	// entry shared by the volume verdict and the token-stats endpoint.
@@ -642,13 +641,9 @@ func (s *priceHistoryService) cacheAssetMeta(ctx context.Context, key string, va
 // a painted price goes unchallenged. That null is counted, so the quadrant
 // is operator-visible.
 //
-// An unconfirmed unit conversion (divisor 0, the shipped default) is null for
-// the same reason: a false would assert "we checked and this token is fine"
-// while no check was possible, and it is the one value the tri-state offers
-// no way to walk back. The unit questions gating the conversion are open
-// (§13); until they close, "unknown" is the honest answer, and enabling it
-// later reads as null → true|false — new information — rather than
-// false → true, which looks like the token changed.
+// A disabled unit conversion (divisor 0) is null for the same reason: a false
+// would assert "we checked and this token is fine" while no check was
+// possible, and it is the one value the tri-state offers no way to walk back.
 //
 // A zero MinVolume7dUSD is different and stays false: that is an operator
 // deliberately turning the banner off, so the check did run and nothing is

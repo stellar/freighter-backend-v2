@@ -319,7 +319,7 @@ type Prices struct {
 	//   - a caller that cancelled mid-request;
 	//   - an absent volume7d — upstream reported no usable reading, so
 	//     there is nothing to compare;
-	//   - an unset conversion divisor, which every response then shares.
+	//   - a zero conversion divisor, which every response then shares.
 	//
 	// A fleet-wide 404/400 storm is a real outage, and it stays visible on
 	// freighter_service_errors_total{error_type="http_error:404"} rather
@@ -352,11 +352,11 @@ func NewPrices(reg prometheus.Registerer) *Prices {
 		}, []string{"network", "range", "outcome"}),
 		TokenStatsCacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_token_stats_cache_outcomes_total",
-			Help: "Asset-payload cache outcomes. Driven by /token-stats AND by /token-price-history, which resolves the same payload on EVERY request — not only when the volume verdict is enabled — so an unset conversion divisor, which nulls every verdict, does not stop history driving this series. Miss is not fetch: concurrent cold requests for one key each record a miss against a single coalesced upstream call.",
+			Help: "Asset-payload cache outcomes. Driven by /token-stats AND by /token-price-history, which resolves the same payload on EVERY request — not only when the volume verdict is enabled — so a zero conversion divisor, which nulls every verdict, does not stop history driving this series. Miss is not fetch: concurrent cold requests for one key each record a miss against a single coalesced upstream call.",
 		}, []string{"network", "outcome"}),
 		VolumeVerdictNull: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_price_history_volume_verdict_null_total",
-			Help: "/token-price-history responses whose lowVolume verdict was null because UPSTREAM DEGRADED. Deliberately excludes the other four routes to a null verdict — an authoritative 404/400, a caller that cancelled, an absent volume7d, and an unset conversion divisor — so ordinary traffic cannot bury the signal.",
+			Help: "/token-price-history responses whose lowVolume verdict was null because UPSTREAM DEGRADED. Deliberately excludes the other four routes to a null verdict — an authoritative 404/400, a caller that cancelled, an absent volume7d, and a zero conversion divisor — so ordinary traffic cannot bury the signal.",
 		}, []string{"network"}),
 	}
 	reg.MustRegister(p.CacheOutcomes, p.MissBudgetExhausted, p.RedisErrors, p.SkippedTokens,
