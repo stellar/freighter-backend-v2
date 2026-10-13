@@ -87,19 +87,39 @@ func TestMiddleware_Logging(t *testing.T) {
 func TestMiddleware_ResponseHeader(t *testing.T) {
 	t.Parallel()
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	responseHeaderMiddleware := ResponseHeader()
-	chain := responseHeaderMiddleware(handler)
+	tests := []struct {
+		name       string
+		method     string
+		wantStatus int
+	}{
+		{"GET Request", http.MethodGet, http.StatusOK},
+		{"OPTIONS Request", http.MethodOptions, http.StatusOK},
+	}
 
-	req := httptest.NewRequest("GET", "/", nil)
-	rec := httptest.NewRecorder()
-	chain.ServeHTTP(rec, req)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodOptions {
+					t.Fatal("handler should not be called for OPTIONS")
+				}
+				w.WriteHeader(http.StatusOK)
+			})
+			responseHeaderMiddleware := ResponseHeader()
+			chain := responseHeaderMiddleware(handler)
 
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
-	assert.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
+			req := httptest.NewRequest(tt.method, "/", nil)
+			rec := httptest.NewRecorder()
+			chain.ServeHTTP(rec, req)
+
+			assert.Equal(t, tt.wantStatus, rec.Code)
+			assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+			assert.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
+			assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
+			assert.Equal(t, "GET, POST, PUT, DELETE, OPTIONS", rec.Header().Get("Access-Control-Allow-Methods"))
+			assert.Equal(t, "Content-Type, Authorization", rec.Header().Get("Access-Control-Allow-Headers"))
+			assert.Equal(t, "Date", rec.Header().Get("Access-Control-Expose-Headers"))
+		})
+	}
 }
 
 func TestMiddleware_Recover(t *testing.T) {
