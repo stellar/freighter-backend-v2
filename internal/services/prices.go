@@ -211,8 +211,20 @@ func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network 
 	}
 	cacheNet := strings.ToLower(network)
 
-	canonical := utils.DedupePreserveOrder(tokens)
-	result := make(map[string]*types.PriceEntry, len(canonical))
+	// SEP-41 contract tokens are withheld until both clients scale the raw
+	// contract balance by decimals before multiplying by currentPrice; today
+	// they don't, and a price inflates the holding's value by 10^decimals.
+	// Checked before the cache read so already-cached prices are withheld too.
+	deduped := utils.DedupePreserveOrder(tokens)
+	result := make(map[string]*types.PriceEntry, len(deduped))
+	canonical := make([]string, 0, len(deduped))
+	for _, c := range deduped {
+		if utils.IsValidContractID(c) {
+			result[c] = nil
+			continue
+		}
+		canonical = append(canonical, c)
+	}
 	var resultMu sync.Mutex
 
 	cacheKeys := make([]string, len(canonical))
