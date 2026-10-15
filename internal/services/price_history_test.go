@@ -20,8 +20,6 @@ import (
 const (
 	// SolvBTC — the one priced SEP-41 contract token measured in A.7.
 	solvBTCContract = "CBIJBDNZNF4X35BJ4FFZWCDBSCKOP5NB4PLG4SNENRMLAPYG4P5FM6VN"
-	// A Soroswap LP token — asset payload exists, candles are empty (A.7).
-	unpricedContract = "CBUIULAWELK3QWVO55TUFKTWE7BHC2BOESOIIV3FJKG47GAZWDUMOZFC"
 
 	// Raw-shaped volume7d fixtures (A.2 measures ~1e14 for XLM). Fixtures
 	// must NEVER be USD-scaled: a USD-authored fixture passes under either
@@ -130,52 +128,33 @@ func TestPriceHistory_ResolutionFallsBackToRequestedOnSinglePoint(t *testing.T) 
 	assert.Nil(t, got.Change, "2h coverage fails the 1D 23-25h guard")
 }
 
-// A priced contract token charts like any classic asset, and the upstream id
-// is the bare contract id, verbatim (A.7).
-func TestPriceHistory_PricedContractToken(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-	expert := newFakeStellarExpert()
-	expert.Set(solvBTCContract, &types.StellarExpertAsset{Price: 66683, Volume7d: float64Ptr(xlmRawVolume7d)})
-	expert.SetCandles(solvBTCContract, historyCandles(now, 24*time.Hour, 900, 66000, 66500))
-
-	svc := newHistoryService(expert, nil, spotPrices("66683"), PriceHistoryServiceConfig{PriceContractTokens: true}, nil)
-	got, err := svc.GetPriceHistory(context.Background(), solvBTCContract, types.PUBLIC, "1D")
-	require.NoError(t, err)
-
-	require.Len(t, got.Points, 2)
-	assert.Equal(t, "66000", got.Points[0].P)
-	assert.Equal(t, 1, expert.CandleCallCount(solvBTCContract), "wire id is the bare contract id")
-	require.NotNil(t, got.Change)
-}
-
 // No data is a 200-shaped result — points: [], change: null — never an
 // error, and the empty series is negatively cached at the flat 15m TTL so
-// unpriced contract tokens (the common SEP-41 case) don't hit upstream per
-// open.
+// unpriced assets don't hit upstream per open.
 func TestPriceHistory_EmptySeriesNegativelyCached(t *testing.T) {
 	t.Parallel()
 
+	unpriced := "BOGUS:" + testIssuer
+	wireID := "BOGUS-" + testIssuer + "-2"
 	expert := newFakeStellarExpert()
-	expert.Set(unpricedContract, &types.StellarExpertAsset{Price: 0}) // payload exists, no candles configured → empty
+	expert.Set(wireID, &types.StellarExpertAsset{Price: 0}) // payload exists, no candles configured → empty
 	cache := newFakeJSONCache()
 
-	svc := newHistoryService(expert, cache, spotPrices("1"), PriceHistoryServiceConfig{PriceContractTokens: true}, nil)
-	got, err := svc.GetPriceHistory(context.Background(), unpricedContract, types.PUBLIC, "1D")
+	svc := newHistoryService(expert, cache, spotPrices("1"), PriceHistoryServiceConfig{}, nil)
+	got, err := svc.GetPriceHistory(context.Background(), unpriced, types.PUBLIC, "1D")
 	require.NoError(t, err)
 	require.NotNil(t, got.Points)
 	assert.Empty(t, got.Points)
 	assert.Nil(t, got.Change)
-	assert.Equal(t, 1, expert.CandleCallCount(unpricedContract))
+	assert.Equal(t, 1, expert.CandleCallCount(wireID))
 
-	assert.Equal(t, 15*time.Minute, cache.TTL("pricehistory:v1:public:"+unpricedContract+":1D"),
+	assert.Equal(t, 15*time.Minute, cache.TTL("pricehistory:v1:public:"+unpriced+":1D"),
 		"empty series cache at the flat negative TTL")
 
-	got, err = svc.GetPriceHistory(context.Background(), unpricedContract, types.PUBLIC, "1D")
+	got, err = svc.GetPriceHistory(context.Background(), unpriced, types.PUBLIC, "1D")
 	require.NoError(t, err)
 	assert.Empty(t, got.Points)
-	assert.Equal(t, 1, expert.CandleCallCount(unpricedContract),
+	assert.Equal(t, 1, expert.CandleCallCount(wireID),
 		"second request within the negative TTL must make zero upstream candle calls")
 }
 
@@ -1166,7 +1145,7 @@ func TestPriceHistory_ContractTokenWithheld(t *testing.T) {
 	expert.Set(solvBTCContract, &types.StellarExpertAsset{Price: 66683, Volume7d: float64Ptr(xlmRawVolume7d)})
 	expert.SetCandles(solvBTCContract, historyCandles(now, 24*time.Hour, 900, 66000, 66500))
 
-	svc := newHistoryService(expert, nil, spotPrices("66683"), PriceHistoryServiceConfig{PriceContractTokens: false}, nil)
+	svc := newHistoryService(expert, nil, spotPrices("66683"), PriceHistoryServiceConfig{}, nil)
 	got, err := svc.GetPriceHistory(context.Background(), solvBTCContract, types.PUBLIC, "1D")
 	require.NoError(t, err)
 
@@ -1185,19 +1164,4 @@ func TestPriceHistory_ContractTokenWithheld(t *testing.T) {
 	got, err = svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
 	require.NoError(t, err)
 	assert.Len(t, got.Points, 2)
-}
-
-func TestPriceHistory_ZeroValueConfigWithholdsContractTokens(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-	expert := newFakeStellarExpert()
-	expert.Set(solvBTCContract, &types.StellarExpertAsset{Price: 66683, Volume7d: float64Ptr(xlmRawVolume7d)})
-	expert.SetCandles(solvBTCContract, historyCandles(now, 24*time.Hour, 900, 66000, 66500))
-
-	svc := newHistoryService(expert, nil, spotPrices("66683"), PriceHistoryServiceConfig{}, nil)
-	got, err := svc.GetPriceHistory(context.Background(), solvBTCContract, types.PUBLIC, "1D")
-	require.NoError(t, err)
-	assert.Empty(t, got.Points)
-	assert.Equal(t, 0, expert.CandleCallCount(solvBTCContract))
 }

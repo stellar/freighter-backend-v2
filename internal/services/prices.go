@@ -102,11 +102,6 @@ type PricesServiceConfig struct {
 	CacheTTL         time.Duration
 	MissFetchTimeout time.Duration
 	MaxConcurrent    int
-	// PriceContractTokens serves SEP-41 contract-token prices; false nulls them.
-	// Both clients multiply currentPrice by the raw contract balance without
-	// scaling by decimals, inflating the holding's value by 10^decimals; enable
-	// once both scale it.
-	PriceContractTokens bool
 }
 
 // reportRedisFailure records one failed Redis operation on the shared
@@ -216,13 +211,15 @@ func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network 
 	}
 	cacheNet := strings.ToLower(network)
 
-	// Must stay before the cache read: prices cached while contract tokens were
-	// priced would otherwise be served.
+	// SEP-41 contract tokens are withheld: both clients multiply currentPrice by
+	// the raw contract balance without scaling by decimals, inflating the
+	// holding's value by 10^decimals. Must stay before the cache read so prices
+	// cached before this shipped aren't served.
 	deduped := utils.DedupePreserveOrder(tokens)
 	result := make(map[string]*types.PriceEntry, len(deduped))
 	canonical := make([]string, 0, len(deduped))
 	for _, c := range deduped {
-		if !p.cfg.PriceContractTokens && utils.IsValidContractID(c) {
+		if utils.IsValidContractID(c) {
 			result[c] = nil
 			continue
 		}

@@ -150,9 +150,6 @@ func isValidCandleResolutionSec(sec int) bool {
 // fall back to safe defaults so callers can construct a service with
 // PriceHistoryServiceConfig{}.
 type PriceHistoryServiceConfig struct {
-	// PriceContractTokens serves contract-token series; false empties them so
-	// the chart can't scrub to prices that PricesServiceConfig nulls.
-	PriceContractTokens bool
 	// CacheTTLs overrides the per-range series cache TTLs, keyed by range
 	// enum member. Zero/absent entries keep the range's default TTL.
 	CacheTTLs map[string]time.Duration
@@ -234,7 +231,9 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 	if !ok {
 		return nil, fmt.Errorf("unsupported price history range: %s", historyRange)
 	}
-	if !s.cfg.PriceContractTokens && utils.IsValidContractID(canonical) {
+	// Withheld for the same reason as the prices service, so the chart can't
+	// scrub to prices the header nulls.
+	if utils.IsValidContractID(canonical) {
 		return &types.TokenPriceHistory{
 			Range:             historyRange,
 			Currency:          historyCurrency,
