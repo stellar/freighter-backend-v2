@@ -213,6 +213,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceCacheTTLSeconds, "price-cache-ttl-seconds", 30, "TTL for cached token prices in Redis (seconds)")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.PriceFetchTimeoutSeconds, "price-fetch-timeout-seconds", 9, "Budget for uncached token price fetches before returning best-effort results (seconds)")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxTokensPerRequest, "max-tokens-per-request", 1000, "Maximum tokens accepted in a single token-prices request")
+	cmd.Flags().BoolVar(&s.Cfg.PricesConfig.WithholdContractTokenPrices, "withhold-contract-token-prices", true, "Return null prices and empty price history for SEP-41 contract tokens. Set false (env WITHHOLD_CONTRACT_TOKEN_PRICES) once both clients scale the raw contract balance by decimals before multiplying by the price.")
 	cmd.Flags().IntVar(&s.Cfg.PricesConfig.MaxConcurrentPriceFetches, "max-concurrent-price-fetches", 25, "Per-request token-in-flight cap; each token issues GetAsset and GetAssetCandles in parallel, so the upstream HTTP-call ceiling is up to 2× this value")
 
 	// Token Price History + Token Stats Config

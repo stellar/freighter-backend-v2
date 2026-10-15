@@ -138,14 +138,15 @@ type HorizonConfig struct {
 }
 
 type PricesConfig struct {
-	StellarExpertPubnetURL    string
-	StellarExpertTestnetURL   string
-	StellarExpertAPIKey       string
-	StellarExpertOrigin       string
-	PriceCacheTTLSeconds      int
-	PriceFetchTimeoutSeconds  int
-	MaxTokensPerRequest       int
-	MaxConcurrentPriceFetches int
+	StellarExpertPubnetURL      string
+	StellarExpertTestnetURL     string
+	StellarExpertAPIKey         string
+	StellarExpertOrigin         string
+	PriceCacheTTLSeconds        int
+	PriceFetchTimeoutSeconds    int
+	MaxTokensPerRequest         int
+	MaxConcurrentPriceFetches   int
+	WithholdContractTokenPrices bool
 }
 
 // PriceHistoryConfig tunes the token-price-history and token-stats

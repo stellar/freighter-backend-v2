@@ -132,9 +132,10 @@ func (s *ApiServer) initServices() error {
 		s.appMetrics.Service,
 	)
 	s.pricesService = services.NewPricesService(stellarExpert, s.redis, services.PricesServiceConfig{
-		CacheTTL:         time.Duration(s.cfg.PricesConfig.PriceCacheTTLSeconds) * time.Second,
-		MissFetchTimeout: time.Duration(s.cfg.PricesConfig.PriceFetchTimeoutSeconds) * time.Second,
-		MaxConcurrent:    s.cfg.PricesConfig.MaxConcurrentPriceFetches,
+		CacheTTL:               time.Duration(s.cfg.PricesConfig.PriceCacheTTLSeconds) * time.Second,
+		MissFetchTimeout:       time.Duration(s.cfg.PricesConfig.PriceFetchTimeoutSeconds) * time.Second,
+		MaxConcurrent:          s.cfg.PricesConfig.MaxConcurrentPriceFetches,
+		WithholdContractTokens: s.cfg.PricesConfig.WithholdContractTokenPrices,
 	}, s.appMetrics.Service, s.appMetrics.Prices)
 
 	// One implementation serves both the history and stats endpoints: they
@@ -153,6 +154,7 @@ func (s *ApiServer) initServices() error {
 		MinVolume7dUSD:            s.cfg.PriceHistoryConfig.MinVolume7dUSD,
 		Volume7dConversionDivisor: s.cfg.PriceHistoryConfig.Volume7dConversionDivisor,
 		TokenStatsCacheTTL:        time.Duration(s.cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds) * time.Second,
+		WithholdContractTokens:    s.cfg.PricesConfig.WithholdContractTokenPrices,
 	}, s.appMetrics.Service, s.appMetrics.Prices)
 	s.priceHistoryService = historyAndStats
 	s.tokenStatsService = historyAndStats

@@ -1154,3 +1154,35 @@ func TestPriceHistory_ZeroThresholdIsFalseRegardlessOfVolumePresence(t *testing.
 		})
 	}
 }
+
+// Withheld contract tokens get the same shape as an unpriced token (points:
+// [], change: null, lowVolume: null) so the chart shows its unavailable state
+// instead of scrubbing to prices the /token-prices header withholds.
+func TestPriceHistory_ContractTokenWithheld(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	expert := newFakeStellarExpert()
+	expert.Set(solvBTCContract, &types.StellarExpertAsset{Price: 66683, Volume7d: float64Ptr(xlmRawVolume7d)})
+	expert.SetCandles(solvBTCContract, historyCandles(now, 24*time.Hour, 900, 66000, 66500))
+
+	svc := newHistoryService(expert, nil, spotPrices("66683"), PriceHistoryServiceConfig{WithholdContractTokens: true}, nil)
+	got, err := svc.GetPriceHistory(context.Background(), solvBTCContract, types.PUBLIC, "1D")
+	require.NoError(t, err)
+
+	require.NotNil(t, got.Points, "points must serialize as [], not null")
+	assert.Empty(t, got.Points)
+	assert.Nil(t, got.Change)
+	assert.Nil(t, got.LowVolume)
+	assert.Equal(t, "1D", got.Range)
+	assert.Equal(t, int64(900), got.ResolutionSeconds)
+	assert.Equal(t, 0, expert.CandleCallCount(solvBTCContract))
+	assert.Equal(t, 0, expert.CallCount(solvBTCContract))
+
+	// Classic assets are unaffected.
+	expert.Set("XLM", &types.StellarExpertAsset{Price: 0.16, Volume7d: float64Ptr(xlmRawVolume7d)})
+	expert.SetCandles("XLM", historyCandles(now, 24*time.Hour, 900, 0.158, 0.159))
+	got, err = svc.GetPriceHistory(context.Background(), "XLM", types.PUBLIC, "1D")
+	require.NoError(t, err)
+	assert.Len(t, got.Points, 2)
+}

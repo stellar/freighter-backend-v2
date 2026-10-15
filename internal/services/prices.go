@@ -102,6 +102,11 @@ type PricesServiceConfig struct {
 	CacheTTL         time.Duration
 	MissFetchTimeout time.Duration
 	MaxConcurrent    int
+	// WithholdContractTokens nulls SEP-41 contract-token prices. Both clients
+	// multiply currentPrice by the raw contract balance without scaling by
+	// decimals, inflating the holding's value by 10^decimals; disable once
+	// both scale it.
+	WithholdContractTokens bool
 }
 
 // reportRedisFailure records one failed Redis operation on the shared
@@ -211,15 +216,13 @@ func (p *pricesService) GetPrices(ctx context.Context, tokens []string, network 
 	}
 	cacheNet := strings.ToLower(network)
 
-	// SEP-41 contract tokens are withheld until both clients scale the raw
-	// contract balance by decimals before multiplying by currentPrice; today
-	// they don't, and a price inflates the holding's value by 10^decimals.
-	// Checked before the cache read so already-cached prices are withheld too.
+	// Must stay before the cache read: prices cached while withholding was off
+	// would otherwise be served.
 	deduped := utils.DedupePreserveOrder(tokens)
 	result := make(map[string]*types.PriceEntry, len(deduped))
 	canonical := make([]string, 0, len(deduped))
 	for _, c := range deduped {
-		if utils.IsValidContractID(c) {
+		if p.cfg.WithholdContractTokens && utils.IsValidContractID(c) {
 			result[c] = nil
 			continue
 		}

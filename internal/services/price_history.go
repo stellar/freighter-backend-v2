@@ -16,6 +16,7 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/freighter-backend-v2/internal/utils/assetid"
 )
 
@@ -149,6 +150,9 @@ func isValidCandleResolutionSec(sec int) bool {
 // fall back to safe defaults so callers can construct a service with
 // PriceHistoryServiceConfig{}.
 type PriceHistoryServiceConfig struct {
+	// WithholdContractTokens empties contract-token series so the chart can't
+	// scrub to prices that PricesServiceConfig.WithholdContractTokens nulls.
+	WithholdContractTokens bool
 	// CacheTTLs overrides the per-range series cache TTLs, keyed by range
 	// enum member. Zero/absent entries keep the range's default TTL.
 	CacheTTLs map[string]time.Duration
@@ -229,6 +233,14 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 	spec, ok := priceHistoryRanges[historyRange]
 	if !ok {
 		return nil, fmt.Errorf("unsupported price history range: %s", historyRange)
+	}
+	if s.cfg.WithholdContractTokens && utils.IsValidContractID(canonical) {
+		return &types.TokenPriceHistory{
+			Range:             historyRange,
+			Currency:          historyCurrency,
+			ResolutionSeconds: spec.resolutionSec,
+			Points:            make([]types.PricePoint, 0),
+		}, nil
 	}
 	cacheNet := strings.ToLower(network)
 
