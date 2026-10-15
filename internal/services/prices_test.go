@@ -1167,7 +1167,7 @@ func TestPrices_ContractTokensReturnNullWithoutCacheOrUpstream(t *testing.T) {
 	cache := newFakeJSONCache()
 	require.NoError(t, cache.SetJSON(context.Background(), cacheKey("public", solvBTCContract),
 		cachedPriceEntry{CurrentPrice: "81597.03"}, time.Minute))
-	withhold := PricesServiceConfig{WithholdContractTokens: true}
+	withhold := PricesServiceConfig{PriceContractTokens: false}
 	svc := NewPricesService(stellarExpert, cache, withhold, nil, nil)
 
 	got, err := svc.GetPrices(context.Background(), []string{solvBTCContract, "USDC:" + testIssuer}, types.PUBLIC)
@@ -1195,10 +1195,27 @@ func TestPrices_ContractTokensPricedWhenWithholdingDisabled(t *testing.T) {
 
 	stellarExpert := newFakeStellarExpert()
 	stellarExpert.Set(solvBTCContract, &types.StellarExpertAsset{Price: 81597.03})
-	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{WithholdContractTokens: false}, nil, nil)
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{PriceContractTokens: true}, nil, nil)
 
 	got, err := svc.GetPrices(context.Background(), []string{solvBTCContract}, types.PUBLIC)
 	require.NoError(t, err)
 	require.NotNil(t, got[solvBTCContract])
 	assert.Equal(t, "81597.03", got[solvBTCContract].CurrentPrice)
+}
+
+// The zero-value config must be the safe one: callers that don't set the
+// option withhold contract-token prices rather than serve inflatable ones.
+func TestPrices_ZeroValueConfigWithholdsContractTokens(t *testing.T) {
+	t.Parallel()
+
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set(solvBTCContract, &types.StellarExpertAsset{Price: 81597.03})
+	svc := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
+
+	got, err := svc.GetPrices(context.Background(), []string{solvBTCContract}, types.PUBLIC)
+	require.NoError(t, err)
+	entry, ok := got[solvBTCContract]
+	require.True(t, ok)
+	assert.Nil(t, entry)
+	assert.Equal(t, 0, stellarExpert.CallCount(solvBTCContract))
 }
