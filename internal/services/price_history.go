@@ -16,6 +16,7 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 	"github.com/stellar/freighter-backend-v2/internal/utils/assetid"
 )
 
@@ -229,6 +230,16 @@ func (s *priceHistoryService) GetPriceHistory(ctx context.Context, canonical, ne
 	spec, ok := priceHistoryRanges[historyRange]
 	if !ok {
 		return nil, fmt.Errorf("unsupported price history range: %s", historyRange)
+	}
+	// Withheld for the same reason as the prices service, so the chart can't
+	// scrub to prices the header nulls.
+	if utils.IsValidContractID(canonical) {
+		return &types.TokenPriceHistory{
+			Range:             historyRange,
+			Currency:          historyCurrency,
+			ResolutionSeconds: spec.resolutionSec,
+			Points:            make([]types.PricePoint, 0),
+		}, nil
 	}
 	cacheNet := strings.ToLower(network)
 
