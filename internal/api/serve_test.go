@@ -558,3 +558,11 @@ func TestApiServer_initHandlers_UserLinkValidTokenReachesHandler(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "past auth, into the handler, which has no DB: %s", rec.Body.String())
 }
+
+// The link handler's database budget must leave room under the server's write
+// timeout: WriteTimeout does not cancel a handler, so a transaction that
+// outlives it would commit after the response can no longer be written.
+func TestApiServer_LinkRequestTimeoutFitsWriteTimeout(t *testing.T) {
+	assert.Less(t, handlers.LinkRequestTimeout, DefaultWriteTimeout,
+		"handlers.LinkRequestTimeout must stay under DefaultWriteTimeout with room to write the response")
+}

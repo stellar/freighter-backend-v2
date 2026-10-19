@@ -51,14 +51,16 @@ func (k linkKey) consent(kind, signer string, iat time.Time) UserLinkSource {
 // leaves it at its zero value and asserts calls == 0 afterwards.
 type fakeLinker struct {
 	calls   int
+	ctx     context.Context
 	signer  string
 	sources []users.Source
 	result  *users.LinkResult
 	err     error
 }
 
-func (f *fakeLinker) Link(_ context.Context, signer string, sources []users.Source) (*users.LinkResult, error) {
+func (f *fakeLinker) Link(ctx context.Context, signer string, sources []users.Source) (*users.LinkResult, error) {
 	f.calls++
+	f.ctx = ctx
 	f.signer = signer
 	f.sources = sources
 	return f.result, f.err
@@ -152,6 +154,38 @@ func TestUserLink_Success(t *testing.T) {
 	assert.Contains(t, w.Body.String(), `"conflicts":[]`, "an empty conflicts list is [] not null")
 }
 
+// Whitespace after the JSON object is not trailing data: a client that ends
+// its body with a newline is accepted and reaches the store once.
+func TestUserLink_TrailingWhitespaceIsAccepted(t *testing.T) {
+	iat := time.Unix(1700000000, 0)
+	P := newLinkKey(t)
+	linker := &fakeLinker{result: &users.LinkResult{CanonicalSourceID: P.id, Sources: []users.LinkedSource{{ID: P.id, Kind: auth.SourceKindPhrase}}, Conflicts: []string{}}}
+	raw, err := json.Marshal(UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}})
+	require.NoError(t, err)
+
+	w, err := doLink(t, linker, P.id, iat, string(raw)+"\n  \n")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, 1, linker.calls)
+}
+
+// The store is called under LinkRequestTimeout, the one deadline that covers
+// waiting for a pool connection and the whole transaction; the request context
+// itself carries none.
+func TestUserLink_LinkerGetsRequestDeadline(t *testing.T) {
+	iat := time.Unix(1700000000, 0)
+	P := newLinkKey(t)
+	linker := &fakeLinker{result: &users.LinkResult{CanonicalSourceID: P.id, Sources: []users.LinkedSource{{ID: P.id, Kind: auth.SourceKindPhrase}}, Conflicts: []string{}}}
+
+	before := time.Now()
+	_, err := doLink(t, linker, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}})
+	require.NoError(t, err)
+	require.NotNil(t, linker.ctx)
+	deadline, ok := linker.ctx.Deadline()
+	require.True(t, ok, "the linker must run under a deadline")
+	assert.WithinDuration(t, before.Add(LinkRequestTimeout), deadline, time.Second)
+}
+
 func TestUserLink_ConflictsAreReported(t *testing.T) {
 	iat := time.Unix(1700000000, 0)
 	P, K := newLinkKey(t), newLinkKey(t)
@@ -197,6 +231,11 @@ func TestUserLink_RejectedWritesNothing(t *testing.T) {
 		}
 		return out
 	}
+	validJSON := func() string {
+		raw, err := json.Marshal(UserLinkRequest{Sources: valid()})
+		require.NoError(t, err)
+		return string(raw)
+	}
 
 	cases := []struct {
 		name       string
@@ -220,6 +259,8 @@ func TestUserLink_RejectedWritesNothing(t *testing.T) {
 		{name: "uppercase id is not canonical", sub: P.id, iat: iat, body: UserLinkRequest{Sources: []UserLinkSource{valid()[0], {ID: strings.ToUpper(K.id), Kind: auth.SourceKindSecretKey, Sig: valid()[1].Sig}}}, wantStatus: http.StatusBadRequest, wantMsg: "sources[1].id must be"},
 		{name: "empty sources", sub: P.id, iat: iat, body: UserLinkRequest{}, wantStatus: http.StatusBadRequest, wantMsg: "must not be empty"},
 		{name: "malformed JSON", sub: P.id, iat: iat, body: `{"sources": [`, wantStatus: http.StatusBadRequest, wantMsg: "invalid JSON"},
+		{name: "trailing garbage after the object", sub: P.id, iat: iat, body: validJSON() + "garbage", wantStatus: http.StatusBadRequest, wantMsg: "trailing data"},
+		{name: "second JSON value after the object", sub: P.id, iat: iat, body: validJSON() + `{"sources":[]}`, wantStatus: http.StatusBadRequest, wantMsg: "trailing data"},
 		{name: "no authenticated source", sub: "", iat: iat, body: UserLinkRequest{Sources: valid()}, wantStatus: http.StatusUnauthorized},
 	}
 	for _, tc := range cases {

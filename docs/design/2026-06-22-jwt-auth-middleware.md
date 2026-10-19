@@ -239,13 +239,15 @@ cannot help here since an attacker mints a fresh `sub` per request. A per-route 
 this path is the real mitigation and is infra work; `freighter_user_link_requests_total` and
 `freighter_user_link_sources_total` (see Operational notes) are how an attack is seen meanwhile.
 
-Status codes: `400` for a malformed body (empty, more than `MaxLinkSources` sources, a repeated id, a non-
-canonical id, an unknown kind, or a body missing `sub`); `403` for a consent that does not verify;
+Status codes: `400` for a malformed body (empty, trailing data after the JSON object, more than
+`MaxLinkSources` sources, a repeated id, a non-canonical id, an unknown kind, or a body missing `sub`); `403` for a consent that does not verify;
 `401` only as a backstop, since the route is always `auth.Required`; `503` with the database
 disabled, and `503` with a `Retry-After: 1` header when the store's `lock_timeout` (3s) fires because
 another link signed as the same source held the signer lock, which is contention, not a fault, and
-is counted as `result="contended"` rather than `"error"`; `504` when the request deadline or the
-store's `statement_timeout` (5s) fires. Both store timeouts reach the handler as a Postgres error
+is counted as `result="contended"` rather than `"error"`; `504` when the handler's request deadline
+(`handlers.LinkRequestTimeout`, 8s, the one budget covering pool acquisition and the whole
+transaction, since `WriteTimeout` does not cancel a handler and the store's timeouts are per
+statement) or the store's `statement_timeout` (5s) fires. Both store timeouts reach the handler as a Postgres error
 (SQLSTATE `55P03` / `57014`), not a context error, so `Linker.Link` maps them to `ErrLockTimeout` /
 `ErrStatementTimeout` for the handler to classify. A conflict is a `200` with the id listed, not an
 error.

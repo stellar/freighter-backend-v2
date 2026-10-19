@@ -24,18 +24,22 @@ import (
 // number.
 const MaxLinkSources = 32
 
-// Per-transaction timeouts, applied with SET LOCAL so they end with the
+// Per-statement timeouts, applied with SET LOCAL so they end with the
 // transaction. The advisory lock below blocks indefinitely by default, and a
 // blocked link transaction pins a pool connection that every DB-backed route
-// shares, so a wait that outlives the HTTP write timeout (10s) helps nobody.
-// lockTimeout bounds each lock wait; statementTimeout bounds every statement.
-// Both are below the server write timeout so the client sees a clean error
-// rather than a dropped connection. When either fires, Postgres cancels the
-// statement and the error reaches Link as a *pgconn.PgError, not as a context
-// error; Link maps the two codes to ErrLockTimeout and ErrStatementTimeout so
-// the handler can answer with a retryable status instead of a 500. Values are
-// milliseconds; SET cannot take bind parameters, so they are formatted into
-// the statement from these constants and never from input.
+// shares. lockTimeout bounds each lock wait and statementTimeout bounds each
+// statement; that is all they bound. They start only once a pool connection
+// has been acquired, and a transaction of several statements can outlive
+// either, so they do not cap the transaction as a whole. That cap is the
+// caller's context deadline (handlers.LinkRequestTimeout), which is what
+// cancels both the wait for a connection and the transaction; the HTTP
+// server's WriteTimeout does not cancel a handler. When either timeout here
+// fires, Postgres cancels the statement and the error reaches Link as a
+// *pgconn.PgError, not as a context error; Link maps the two codes to
+// ErrLockTimeout and ErrStatementTimeout so the handler can answer with a
+// retryable status instead of a 500. Values are milliseconds; SET cannot take
+// bind parameters, so they are formatted into the statement from these
+// constants and never from input.
 const (
 	linkLockTimeoutMs      = 3000
 	linkStatementTimeoutMs = 5000
