@@ -23,6 +23,11 @@ type SourceLinker interface {
 	Link(ctx context.Context, signerID string, sources []users.Source) (*users.LinkResult, error)
 }
 
+// linkRetryAfterSeconds is the Retry-After the handler sends with a 503 for a
+// signer-lock timeout. The lock is held for one transaction, normally
+// milliseconds, so one second is ample for the holder to finish.
+const linkRetryAfterSeconds = "1"
+
 // UserLinkHandler serves POST /api/v1/user/link, the only write to the identity
 // tables. It is the one place a source becomes part of a user.
 //
@@ -94,8 +99,11 @@ type UserLinkedSource struct {
 //     behind auth.Required).
 //   - 403: a consent that does not verify: forged, signed by another key, or
 //     bound to a different signer, kind, or issue time than this request's.
-//   - 503: the database is disabled, or the request was canceled.
-//   - 504: the request deadline passed inside the store.
+//   - 503: the database is disabled, the request was canceled, or (with a
+//     Retry-After header) the store timed out waiting for the signer lock
+//     behind another link signed as the same source.
+//   - 504: the request deadline passed inside the store, or one of the
+//     store's own statements timed out.
 func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
@@ -141,10 +149,20 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 			logger.ErrorWithContext(ctx, "link store rejected a request the handler accepted", "error", err)
 			metrics.RecordUserLink(h.metrics, metrics.LinkResultBadRequest)
 			return httperror.BadRequest("invalid link request", err)
-		case errors.Is(err, context.DeadlineExceeded):
-			// The store's own lock/statement timeouts surface as a pgx error, not
-			// this; this is the request context's deadline. Same mapping as the
-			// wallet-backend handlers: a timeout is a 504, not an operational 500.
+		case errors.Is(err, users.ErrLockTimeout):
+			// Another link signed as the same source held the signer lock past the
+			// store's lock timeout. Transient and expected under same-signer
+			// concurrency, so it is a retryable 503 at warn level, not a 500 that
+			// pages for a bug.
+			logger.WarnWithContext(ctx, "link timed out waiting for the signer lock", "error", err)
+			metrics.RecordUserLink(h.metrics, metrics.LinkResultContended)
+			w.Header().Set("Retry-After", linkRetryAfterSeconds)
+			return httperror.ServiceUnavailable("another link for this signer is in progress; retry shortly", err)
+		case errors.Is(err, users.ErrStatementTimeout), errors.Is(err, context.DeadlineExceeded):
+			// Either the store's own statement timeout or the request context's
+			// deadline. Same mapping as the wallet-backend handlers: a timeout is a
+			// 504, not an operational 500.
+			logger.WarnWithContext(ctx, "linking sources timed out", "error", err)
 			metrics.RecordUserLink(h.metrics, metrics.LinkResultError)
 			return httperror.GatewayTimeout("linking sources timed out", err)
 		case errors.Is(err, context.Canceled):
