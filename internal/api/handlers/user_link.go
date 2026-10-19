@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -22,6 +23,16 @@ import (
 type SourceLinker interface {
 	Link(ctx context.Context, signerID string, sources []users.Source) (*users.LinkResult, error)
 }
+
+// LinkRequestTimeout is the one budget for a link request's database work:
+// pool acquisition and the whole transaction share it. Nothing else bounds
+// that work. The request context has no deadline, http.Server.WriteTimeout
+// only fails the response write and does not cancel the handler, and the
+// store's SET LOCAL timeouts start after a connection is acquired and apply
+// per statement. It stays under api.DefaultWriteTimeout (10s) with room to
+// write the response; serve_test.go guards that relation, since this package
+// cannot import the server's constant.
+const LinkRequestTimeout = 8 * time.Second
 
 // linkRetryAfterSeconds is the Retry-After the handler sends with a 503 for a
 // signer-lock timeout. The lock is held for one transaction, normally
@@ -92,9 +103,10 @@ type UserLinkedSource struct {
 // Link handles POST /api/v1/user/link.
 //
 // Status codes:
-//   - 400: malformed JSON, no sources, more than users.MaxLinkSources, a
-//     repeated id, an id that is not a canonical hex public key, an unknown
-//     kind, or a body that does not include the JWT `sub`.
+//   - 400: malformed JSON, trailing data after the JSON object, no sources,
+//     more than users.MaxLinkSources, a repeated id, an id that is not a
+//     canonical hex public key, an unknown kind, or a body that does not
+//     include the JWT `sub`.
 //   - 401: no authenticated source on the request (should be unreachable
 //     behind auth.Required).
 //   - 403: a consent that does not verify: forged, signed by another key, or
@@ -102,8 +114,8 @@ type UserLinkedSource struct {
 //   - 503: the database is disabled, the request was canceled, or (with a
 //     Retry-After header) the store timed out waiting for the signer lock
 //     behind another link signed as the same source.
-//   - 504: the request deadline passed inside the store, or one of the
-//     store's own statements timed out.
+//   - 504: LinkRequestTimeout passed (pool acquisition plus the whole
+//     transaction), or one of the store's own statements timed out.
 func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 
@@ -120,9 +132,21 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	var req UserLinkRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&req); err != nil {
 		metrics.RecordUserLink(h.metrics, metrics.LinkResultBadRequest)
 		return httperror.BadRequest("invalid JSON", err)
+	}
+	// Decode reads one JSON value and ignores the rest of the body. The body is
+	// the whole request, so anything after the object (garbage or a second
+	// value) is malformed; only whitespace, which leaves the decoder at EOF, is
+	// allowed.
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("a second JSON value follows the request object")
+		}
+		metrics.RecordUserLink(h.metrics, metrics.LinkResultBadRequest)
+		return httperror.BadRequest("invalid JSON: trailing data after the request object", err)
 	}
 
 	sources, err := validateLinkSources(req.Sources, sub, iat)
@@ -136,7 +160,9 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 		return httperror.ServiceUnavailable("Database is disabled", nil)
 	}
 
-	res, err := h.linker.Link(ctx, sub, sources)
+	linkCtx, cancel := context.WithTimeout(ctx, LinkRequestTimeout)
+	defer cancel()
+	res, err := h.linker.Link(linkCtx, sub, sources)
 	if err != nil {
 		switch {
 		case errors.Is(err, users.ErrTooManySources),
@@ -159,9 +185,9 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 			w.Header().Set("Retry-After", linkRetryAfterSeconds)
 			return httperror.ServiceUnavailable("another link for this signer is in progress; retry shortly", err)
 		case errors.Is(err, users.ErrStatementTimeout), errors.Is(err, context.DeadlineExceeded):
-			// Either the store's own statement timeout or the request context's
-			// deadline. Same mapping as the wallet-backend handlers: a timeout is a
-			// 504, not an operational 500.
+			// Either the store's own statement timeout or LinkRequestTimeout (which
+			// also covers waiting for a pool connection). Same mapping as the
+			// wallet-backend handlers: a timeout is a 504, not an operational 500.
 			logger.WarnWithContext(ctx, "linking sources timed out", "error", err)
 			metrics.RecordUserLink(h.metrics, metrics.LinkResultError)
 			return httperror.GatewayTimeout("linking sources timed out", err)

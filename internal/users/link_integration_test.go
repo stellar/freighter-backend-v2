@@ -383,6 +383,41 @@ func TestLink_Postgres(t *testing.T) {
 		assert.Equal(t, res.UserID, d.ownerOf(S))
 	})
 
+	t.Run("pool exhausted: the caller's deadline bounds the wait for a connection, nothing written", func(t *testing.T) {
+		// A one-connection pool whose only connection is held elsewhere, as a
+		// saturated production pool looks to the next request. Nothing in the
+		// store bounds this wait; the caller's context deadline must.
+		cfg := db.DefaultPoolConfig()
+		cfg.MaxConns, cfg.MinConns = 1, 0
+		small, err := db.OpenDBConnectionPool(ctx, dsn, cfg)
+		require.NoError(t, err)
+		defer small.Close()
+		held, err := small.Acquire(ctx)
+		require.NoError(t, err)
+		defer held.Release()
+
+		S := newID(t)
+		const budget = 500 * time.Millisecond
+		deadlineCtx, cancel := context.WithTimeout(ctx, budget)
+		defer cancel()
+		start := time.Now()
+		res, err := NewLinker(small).Link(deadlineCtx, S, []Source{phrase(S)})
+		elapsed := time.Since(start)
+		require.Error(t, err)
+		assert.Nil(t, res)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.GreaterOrEqual(t, elapsed, budget, "waited for the budget, not less")
+		assert.Less(t, elapsed, 4*budget, "gave up at the budget, not at a store timeout")
+		assert.False(t, d.hasRow(S), "nothing was written")
+		assert.Equal(t, 0, d.usersWithCanonical(S))
+
+		held.Release()
+		res, err = NewLinker(small).Link(ctx, S, []Source{phrase(S)})
+		require.NoError(t, err)
+		assert.True(t, res.Created)
+		assert.Equal(t, res.UserID, d.ownerOf(S))
+	})
+
 	t.Run("concurrency without per-source locks", func(t *testing.T) {
 		t.Run("new signer S races a caller P that links S as a source: S joins P or P conflicts, never both, never an orphan users row", func(t *testing.T) {
 			joined, rooted := 0, 0 // logged so a run shows both branches were exercised
