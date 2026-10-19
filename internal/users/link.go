@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/stellar/freighter-backend-v2/internal/auth"
 )
@@ -29,13 +30,50 @@ const MaxLinkSources = 32
 // shares, so a wait that outlives the HTTP write timeout (10s) helps nobody.
 // lockTimeout bounds each lock wait; statementTimeout bounds every statement.
 // Both are below the server write timeout so the client sees a clean error
-// rather than a dropped connection. Values are milliseconds; SET cannot take
-// bind parameters, so they are formatted into the statement from these
-// constants and never from input.
+// rather than a dropped connection. When either fires, Postgres cancels the
+// statement and the error reaches Link as a *pgconn.PgError, not as a context
+// error; Link maps the two codes to ErrLockTimeout and ErrStatementTimeout so
+// the handler can answer with a retryable status instead of a 500. Values are
+// milliseconds; SET cannot take bind parameters, so they are formatted into
+// the statement from these constants and never from input.
 const (
 	linkLockTimeoutMs      = 3000
 	linkStatementTimeoutMs = 5000
 )
+
+// Timeouts the transaction's own SET LOCAL settings raise. Both are transient:
+// ErrLockTimeout means another link signed as the same source held the signer
+// lock for longer than lockTimeout, and the caller should retry shortly;
+// ErrStatementTimeout means one statement ran past statementTimeout, which is
+// a slow or contended database rather than a bug in the request.
+var (
+	ErrLockTimeout      = errors.New("timed out waiting for the signer lock")
+	ErrStatementTimeout = errors.New("statement timed out")
+)
+
+// SQLSTATE codes Postgres uses for the two timeouts above.
+const (
+	pgLockNotAvailable = "55P03" // lock_timeout: "canceling statement due to lock timeout"
+	pgQueryCanceled    = "57014" // statement_timeout: "canceling statement due to statement timeout"
+)
+
+// classifyTimeout wraps a store error that was caused by one of the
+// transaction's SET LOCAL timeouts in its sentinel, and returns every other
+// error unchanged. The original error stays in the chain for the log line.
+func classifyTimeout(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.Code {
+	case pgLockNotAvailable:
+		return fmt.Errorf("%w: %w", ErrLockTimeout, err)
+	case pgQueryCanceled:
+		return fmt.Errorf("%w: %w", ErrStatementTimeout, err)
+	default:
+		return err
+	}
+}
 
 // Source is one entry of a link request after its consent has been verified:
 // the canonical hex source id and the kind read from the signed bytes.
@@ -131,7 +169,20 @@ func NewLinker(db TxBeginner) *Linker {
 // Invariants this preserves: a claimed source is never moved, two populated
 // clusters never combine, no row is ever retired, no users row is ever deleted,
 // and canonical_source_id is never updated.
+//
+// Errors: the validation sentinels below for a malformed request;
+// ErrLockTimeout and ErrStatementTimeout when the transaction's own timeouts
+// fire (see classifyTimeout); the request context's error when it ends first;
+// anything else is a database failure.
 func (l *Linker) Link(ctx context.Context, signerID string, sources []Source) (*LinkResult, error) {
+	res, err := l.link(ctx, signerID, sources)
+	if err != nil {
+		return nil, classifyTimeout(err)
+	}
+	return res, nil
+}
+
+func (l *Linker) link(ctx context.Context, signerID string, sources []Source) (*LinkResult, error) {
 	if err := validateLinkRequest(signerID, sources); err != nil {
 		return nil, err
 	}

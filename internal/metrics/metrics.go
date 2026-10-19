@@ -171,6 +171,7 @@ const (
 	LinkResultResolved   = "resolved"    // the signer already belonged to a user
 	LinkResultBadRequest = "bad_request" // 400: malformed body, cap exceeded, repeated or non-canonical id, unknown kind, sub absent
 	LinkResultBadConsent = "bad_consent" // 403: a consent did not verify
+	LinkResultContended  = "contended"   // 503: timed out waiting for the signer lock behind another link as the same source
 	LinkResultError      = "error"       // 5xx or 503/504: database disabled, timeout, store failure
 
 	// Per-source outcomes.
@@ -184,8 +185,10 @@ const (
 // these series are how a storage-exhaustion attack is seen. The rate of
 // result="created" is the alert signal: a real wallet creates one user, once.
 type UserLink struct {
-	// RequestsTotal counts link requests by result.
-	//   result: "created" | "resolved" | "bad_request" | "bad_consent" | "error"
+	// RequestsTotal counts link requests by result. "contended" is kept apart
+	// from "error" because it is expected under same-signer concurrency (two
+	// devices on one wallet) and is not a server fault.
+	//   result: "created" | "resolved" | "bad_request" | "bad_consent" | "contended" | "error"
 	RequestsTotal *prometheus.CounterVec
 	// SourcesTotal counts submitted sources by what happened to them. Only the
 	// two outcomes that carry a signal are counted: rows written (the
@@ -201,7 +204,7 @@ func NewUserLink(reg prometheus.Registerer) *UserLink {
 	m := &UserLink{
 		RequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_user_link_requests_total",
-			Help: "Total number of POST /api/v1/user/link requests, by result (created, resolved, bad_request, bad_consent, error). A rising created rate is a sybil storage-exhaustion signal.",
+			Help: "Total number of POST /api/v1/user/link requests, by result (created, resolved, bad_request, bad_consent, contended, error). A rising created rate is a sybil storage-exhaustion signal.",
 		}, []string{"result"}),
 		SourcesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_user_link_sources_total",

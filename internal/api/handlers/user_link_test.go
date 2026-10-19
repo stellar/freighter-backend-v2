@@ -314,12 +314,34 @@ func TestUserLink_DeadlineIs504AndCancelIs503(t *testing.T) {
 	}{
 		{context.DeadlineExceeded, http.StatusGatewayTimeout},
 		{context.Canceled, http.StatusServiceUnavailable},
+		{users.ErrStatementTimeout, http.StatusGatewayTimeout},
 	} {
 		linker := &fakeLinker{err: fmt.Errorf("link: %w", tc.err)}
-		_, err := doLink(t, linker, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}})
+		w, err := doLink(t, linker, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}})
 		require.Error(t, err)
 		assert.Equal(t, tc.want, statusOf(t, err), "%v", tc.err)
+		assert.Empty(t, w.Header().Get("Retry-After"), "%v: only the signer-lock timeout is advertised as retryable", tc.err)
 	}
+}
+
+// A signer-lock timeout is contention with another link as the same source,
+// not a server fault: 503 with Retry-After, its own metric result, and the
+// store error kept for the log line.
+func TestUserLink_LockTimeoutIs503WithRetryAfter(t *testing.T) {
+	iat := time.Unix(1700000000, 0)
+	P := newLinkKey(t)
+	m := metrics.NewUserLink(prometheus.NewRegistry())
+	count := func(result string) float64 { return testutil.ToFloat64(m.RequestsTotal.WithLabelValues(result)) }
+
+	cause := fmt.Errorf("locking signer %s: %w", P.id, users.ErrLockTimeout)
+	linker := &fakeLinker{err: cause}
+	w, err := doLinkWithMetrics(t, linker, m, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}})
+	require.Error(t, err)
+	assert.Equal(t, http.StatusServiceUnavailable, statusOf(t, err))
+	assert.Equal(t, "1", w.Header().Get("Retry-After"))
+	assert.ErrorIs(t, err, users.ErrLockTimeout, "the store error is kept in the chain")
+	assert.Equal(t, float64(1), count(metrics.LinkResultContended))
+	assert.Equal(t, float64(0), count(metrics.LinkResultError), "contention is not counted as an error")
 }
 
 // The body is never a source of the signer or the issue time: a body that

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -350,6 +351,36 @@ func TestLink_Postgres(t *testing.T) {
 				assert.NotContains(t, idsOf(loser.Sources), K)
 			}
 		})
+	})
+
+	t.Run("signer lock held past lock_timeout: ErrLockTimeout, nothing written, and the link succeeds once released", func(t *testing.T) {
+		S := newID(t)
+
+		// Hold S's signer lock from a raw transaction, exactly as a slow
+		// concurrent link signed as S would.
+		holder, err := pool.Begin(ctx)
+		require.NoError(t, err)
+		defer holder.Rollback(ctx) //nolint:errcheck // released below; no-op after
+		_, err = holder.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, S)
+		require.NoError(t, err)
+
+		start := time.Now()
+		res, err := linker.Link(ctx, S, []Source{phrase(S)})
+		elapsed := time.Since(start)
+		require.Error(t, err)
+		assert.Nil(t, res)
+		assert.ErrorIs(t, err, ErrLockTimeout)
+		assert.NotErrorIs(t, err, context.DeadlineExceeded, "the store's own timeout, not the context's")
+		assert.GreaterOrEqual(t, elapsed, time.Duration(linkLockTimeoutMs)*time.Millisecond, "waited the full lock_timeout")
+		assert.Less(t, elapsed, time.Duration(linkStatementTimeoutMs)*time.Millisecond, "gave up before statement_timeout")
+		assert.False(t, d.hasRow(S), "the failed link wrote nothing")
+		assert.Equal(t, 0, d.usersWithCanonical(S))
+
+		require.NoError(t, holder.Rollback(ctx))
+		res, err = linker.Link(ctx, S, []Source{phrase(S)})
+		require.NoError(t, err)
+		assert.True(t, res.Created)
+		assert.Equal(t, res.UserID, d.ownerOf(S))
 	})
 
 	t.Run("concurrency without per-source locks", func(t *testing.T) {
