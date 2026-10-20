@@ -67,9 +67,8 @@ They are **idempotent** — re-running applies nothing once the schema is curren
 Migrations run **out-of-band from `serve`**, via a dedicated subcommand:
 
 ```sh
-freighter-backend migrate up        # apply all pending migrations
-freighter-backend migrate up 1      # apply only the next 1
-freighter-backend migrate down 1    # roll back the last 1
+freighter-backend migrate up        # apply all pending migrations (takes no count)
+freighter-backend migrate down 1    # roll back the last 1 (a positive count is required)
 ```
 
 This is deliberate. `serve` never mutates schema, so any number of replicas or
@@ -96,6 +95,39 @@ CREATE TABLE widgets (...);
 -- +migrate Down
 DROP TABLE widgets;
 ```
+
+### Running a migration against a scratch database
+
+To exercise a migration end to end without the full compose stack, point the
+`migrate` subcommand at a throwaway Postgres. `DATABASE_URL` is the only thing
+`migrate` needs — no config file.
+
+```sh
+# 1. start a disposable Postgres (same image the compose stack and tests use)
+docker run --rm -d --name fb-scratch -p 5433:5432 \
+  -e POSTGRES_USER=freighter -e POSTGRES_PASSWORD=freighter -e POSTGRES_DB=freighter \
+  postgres:16-alpine
+
+# 2. apply every pending migration from the working tree
+export DATABASE_URL="postgres://freighter:freighter@localhost:5433/freighter?sslmode=disable"
+go run . migrate up            # → "Applied migrations up count=N"
+
+# 3. inspect the result
+psql "$DATABASE_URL" -c '\dt' -c '\d user_sources'
+
+# 4. prove the down migration, then bring the schema back
+go run . migrate down 1        # → "Rolled migrations down count=1"
+go run . migrate up            # → "Applied migrations up count=1"
+
+# 5. throw the database away
+docker rm -f fb-scratch
+```
+
+Port `5433` avoids colliding with the compose Postgres on `5432`. The
+integration tests do the same thing automatically: `make integration-test`
+starts a testcontainers Postgres, runs the embedded migrations against it
+(`internal/db`), and the end-to-end harness migrates the app database before
+`serve` starts (`internal/integrationtests`).
 
 ## Connecting to deployed environments
 

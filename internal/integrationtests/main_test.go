@@ -18,6 +18,11 @@ func TestIntegrationTests(t *testing.T) {
 	containers := infrastructure.NewSharedContainers(t)
 	defer containers.Cleanup(context.Background())
 
+	t.Run("SchemaTestSuite", func(t *testing.T) {
+		suite.Run(t, &SchemaTestSuite{
+			appPostgresContainer: containers.AppPostgresContainer,
+		})
+	})
 	t.Run("ProtocolsTestSuite", func(t *testing.T) {
 		suite.Run(t, &ProtocolsTestSuite{
 			freighterContainer: containers.FreighterContainer,

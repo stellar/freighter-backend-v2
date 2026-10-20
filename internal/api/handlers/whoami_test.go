@@ -15,7 +15,7 @@ import (
 func TestWhoami_Authenticated(t *testing.T) {
 	h := NewWhoamiHandler()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami", nil)
-	r = r.WithContext(auth.ContextWithUserID(r.Context(), "deadbeef"))
+	r = r.WithContext(auth.ContextWithSourceID(r.Context(), "deadbeef"))
 	w := httptest.NewRecorder()
 
 	require.NoError(t, h.Whoami(w, r))

@@ -236,6 +236,21 @@ func createAppPostgresContainer(ctx context.Context, testNetwork *testcontainers
 	return &TestContainer{Container: container, MappedPortStr: "5432"}, nil
 }
 
+// AppDatabaseHostURL returns a DATABASE_URL for the app Postgres that is
+// reachable from the test process (host-mapped port), as opposed to
+// AppDatabaseURL, which is only resolvable from inside the Docker network.
+func AppDatabaseHostURL(ctx context.Context, appPostgres *TestContainer) (string, error) {
+	host, err := appPostgres.GetHost(ctx)
+	if err != nil {
+		return "", fmt.Errorf("getting app postgres host: %w", err)
+	}
+	port, err := appPostgres.GetPort(ctx)
+	if err != nil {
+		return "", fmt.Errorf("getting app postgres port: %w", err)
+	}
+	return fmt.Sprintf("postgres://freighter:freighter@%s:%s/freighter?sslmode=disable", host, port), nil
+}
+
 // createStellarCoreContainer starts a Stellar Core container in standalone mode.
 func createStellarCoreContainer(ctx context.Context, testNetwork *testcontainers.DockerNetwork) (*TestContainer, error) {
 	_, filename, _, _ := runtime.Caller(0)
