@@ -211,11 +211,8 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 
 	out := UserLinkResponse{
 		UserID:    res.CanonicalSourceID,
-		Sources:   make([]UserLinkedSource, 0, len(res.Sources)),
+		Sources:   toUserLinkedSources(res.Sources),
 		Conflicts: res.Conflicts,
-	}
-	for _, s := range res.Sources {
-		out.Sources = append(out.Sources, UserLinkedSource{ID: s.ID, Kind: s.Kind, CreatedAt: s.CreatedAt})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

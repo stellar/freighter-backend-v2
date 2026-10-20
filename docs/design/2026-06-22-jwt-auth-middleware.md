@@ -1,6 +1,6 @@
 # JWT Authentication — Design
 
-- **Tickets:** [#88](https://github.com/stellar/freighter-backend-v2/issues/88) (verifier + middleware), [#114](https://github.com/stellar/freighter-backend-v2/issues/114) (applied to all user-facing routes), [#164](https://github.com/stellar/freighter-backend-v2/issues/164) (`sub` is a source id; lazy user resolution), [#165](https://github.com/stellar/freighter-backend-v2/issues/165) (`POST /api/v1/user/link` with signed consents)
+- **Tickets:** [#88](https://github.com/stellar/freighter-backend-v2/issues/88) (verifier + middleware), [#114](https://github.com/stellar/freighter-backend-v2/issues/114) (applied to all user-facing routes), [#164](https://github.com/stellar/freighter-backend-v2/issues/164) (`sub` is a source id; lazy user resolution), [#165](https://github.com/stellar/freighter-backend-v2/issues/165) (`POST /api/v1/user/link` with signed consents), [#167](https://github.com/stellar/freighter-backend-v2/issues/167) (`GET /api/v1/user`: the resolved identity)
 - **Reference:** [Freighter Unified User Model Storage](https://github.com/stellar/wallet-eng-monorepo/blob/main/design-docs/contact-lists/Freighter%20Unified%20User%20Model%20Storage.md) — user ID derivation, auth flow, JWT claims
 - **Last updated:** 2026-10-09
 - **Status:** Current
@@ -17,8 +17,9 @@ secret to provision**.
 A source id is **not** a user id. Under the Unified User Model v2 a *user* is a cluster of sources
 (every phrase and account key they have proven possession of, via `POST /api/v1/user/link`), and
 `users.canonical_source_id` — the source that created the cluster — is the user id as exposed to
-clients. Mapping a source to its user is one primary-key lookup, `users.ResolveUser`, that **only
-the handlers that need a user make, lazily**. The middleware attaches the source id and the verified
+clients; a client reads it back, with every source of its cluster, from `GET /api/v1/user`. Mapping
+a source to its user is one primary-key lookup, `users.ResolveUser`, that **only the handlers that
+need a user make, lazily**. The middleware attaches the source id and the verified
 `iat` to the request context and nothing else, so `/protocols`, `/token-prices` and every other
 route that does not need a user never touch the database. See [Source → user
 resolution](#source--user-resolution).
@@ -56,8 +57,8 @@ canonicalSourceID string, err error)` in `internal/users`, the package that owns
 `user_sources` tables. It is one primary-key lookup on `user_sources` joined to `users`. A source
 with no row returns the `users.ErrSourceNotFound` sentinel, which handlers map to `404`.
 
-**Access rule for every user-scoped handler** (recorded in the `internal/users` package doc; `#90`
-contacts is the first consumer):
+**Access rule for every user-scoped handler** (recorded in the `internal/users` package doc;
+`GET /api/v1/user` is the first consumer, through `users.ListSources`; `#90` contacts is next):
 
 1. read the source id from the context with `auth.SourceIDFromContext`;
 2. call `users.ResolveUser`;
@@ -166,9 +167,10 @@ guard test enumerates the same `routes()`, so a newly-added route is auto-covere
 - **Gated (user-facing):** `/api/v1/protocols`, `/api/v1/collectibles`,
   `/api/v1/ledger-key/accounts`, `/api/v1/feature-flags`, `/api/v1/accounts/balances`,
   `/api/v1/token-prices`, `/api/v1/accounts/{address}/transactions`, `/api/v1/auth/whoami`.
-- **Always `auth.Required` (`requireAuth: true`, independent of `AUTH_MODE`):** `POST /api/v1/user/link`.
-  It is the only write to the identity tables and has no anonymous form, so it is wrapped with its
-  own `middleware.Auth(verifier, auth.Required, m)` value even while the global mode is permissive.
+- **Always `auth.Required` (`requireAuth: true`, independent of `AUTH_MODE`):** `POST /api/v1/user/link`
+  and `GET /api/v1/user`. Link is the only write to the identity tables and user is the read that
+  needs a resolved user; neither has an anonymous form, so each is wrapped with its own
+  `middleware.Auth(verifier, auth.Required, m)` value even while the global mode is permissive.
   The `RequireAuthRoutesRejectAnonymousInBothModes` guard test probes every such route under both
   modes with no token and with an expired-but-signed token, the two cases the permissive gate would
   have served.
@@ -252,6 +254,39 @@ statement) or the store's `statement_timeout` (5s) fires. Both store timeouts re
 `ErrStatementTimeout` for the handler to classify. A conflict is a `200` with the id listed, not an
 error.
 
+## Reading the user: `GET /api/v1/user`
+
+The client's one source of truth for its analytics identity. `whoami` echoes the JWT `sub`, which is
+a *source* id and therefore the wrong answer for any wallet whose pinned source is not the cluster
+root; `GET /api/v1/user` resolves it. `handlers.UserHandler` reads the source id from the context,
+calls `users.ResolveUser`, then `users.ListSources` on the returned user id (exactly one resolver
+call and one sources query), and returns:
+
+```
+{ "userId": "<canonical source id>", "sources": [ { "id", "kind", "createdAt" }, ... ] }
+```
+
+Every source of a cluster reads back the same body: `userId` is the cluster's canonical id, not the
+caller's `sub`, and the list is ordered by `(created_at, source_id)`, the same query `Link` returns
+the cluster through (`users.listSourcesSQL`), so the two routes cannot drift. The body carries no G
+address; every id is a hex ed25519 key. A source with no `user_sources` row is `404`: the client
+treats that as "not yet linked" and uses its pinned source id locally.
+
+The two reads run as separate statements on the pool, not in a transaction. That is safe because the
+identity tables are append-only (no `user_sources` row is deleted or moved, no `users` row is
+deleted, `canonical_source_id` never changes): everything `ResolveUser` returns is permanently true
+once observed, and every row `ListSources` returns belongs to that user for good. The only
+interleaving is a concurrent link adding a row between the two statements, which makes the response
+a slightly newer snapshot. If detach or merge is ever implemented, this handler must move onto one
+snapshot.
+
+Status codes: `401` only as a backstop, since the route is always `auth.Required`; `404` for an
+unlinked source; `503` with the database disabled or the request canceled; `504` when
+`handlers.UserRequestTimeout` (5s; the only bound on these reads, which run under no
+`statement_timeout`) fires. There is no dedicated metric family: the HTTP middleware meters the
+route by status, and its `404` rate on `freighter_http_requests_total` is the "authenticated but not
+yet linked" signal.
+
 ## Architecture
 
 ```
@@ -264,11 +299,12 @@ internal/auth/                     pure verifier primitive — no HTTP/config/me
   helpers.go     HashBody (SHA-256 hex)
   linkproof.go   LinkConsentMessage / VerifyLinkConsent (the v2 consent contract); source kinds; IsCanonicalSourceID
   context.go     ContextWithSourceID / SourceIDFromContext; ContextWithIssuedAt / IssuedAtFromContext
-internal/users/users.go            ResolveUser(ctx, sourceID) → (userID, canonicalSourceID); ErrSourceNotFound; the user-scoped access rule
+internal/users/users.go            ResolveUser(ctx, sourceID) → (userID, canonicalSourceID); ListSources(ctx, userID); ErrSourceNotFound; the user-scoped access rule
 internal/users/link.go             Linker.Link: the only write to users/user_sources, one transaction under ordered advisory locks
 internal/api/middleware/auth.go    Auth(verifier, mode, metrics) Middleware; 401 via httperror; injects sourceID + iat; no DB
 internal/api/handlers/whoami.go    echoes the authenticated sourceID (auth smoke-test surface; does not resolve the user)
 internal/api/handlers/user_link.go POST /api/v1/user/link: validates the body, verifies every consent, then calls Linker.Link
+internal/api/handlers/user.go      GET /api/v1/user: ResolveUser then ListSources; 404 for an unlinked source; the client's identity contract
 internal/config/config.go          AuthMode field (permissive|strict), validated at load
 internal/metrics/metrics.go        auth counter (adoption/rejection signal)
 internal/api/serve.go              routes() table + per-route Auth wrapping in initHandlers; health routes gated=false (bare); requireAuth routes pinned to Required
@@ -385,14 +421,19 @@ logging middleware.
   `iat`) in context. The `permissive/wrong-key` and `required/expired` rows are the load-bearing ones: they
   prove the timing fall-through is narrow (a bad signature still 401s) and that strict is unchanged.
 - **route wiring tests** (`internal/api`): user-facing routes reject anonymous in strict, reject
-  invalid tokens in permissive, and expose `sourceID` on a valid token; health probes stay anonymous
-  in every mode; an authenticated request keeps its real route label in `freighter_http_requests_total`.
+  invalid tokens in permissive, and expose `sourceID` on a valid token; `requireAuth` routes (link,
+  user) 401 anonymous and expired-but-signed tokens under both modes, and a valid token reaches each
+  handler; health probes stay anonymous in every mode; an authenticated request keeps its real route
+  label in `freighter_http_requests_total`.
 
 ## Operational notes
 
 - Config var: `AUTH_MODE` / `--auth-mode` (default `permissive`).
 - Route: `GET /api/v1/auth/whoami` (auth smoke-test surface).
 - Route: `POST /api/v1/user/link` (always `auth.Required`; the only identity write).
+- Route: `GET /api/v1/user` (always `auth.Required`; the client contract for the caller's user id and
+  sources; `404` until linked, and that `404` rate on `freighter_http_requests_total` is the
+  authenticated-but-unlinked signal).
 - Metrics: `freighter_user_link_requests_total{result}` with `result` in `created` | `resolved` |
   `bad_request` | `bad_consent` | `error`, and `freighter_user_link_sources_total{outcome}` with
   `outcome` in `written` | `conflict`. Alert on the rate of `result="created"`: a real wallet creates
@@ -406,9 +447,17 @@ logging middleware.
   against Postgres in `internal/users` (`make integration-test`); and an end-to-end suite in
   `internal/integrationtests` that proves the Required wrap under the container's permissive mode
   and the consent's binding to the token's `iat`.
+- **user tests:** the handler against a fake store (canonical id not `sub`, exactly one resolve and
+  one list call, `404` without a list call, `401`/`503`/`504`/`500` mapping, the request deadline on
+  both reads, no internal uuid or G address in the body); and an end-to-end suite in
+  `internal/integrationtests` that links `{P, k1, k2}` as `P` and proves `P` and `k2` read back the
+  same body, an unlinked key gets `404`, and anonymous gets `401` under the container's permissive
+  mode.
 - **`users` pkg tests:** `ResolveUser` returns the user for a known source (from either its
-  canonical or a linked source) and `ErrSourceNotFound` for an unknown one, against a fake row
-  (unit) and a migrated Postgres (`make integration-test`).
+  canonical or a linked source) and `ErrSourceNotFound` for an unknown one; `ListSources` returns
+  the rows in `(created_at, source_id)` order, empty-not-nil for an unknown user, and sees its own
+  uncommitted rows on a transaction backend; against fakes (unit) and a migrated Postgres
+  (`make integration-test`).
 - Metric: `freighter_auth_requests_total`.
 - Under `strict`, all user-facing `/api/v1` routes return 401 without a valid JWT; health probes
   remain anonymous. Reflect endpoint/metric/behavior changes in `wallet-eng-runbooks` via the
