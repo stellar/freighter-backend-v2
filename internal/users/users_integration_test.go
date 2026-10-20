@@ -98,3 +98,60 @@ func TestResolveUser_Postgres(t *testing.T) {
 	assert.Equal(t, seededUserID, userID)
 	assert.Equal(t, canonical, gotCanonical)
 }
+
+// ListSources against the real schema: exactly the rows under the user, in
+// (created_at, source_id) order with their kinds; nothing for an unknown user;
+// and a transaction backend sees its own uncommitted rows, which is how Link
+// returns the cluster it just wrote.
+func TestListSources_Postgres(t *testing.T) {
+	dsn := startMigratedPostgres(t)
+	ctx := context.Background()
+
+	pool, err := db.OpenDBConnectionPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	var u1, u2 uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO users (canonical_source_id) VALUES ('aa') RETURNING id`).Scan(&u1))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO users (canonical_source_id) VALUES ('cc') RETURNING id`).Scan(&u2))
+	// bb is inserted first with a later created_at than aa would get by default,
+	// so the order asserted below is created_at's, not insertion's.
+	_, err = pool.Exec(ctx,
+		`INSERT INTO user_sources (source_id, user_id, kind, created_at) VALUES
+		   ('bb', $1, 'secret_key', now() + interval '1 minute'),
+		   ('aa', $1, 'phrase',     now()),
+		   ('cc', $2, 'phrase',     now())`, u1, u2)
+	require.NoError(t, err)
+
+	store := NewStore(pool)
+
+	got, err := store.ListSources(ctx, u1)
+	require.NoError(t, err)
+	require.Len(t, got, 2, "only u1's rows: %+v", got)
+	assert.Equal(t, "aa", got[0].ID)
+	assert.Equal(t, "phrase", got[0].Kind)
+	assert.Equal(t, "bb", got[1].ID)
+	assert.Equal(t, "secret_key", got[1].Kind)
+	assert.False(t, got[0].CreatedAt.IsZero())
+	assert.True(t, got[0].CreatedAt.Before(got[1].CreatedAt), "ordered by created_at")
+
+	empty, err := store.ListSources(ctx, uuid.New())
+	require.NoError(t, err)
+	require.NotNil(t, empty)
+	assert.Empty(t, empty)
+
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	require.NoError(t, err)
+	defer tx.Rollback(ctx) //nolint:errcheck // test cleanup
+	_, err = tx.Exec(ctx,
+		`INSERT INTO user_sources (source_id, user_id, kind) VALUES ('dd', $1, 'secret_key')`, u1)
+	require.NoError(t, err)
+	inTx, err := NewStore(tx).ListSources(ctx, u1)
+	require.NoError(t, err)
+	assert.Len(t, inTx, 3, "the transaction sees its own uncommitted row")
+	outside, err := store.ListSources(ctx, u1)
+	require.NoError(t, err)
+	assert.Len(t, outside, 2, "the pool does not")
+}

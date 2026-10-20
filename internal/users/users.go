@@ -24,7 +24,8 @@
 //  3. Scope EVERY query by the returned user id (`WHERE user_id = $1`). Never key
 //     storage by the source id, and never accept a user id or source id from the
 //     request body, path, or query: the only trusted identity is the one the
-//     signature proved.
+//     signature proved. ListSources is the first such read, and GET /api/v1/user
+//     (handlers.UserHandler) is its consumer.
 //
 // There is no cache in front of ResolveUser, on purpose. The mapping is immutable
 // today (no code path moves a source between users, retires a source, or deletes
@@ -39,6 +40,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -50,12 +52,13 @@ import (
 // a wrapped database error, so callers test it with errors.Is.
 var ErrSourceNotFound = errors.New("source id is not linked to any user")
 
-// Querier is the subset of pgx that ResolveUser needs. Both *pgxpool.Pool and
-// pgx.Tx satisfy it, so a handler that resolves the caller inside the same
-// transaction as its writes (the link handler) can pass the transaction and
-// read its own uncommitted rows.
+// Querier is the subset of pgx the Store needs. Both *pgxpool.Pool and pgx.Tx
+// satisfy it, so a handler that resolves the caller inside the same transaction
+// as its writes (the link handler) can pass the transaction and read its own
+// uncommitted rows.
 type Querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
 // Store reads the identity tables.
@@ -92,4 +95,46 @@ func (s *Store) ResolveUser(ctx context.Context, sourceID string) (userID uuid.U
 		return uuid.Nil, "", fmt.Errorf("resolving user for source: %w", err)
 	}
 	return userID, canonicalSourceID, nil
+}
+
+// LinkedSource is one user_sources row of a user's cluster.
+type LinkedSource struct {
+	ID        string
+	Kind      string
+	CreatedAt time.Time
+}
+
+// listSourcesSQL is the one query for "the sources under a user". Link (on its
+// transaction) and GET /api/v1/user (on the pool) both read through it, so the
+// two routes cannot drift in what they return. The ORDER BY is what makes the
+// list deterministic: sources linked in one request share a created_at (one
+// transaction, one now()), so source_id is the real tiebreaker, and every
+// source of a cluster sees the same body from GET /api/v1/user.
+const listSourcesSQL = `
+SELECT source_id, kind, created_at
+FROM user_sources
+WHERE user_id = $1
+ORDER BY created_at, source_id`
+
+// ListSources returns every source under userID, ordered by (created_at,
+// source_id). It is never nil: a user id with no rows returns an empty slice,
+// though for a userID that came from ResolveUser that cannot happen, since the
+// resolved source's own row is under it and rows are never deleted.
+func (s *Store) ListSources(ctx context.Context, userID uuid.UUID) ([]LinkedSource, error) {
+	rows, err := s.db.Query(ctx, listSourcesSQL, userID)
+	if err != nil {
+		return nil, fmt.Errorf("reading sources for user: %w", err)
+	}
+	sources, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (LinkedSource, error) {
+		var src LinkedSource
+		scanErr := row.Scan(&src.ID, &src.Kind, &src.CreatedAt)
+		return src, scanErr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("collecting sources for user: %w", err)
+	}
+	if sources == nil {
+		sources = []LinkedSource{}
+	}
+	return sources, nil
 }
