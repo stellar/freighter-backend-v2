@@ -1,6 +1,6 @@
 # JWT Authentication — Design
 
-- **Tickets:** [#88](https://github.com/stellar/freighter-backend-v2/issues/88) (verifier + middleware), [#114](https://github.com/stellar/freighter-backend-v2/issues/114) (applied to all user-facing routes), [#164](https://github.com/stellar/freighter-backend-v2/issues/164) (`sub` is a source id; lazy user resolution)
+- **Tickets:** [#88](https://github.com/stellar/freighter-backend-v2/issues/88) (verifier + middleware), [#114](https://github.com/stellar/freighter-backend-v2/issues/114) (applied to all user-facing routes), [#164](https://github.com/stellar/freighter-backend-v2/issues/164) (`sub` is a source id; lazy user resolution), [#165](https://github.com/stellar/freighter-backend-v2/issues/165) (`POST /api/v1/user/link` with signed consents)
 - **Reference:** [Freighter Unified User Model Storage](https://github.com/stellar/wallet-eng-monorepo/blob/main/design-docs/contact-lists/Freighter%20Unified%20User%20Model%20Storage.md) — user ID derivation, auth flow, JWT claims
 - **Last updated:** 2026-10-09
 - **Status:** Current
@@ -166,6 +166,12 @@ guard test enumerates the same `routes()`, so a newly-added route is auto-covere
 - **Gated (user-facing):** `/api/v1/protocols`, `/api/v1/collectibles`,
   `/api/v1/ledger-key/accounts`, `/api/v1/feature-flags`, `/api/v1/accounts/balances`,
   `/api/v1/token-prices`, `/api/v1/accounts/{address}/transactions`, `/api/v1/auth/whoami`.
+- **Always `auth.Required` (`requireAuth: true`, independent of `AUTH_MODE`):** `POST /api/v1/user/link`.
+  It is the only write to the identity tables and has no anonymous form, so it is wrapped with its
+  own `middleware.Auth(verifier, auth.Required, m)` value even while the global mode is permissive.
+  The `RequireAuthRoutesRejectAnonymousInBothModes` guard test probes every such route under both
+  modes with no token and with an expired-but-signed token, the two cases the permissive gate would
+  have served.
 - **Anonymous in every mode (registered bare, never wrapped):** the infra liveness/readiness
   probes `/api/v1/ping`, `/api/v1/db-health`, `/api/v1/rpc-health`. K8s and the docker-compose
   healthcheck cannot present per-request JWTs, and `db-health` is designed never to fail the
@@ -175,10 +181,76 @@ Because auth wraps the handler *inside* the mux, it runs **after** routing — s
 `Logging`/`Metrics` middleware (which are outer, wrapping the whole mux) capture auth 401s, and the
 HTTP metrics `handler` label (from `r.Pattern`) stays correct for authenticated requests.
 
-A future user-scoped route that needs a policy *different* from the global mode (e.g. always
-`auth.Required` regardless of `AUTH_MODE`) would wrap explicitly with its own `Auth` value —
-e.g. `middleware.Auth(verifier, auth.Required, m)(contactsHandler)` — rather than relying on the
-shared `authed` the table applies to every `gated` route.
+A user-scoped route that needs a policy *different* from the global mode (always `auth.Required`
+regardless of `AUTH_MODE`) declares `requireAuth: true` in the table. `initHandlers` wraps it with a
+second `Auth` value pinned to `auth.Required` (same verifier, same metrics) instead of the shared
+`authed`. `requireAuth` implies `gated`, so the strict-mode guard still enumerates it.
+
+## Linking sources: `POST /api/v1/user/link`
+
+A valid JWT proves possession of *some* keypair, and anyone can mint one, so the link endpoint
+accepts no claimed source or user id. Every source in the body carries a consent signed by that
+source's own key over a domain-separated, newline-delimited message that binds it to the caller:
+
+```
+freighter-user-link-v2 \n source \n <id> \n <kind> \n <signingSourceId> \n <iat as unix seconds>
+```
+
+`signingSourceId` is the JWT `sub`, and `iat` is the token's **verified** issued-at, read from the
+request context (`auth.IssuedAtFromContext`), never from the body. The signer binding is what
+matters for security: only the holder of `sub` can use a consent. The `iat` binding is a freshness
+bound rather than a binding to one token, since any token whose `iat` falls inside the clock-skew
+window (about `2 × ClockSkewLeeway + MaxTokenLifetime`) rebuilds the same message; it limits how
+long a captured consent stays usable by its own signer and nothing more. `kind` (`phrase` |
+`secret_key`) is read from the signed bytes and stored from there, so a kind edited after signing
+fails verification. `auth.LinkConsentMessage` builds the bytes and `auth.VerifyLinkConsent` checks
+one consent; the format is a cross-platform contract pinned by fixture vectors (#166), so a later
+change needs a new domain prefix, not an edit.
+
+Resolution (`users.Linker.Link`) runs in one transaction with `SET LOCAL` lock and statement
+timeouts and takes **one** `pg_advisory_xact_lock`, on `hashtext(sub)`, so two callers signing as the
+same source serialize. It then resolves `sub` with `ResolveUser` on the transaction (an existing row
+is the caller's user; otherwise, under a savepoint, a new `users` row with `canonical_source_id =
+sub`, adopting an existing `users` row with that canonical id if its source row was ever lost) and
+writes every source that has no row with one sorted multi-row
+`INSERT ... ON CONFLICT (source_id) DO NOTHING RETURNING source_id`. An id that comes back unwritten
+has a committed row: under the caller it needs nothing, under anyone else it goes in `conflicts`
+and is left untouched. If the *signer's* own row comes back unwritten, another caller linked it as
+one of their sources in the meantime; the savepoint is rolled back and the signer is re-resolved as
+a member of that cluster, exactly as if that request had arrived first. A claimed source is never
+moved, two populated clusters never combine, no row is retired, and `canonical_source_id` is never
+updated.
+
+This departs from the v2 design's *Resolution* step as written, which takes a per-source advisory
+lock on every submitted id. Those locks decided who wins a contested source, which the
+`user_sources` primary key already decides; what they added was up to `MaxLinkSources` entries per transaction
+in Postgres's shared lock table (`max_locks_per_transaction × max_connections`, about 6400 at
+defaults), which a handful of pods under concurrent full-size requests could exhaust and take every
+transaction in the database down with them. Sorting the batch is what keeps two concurrent inserts
+with overlapping ids from deadlocking.
+
+A request carries at most `users.MaxLinkSources` = 32 sources. #165 specified 128; it was lowered
+because every row this endpoint writes is permanent and any self-minted key can write some, so the
+cap is what bounds how far one request amplifies into storage and ed25519 work. A real wallet is one
+phrase plus a handful of keys; a client with more links in several calls under the same signer.
+The only rate limiter is per-IP at the ingress (#104, in `stellar/kube`), keyed on an
+X-Forwarded-For value that closure itself calls attacker-influenced, and per-`sub` limiting (#105)
+cannot help here since an attacker mints a fresh `sub` per request. A per-route ingress limit on
+this path is the real mitigation and is infra work; `freighter_user_link_requests_total` and
+`freighter_user_link_sources_total` (see Operational notes) are how an attack is seen meanwhile.
+
+Status codes: `400` for a malformed body (empty, trailing data after the JSON object, more than
+`MaxLinkSources` sources, a repeated id, a non-canonical id, an unknown kind, or a body missing `sub`); `403` for a consent that does not verify;
+`401` only as a backstop, since the route is always `auth.Required`; `503` with the database
+disabled, and `503` with a `Retry-After: 1` header when the store's `lock_timeout` (3s) fires because
+another link signed as the same source held the signer lock, which is contention, not a fault, and
+is counted as `result="contended"` rather than `"error"`; `504` when the handler's request deadline
+(`handlers.LinkRequestTimeout`, 8s, the one budget covering pool acquisition and the whole
+transaction, since `WriteTimeout` does not cancel a handler and the store's timeouts are per
+statement) or the store's `statement_timeout` (5s) fires. Both store timeouts reach the handler as a Postgres error
+(SQLSTATE `55P03` / `57014`), not a context error, so `Linker.Link` maps them to `ErrLockTimeout` /
+`ErrStatementTimeout` for the handler to classify. A conflict is a `200` with the id listed, not an
+error.
 
 ## Architecture
 
@@ -190,13 +262,16 @@ internal/auth/                     pure verifier primitive — no HTTP/config/me
   mode.go        Mode enum (Permissive|Required) + ParseMode("permissive"|"strict")
   errors.go      ErrNoToken (sentinel), ErrUnauthorized, VerificationError + Reason
   helpers.go     HashBody (SHA-256 hex)
+  linkproof.go   LinkConsentMessage / VerifyLinkConsent (the v2 consent contract); source kinds; IsCanonicalSourceID
   context.go     ContextWithSourceID / SourceIDFromContext; ContextWithIssuedAt / IssuedAtFromContext
 internal/users/users.go            ResolveUser(ctx, sourceID) → (userID, canonicalSourceID); ErrSourceNotFound; the user-scoped access rule
+internal/users/link.go             Linker.Link: the only write to users/user_sources, one transaction under ordered advisory locks
 internal/api/middleware/auth.go    Auth(verifier, mode, metrics) Middleware; 401 via httperror; injects sourceID + iat; no DB
 internal/api/handlers/whoami.go    echoes the authenticated sourceID (auth smoke-test surface; does not resolve the user)
+internal/api/handlers/user_link.go POST /api/v1/user/link: validates the body, verifies every consent, then calls Linker.Link
 internal/config/config.go          AuthMode field (permissive|strict), validated at load
 internal/metrics/metrics.go        auth counter (adoption/rejection signal)
-internal/api/serve.go              routes() table + per-route Auth wrapping in initHandlers; health routes gated=false (bare)
+internal/api/serve.go              routes() table + per-route Auth wrapping in initHandlers; health routes gated=false (bare); requireAuth routes pinned to Required
 ```
 
 **Boundaries:** `internal/auth` owns the *mechanism* (is this token cryptographically valid for its
@@ -317,6 +392,20 @@ logging middleware.
 
 - Config var: `AUTH_MODE` / `--auth-mode` (default `permissive`).
 - Route: `GET /api/v1/auth/whoami` (auth smoke-test surface).
+- Route: `POST /api/v1/user/link` (always `auth.Required`; the only identity write).
+- Metrics: `freighter_user_link_requests_total{result}` with `result` in `created` | `resolved` |
+  `bad_request` | `bad_consent` | `error`, and `freighter_user_link_sources_total{outcome}` with
+  `outcome` in `written` | `conflict`. Alert on the rate of `result="created"`: a real wallet creates
+  one user, once, so a sustained creation rate is a sybil storage-exhaustion attack, and
+  `outcome="written"` says how many permanent rows it is producing. Both label sets are closed and
+  never carry a source id. Reflect in `wallet-eng-runbooks` via the runbook reconcile step.
+- **link tests:** consent verifier vectors in `internal/auth` (both kinds, signer-as-subject, kind /
+  signer / iat altered after signing, wrong key, non-standard base64); the handler's rejection table
+  against a fake store that must never be reached; the resolve-by-signer matrix, canonical-root,
+  concurrency (same signer ×100, different signers sharing a key) and no-cross-cluster-writes cases
+  against Postgres in `internal/users` (`make integration-test`); and an end-to-end suite in
+  `internal/integrationtests` that proves the Required wrap under the container's permissive mode
+  and the consent's binding to the token's `iat`.
 - **`users` pkg tests:** `ResolveUser` returns the user for a known source (from either its
   canonical or a linked source) and `ErrSourceNotFound` for an unknown one, against a fake row
   (unit) and a migrated Postgres (`make integration-test`).
