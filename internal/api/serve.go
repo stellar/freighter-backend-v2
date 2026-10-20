@@ -268,6 +268,11 @@ func (s *ApiServer) routes() ([]route, error) {
 		linker = users.NewLinker(s.dbPool)
 	}
 	userLinkHandler := handlers.NewUserLinkHandler(linker, s.appMetrics.UserLink)
+	var userReader handlers.UserReader
+	if s.dbPool != nil {
+		userReader = users.NewStore(s.dbPool)
+	}
+	userHandler := handlers.NewUserHandler(userReader)
 
 	return []route{
 		// Health/liveness/readiness probes: gated=false, registered BARE — never
@@ -281,8 +286,8 @@ func (s *ApiServer) routes() ([]route, error) {
 
 		// User-facing routes: gated=true, wrapped in the shared Auth middleware.
 		// Flipping --auth-mode permissive<->strict moves all of these together.
-		// whoami reads the user ID from context and reports authenticated:false when
-		// absent (permissive anonymous).
+		// whoami reads the source id from context and reports authenticated:false
+		// when absent (permissive anonymous).
 		{http.MethodGet, "/api/v1/protocols", handlers.CustomHandler(protocolsHandler.GetProtocols), true, false, true},
 		{http.MethodPost, "/api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles), true, false, true},
 		{http.MethodPost, "/api/v1/ledger-key/accounts", handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts), true, false, true},
@@ -312,6 +317,12 @@ func (s *ApiServer) routes() ([]route, error) {
 		// anonymous form of this request: requireAuth pins it to auth.Required even
 		// while the global mode is permissive. See handlers.UserLinkHandler.
 		{http.MethodPost, "/api/v1/user/link", handlers.CustomHandler(userLinkHandler.Link), true, true, true},
+		// The client contract for its identity: resolves the JWT sub to its user
+		// and returns the canonical source id plus every source in the cluster.
+		// Reads user-scoped data, so it has no anonymous form either: requireAuth
+		// pins it to auth.Required. 404 until the source is linked. See
+		// handlers.UserHandler.
+		{http.MethodGet, "/api/v1/user", handlers.CustomHandler(userHandler.GetUser), true, true, true},
 	}, nil
 }
 

@@ -528,6 +528,7 @@ func TestApiServer_initHandlers_RequireAuthRoutesRejectAnonymousInBothModes(t *t
 					"%s %s: an expired token must 401 under %s (permissive fall-through must not apply)", rt.method, rt.pattern, mode)
 			}
 			assert.Contains(t, covered, "POST /api/v1/user/link", "the link route must declare requireAuth")
+			assert.Contains(t, covered, "GET /api/v1/user", "the user route must declare requireAuth")
 		})
 	}
 }
@@ -559,10 +560,34 @@ func TestApiServer_initHandlers_UserLinkValidTokenReachesHandler(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "past auth, into the handler, which has no DB: %s", rec.Body.String())
 }
 
-// The link handler's database budget must leave room under the server's write
-// timeout: WriteTimeout does not cancel a handler, so a transaction that
-// outlives it would commit after the response can no longer be written.
-func TestApiServer_LinkRequestTimeoutFitsWriteTimeout(t *testing.T) {
-	assert.Less(t, handlers.LinkRequestTimeout, DefaultWriteTimeout,
-		"handlers.LinkRequestTimeout must stay under DefaultWriteTimeout with room to write the response")
+// A valid token reaches the user handler under permissive, same as for link:
+// the Required wrap rejects anonymous and wrong-clock callers, not
+// authenticated ones. With no database in the test server the handler answers
+// 503, which is past the auth gate and proves the handler itself served it.
+func TestApiServer_initHandlers_UserValidTokenReachesHandler(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	sub := hex.EncodeToString(pub)
+
+	mux, err := newTestAPIServer(t, testCfg("permissive")).initHandlers()
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/user", nil)
+	req.Header.Set("Authorization", "Bearer "+mintAPIToken(t, priv, sub, "GET /api/v1/user"))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code, "past auth, into the handler, which has no DB: %s", rec.Body.String())
+}
+
+// The DB-backed handlers' budgets must leave room under the server's write
+// timeout: WriteTimeout does not cancel a handler, so work that outlives it
+// would finish (or commit) after the response can no longer be written.
+func TestApiServer_DBRequestTimeoutsFitWriteTimeout(t *testing.T) {
+	for name, timeout := range map[string]time.Duration{
+		"handlers.LinkRequestTimeout": handlers.LinkRequestTimeout,
+		"handlers.UserRequestTimeout": handlers.UserRequestTimeout,
+	} {
+		assert.Less(t, timeout, DefaultWriteTimeout,
+			"%s must stay under DefaultWriteTimeout with room to write the response", name)
+	}
 }

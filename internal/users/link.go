@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -84,13 +83,6 @@ func classifyTimeout(err error) error {
 type Source struct {
 	ID   string
 	Kind string
-}
-
-// LinkedSource is one row of the caller's cluster as returned by Link.
-type LinkedSource struct {
-	ID        string
-	Kind      string
-	CreatedAt time.Time
 }
 
 // LinkResult is the outcome of one link call.
@@ -269,7 +261,7 @@ func (l *Linker) link(ctx context.Context, signerID string, sources []Source) (*
 		}
 	}
 
-	cluster, err := selectCluster(ctx, tx, userID)
+	cluster, err := NewStore(tx).ListSources(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -485,24 +477,4 @@ func selectOwners(ctx context.Context, tx pgx.Tx, ids []string) (map[string]uuid
 		return nil, fmt.Errorf("reading owners of submitted sources: %w", err)
 	}
 	return out, nil
-}
-
-func selectCluster(ctx context.Context, tx pgx.Tx, userID uuid.UUID) ([]LinkedSource, error) {
-	rows, err := tx.Query(ctx,
-		`SELECT source_id, kind, created_at FROM user_sources WHERE user_id = $1 ORDER BY created_at, source_id`, userID)
-	if err != nil {
-		return nil, fmt.Errorf("reading cluster: %w", err)
-	}
-	cluster, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (LinkedSource, error) {
-		var s LinkedSource
-		scanErr := row.Scan(&s.ID, &s.Kind, &s.CreatedAt)
-		return s, scanErr
-	})
-	if err != nil {
-		return nil, fmt.Errorf("collecting cluster: %w", err)
-	}
-	if cluster == nil {
-		cluster = []LinkedSource{}
-	}
-	return cluster, nil
 }

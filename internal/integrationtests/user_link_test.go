@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -75,17 +76,24 @@ func (k linkKey) consent(kind, signer string, iat time.Time) handlers.UserLinkSo
 }
 
 // postLinkAt sends the request as signer with a JWT minted for exactly this
-// body and issued at iat. Callers sign their consents over the same iat: the
-// consent message carries it as unix seconds and so does the JWT numeric date,
-// so the two must be the same whole second or the server, which reads iat back
-// from the token, rebuilds a different message than the one signed.
+// body and issued at iat. See postLink.
 func (s *UserLinkTestSuite) postLinkAt(signer linkKey, iat time.Time, sources ...handlers.UserLinkSource) (int, []byte) {
-	t := s.T()
+	return postLink(s.T(), s.baseURL, signer, iat, sources...)
+}
+
+// postLink sends a link request to baseURL as signer with a JWT minted for
+// exactly this body and issued at iat. Callers sign their consents over the
+// same iat: the consent message carries it as unix seconds and so does the JWT
+// numeric date, so the two must be the same whole second or the server, which
+// reads iat back from the token, rebuilds a different message than the one
+// signed. Shared by the link and user suites.
+func postLink(t *testing.T, baseURL string, signer linkKey, iat time.Time, sources ...handlers.UserLinkSource) (int, []byte) {
+	t.Helper()
 	body, err := json.Marshal(handlers.UserLinkRequest{Sources: sources})
 	require.NoError(t, err)
 	token := authtest.MintToken(t, signer.priv, signer.id, "POST /api/v1/user/link", auth.MaxTokenLifetime, iat, body)
 
-	req, err := http.NewRequest(http.MethodPost, s.baseURL+"/api/v1/user/link", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/user/link", bytes.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
