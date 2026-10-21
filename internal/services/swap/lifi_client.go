@@ -86,7 +86,7 @@ func (c *LifiClient) TokenDecimals(ctx context.Context, contract string) (int, e
 	}
 	// Checked before caching: ParseUnits/FormatUnits size strings by decimals.
 	if tok.Decimals < 0 || tok.Decimals > maxTokenDecimals {
-		return 0, fmt.Errorf("lifi: token %s decimals %d out of range", contract, tok.Decimals)
+		return 0, &metrics.UpstreamError{Kind: "invalid_response", Err: fmt.Errorf("lifi: token %s decimals %d out of range", contract, tok.Decimals)}
 	}
 	c.decimals.Store(contract, tok.Decimals)
 	return tok.Decimals, nil

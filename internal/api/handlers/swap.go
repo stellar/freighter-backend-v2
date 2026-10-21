@@ -13,6 +13,7 @@ import (
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/services/swap"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
@@ -174,6 +175,8 @@ func mapSwapError(err error, build bool) *httperror.HttpError {
 		return httperror.Conflict("quote_moved", err)
 	case build && (errors.Is(err, swap.ErrNoRoute) || errors.Is(err, swap.ErrInsufficientBalance)):
 		return httperror.Conflict("quote_moved", err)
+	case errors.As(err, new(*metrics.UpstreamError)), errors.Is(err, swap.ErrRateLimited):
+		return httperror.BadGateway("swap source unavailable", err)
 	}
 	return httperror.InternalServerError("swap failed", err)
 }

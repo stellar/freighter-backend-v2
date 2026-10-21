@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
@@ -336,6 +337,9 @@ func TestLifiBadTokenDecimals(t *testing.T) {
 				require.Error(t, berr)
 				assert.Equal(t, "error", Reason(qerr))
 				assert.Equal(t, "error", Reason(berr))
+				var ue *metrics.UpstreamError
+				assert.ErrorAs(t, qerr, &ue)
+				assert.ErrorAs(t, berr, &ue)
 				assert.EqualValues(t, 2, atomic.LoadInt32(&tokenCalls), "bad decimals must not be cached")
 			})
 		}

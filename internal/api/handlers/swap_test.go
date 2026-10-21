@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/services/swap"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
@@ -241,6 +242,8 @@ func TestSwapBuild_ErrorMapping(t *testing.T) {
 		"account not found":    {swap.ErrAccountNotFound, http.StatusBadRequest},
 		"bad request":          {swap.ErrBadRequest, http.StatusBadRequest},
 		"all failed":           {swap.ErrAllSourcesFailed, http.StatusBadGateway},
+		"upstream error":       {fmt.Errorf("lifi: %w", &metrics.UpstreamError{Kind: "http_error", Code: 424, Err: errors.New("x")}), http.StatusBadGateway},
+		"rate limited":         {swap.ErrRateLimited, http.StatusBadGateway},
 		"deadline":             {context.DeadlineExceeded, http.StatusServiceUnavailable},
 		"other":                {errors.New("boom"), http.StatusInternalServerError},
 	}
