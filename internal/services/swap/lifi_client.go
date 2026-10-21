@@ -101,12 +101,12 @@ func (c *LifiClient) getJSON(ctx context.Context, path string, q url.Values, des
 	}
 	defer resp.Body.Close()              //nolint:errcheck
 	defer io.Copy(io.Discard, resp.Body) //nolint:errcheck
-	switch {
-	case resp.StatusCode == http.StatusOK:
+	switch resp.StatusCode {
+	case http.StatusOK:
 		return json.NewDecoder(resp.Body).Decode(dest)
-	case resp.StatusCode == http.StatusTooManyRequests:
+	case http.StatusTooManyRequests:
 		return ErrRateLimited
-	case resp.StatusCode == http.StatusNotFound:
+	case http.StatusNotFound:
 		var e struct {
 			Code    int    `json:"code"`
 			Message string `json:"message"`
