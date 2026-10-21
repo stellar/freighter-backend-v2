@@ -3,13 +3,15 @@ package swap
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/stellar/go-stellar-sdk/txnbuild"
+	"github.com/stellar/go-stellar-sdk/xdr"
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
@@ -171,6 +173,116 @@ func (c *ClassicSource) getJSON(ctx context.Context, network, path string, q url
 	return json.NewDecoder(resp.Body).Decode(dest)
 }
 
-func (c *ClassicSource) BuildTx(context.Context, types.SwapBuildRequest) (string, error) {
-	return "", errors.New("not implemented")
+func (c *ClassicSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (string, error) {
+	from, err := ParseAsset(req.FromAsset)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	to, err := ParseAsset(req.ToAsset)
+	if err != nil || !from.IsClassic() || !to.IsClassic() {
+		return "", fmt.Errorf("%w: classic swaps need classic assets", ErrBadRequest)
+	}
+	acct, err := xdr.AddressToAccountId(req.Account)
+	if err != nil {
+		return "", fmt.Errorf("%w: account", ErrBadRequest)
+	}
+	var acctKey xdr.LedgerKey
+	if err := acctKey.SetAccount(acct); err != nil {
+		return "", err
+	}
+	acctKeyB64, err := xdr.MarshalBase64(acctKey)
+	if err != nil {
+		return "", err
+	}
+	keys := []string{acctKeyB64}
+	var tlKeyB64 string
+	if !to.IsNative() {
+		toX, err := to.XDR()
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
+		}
+		var tlKey xdr.LedgerKey
+		if err := tlKey.SetTrustline(acct, toX.ToTrustLineAsset()); err != nil {
+			return "", err
+		}
+		tlKeyB64, err = xdr.MarshalBase64(tlKey)
+		if err != nil {
+			return "", err
+		}
+		keys = append(keys, tlKeyB64)
+	}
+	entries, err := c.rpc.GetLedgerEntriesXDR(ctx, keys, req.Network)
+	if err != nil {
+		return "", err
+	}
+	acctData, ok := entries[acctKeyB64]
+	if !ok {
+		return "", ErrAccountNotFound
+	}
+	var data xdr.LedgerEntryData
+	if err := xdr.SafeUnmarshalBase64(acctData, &data); err != nil {
+		return "", err
+	}
+	seq := int64(data.MustAccount().SeqNum)
+
+	fromT, err := from.TxnbuildAsset()
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	toT, err := to.TxnbuildAsset()
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	var path []txnbuild.Asset
+	if len(req.Paths) == 1 {
+		hops := req.Paths[0].Hops
+		for i := 0; i+1 < len(hops); i++ {
+			mid, err := ParseAsset(hops[i].To)
+			if err != nil || !mid.IsClassic() {
+				return "", fmt.Errorf("%w: path", ErrBadRequest)
+			}
+			midT, err := mid.TxnbuildAsset()
+			if err != nil {
+				return "", fmt.Errorf("%w: path", ErrBadRequest)
+			}
+			path = append(path, midT)
+		}
+	}
+	ops := []txnbuild.Operation{}
+	if tlKeyB64 != "" {
+		if _, has := entries[tlKeyB64]; !has {
+			credit, ok := toT.(txnbuild.CreditAsset)
+			if !ok {
+				return "", fmt.Errorf("%w: destination asset", ErrBadRequest)
+			}
+			line, err := credit.ToChangeTrustAsset()
+			if err != nil {
+				return "", err
+			}
+			ops = append(ops, &txnbuild.ChangeTrust{Line: line, Limit: txnbuild.MaxTrustlineLimit})
+		}
+	}
+	ops = append(ops, &txnbuild.PathPaymentStrictSend{
+		SendAsset: fromT, SendAmount: req.Amount, Destination: req.Account,
+		DestAsset: toT, DestMin: req.MinOut, Path: path,
+	})
+	totalFee, err := ParseUnits(req.Fee, ClassicDecimals)
+	if err != nil {
+		return "", fmt.Errorf("%w: fee", ErrBadRequest)
+	}
+	perOp := totalFee.Int64() / int64(len(ops))
+	if perOp < txnbuild.MinBaseFee {
+		perOp = txnbuild.MinBaseFee
+	}
+	tx, err := txnbuild.NewTransaction(txnbuild.TransactionParams{
+		SourceAccount:        &txnbuild.SimpleAccount{AccountID: req.Account, Sequence: seq},
+		IncrementSequenceNum: true,
+		Operations:           ops,
+		BaseFee:              perOp,
+		Preconditions:        txnbuild.Preconditions{TimeBounds: txnbuild.NewTimeout(300)},
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	return tx.Base64()
 }

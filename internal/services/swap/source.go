@@ -23,6 +23,7 @@ var (
 	ErrQuoteMoved          = errors.New("quote moved")
 	ErrCheckFailed         = errors.New("transaction check failed")
 	ErrBadRequest          = errors.New("bad request")
+	ErrAccountNotFound     = errors.New("account not found")
 )
 
 // Reason maps a Source error to the reason string reported in SwapUnavailable.

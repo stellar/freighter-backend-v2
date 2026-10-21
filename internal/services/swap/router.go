@@ -3,6 +3,7 @@ package swap
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"sort"
 	"sync"
@@ -156,4 +157,30 @@ func pairKind(req types.SwapQuoteRequest) string {
 		return "classic"
 	}
 	return "soroban"
+}
+
+func (r *Router) Build(ctx context.Context, req types.SwapBuildRequest) (types.SwapBuildResponse, error) {
+	for _, s := range r.sources {
+		if s.Name() != req.Source {
+			continue
+		}
+		if !s.Supports(req.Network) {
+			return types.SwapBuildResponse{}, fmt.Errorf("%w: source %s does not support %s", ErrBadRequest, req.Source, req.Network)
+		}
+		x, err := s.BuildTx(ctx, req)
+		metrics.RecordSwapSource(r.m, s.Name(), "build", Reason(err))
+		if err != nil {
+			return types.SwapBuildResponse{}, err
+		}
+		toContract := ""
+		if to, perr := ParseAsset(req.ToAsset); perr == nil {
+			toContract, _ = to.ContractID(req.Network)
+		}
+		adds, err := AddsTrustline(x, req.Account, toContract)
+		if err != nil {
+			return types.SwapBuildResponse{}, err
+		}
+		return types.SwapBuildResponse{XDR: x, AddsTrustline: adds}, nil
+	}
+	return types.SwapBuildResponse{}, fmt.Errorf("%w: unknown source %q", ErrBadRequest, req.Source)
 }

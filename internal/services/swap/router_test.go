@@ -185,3 +185,17 @@ func TestRouterUnparseableRankingAmountIsDropped(t *testing.T) {
 		assert.Equal(t, []types.SwapUnavailable{{Source: "bad", Reason: "error"}}, res.Unavailable, tc.mode)
 	}
 }
+
+func TestRouterBuildDispatchesAndDetectsTrustline(t *testing.T) {
+	t.Parallel()
+	x, acct := classicTx(t, true)
+	r := NewRouter([]Source{&fakeSource{name: "classic", buildXDR: x}}, time.Second, nil)
+	res, err := r.Build(context.Background(), types.SwapBuildRequest{Network: types.PUBLIC, Account: acct,
+		Source: "classic", FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer})
+	require.NoError(t, err)
+	assert.Equal(t, x, res.XDR)
+	assert.True(t, res.AddsTrustline)
+
+	_, err = r.Build(context.Background(), types.SwapBuildRequest{Network: types.PUBLIC, Source: "nope"})
+	assert.ErrorIs(t, err, ErrBadRequest)
+}
