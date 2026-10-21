@@ -228,6 +228,42 @@ func TestSwapBuild_Validation(t *testing.T) {
 	}
 }
 
+func TestSwapBuild_Slippage(t *testing.T) {
+	t.Parallel()
+	good := swapBuildBody("XLM", swapUSDC, "10")
+	withSlippage := func(v string) string {
+		return strings.Replace(good, `"fee"`, `"slippage":`+v+`,"fee"`, 1)
+	}
+	for _, v := range []string{`"11"`, `"-1"`, `"abc"`, `"1e1"`, `"1/2"`, `"10.01"`, `"0"`, `"0.5"`, `"1.25"`, `"2.0"`} {
+		t.Run("rejects "+v, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeSwapService{}
+			_, err := doBuild(NewSwapHandler(f), "TESTNET", withSlippage(v))
+			require.Error(t, err)
+			assert.Equal(t, http.StatusBadRequest, statusOf(t, err))
+			assert.Contains(t, err.Error(), "invalid slippage")
+			assert.Zero(t, f.calls)
+		})
+	}
+	for _, v := range []string{"1", "2", "10"} {
+		t.Run("accepts "+v, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeSwapService{}
+			_, err := doBuild(NewSwapHandler(f), "TESTNET", withSlippage(`"`+v+`"`))
+			require.NoError(t, err)
+			assert.Equal(t, v, f.lastB.Slippage)
+		})
+	}
+	t.Run("absent stays empty", func(t *testing.T) {
+		t.Parallel()
+		f := &fakeSwapService{}
+		_, err := doBuild(NewSwapHandler(f), "TESTNET", good)
+		require.NoError(t, err)
+		assert.Empty(t, f.lastB.Slippage)
+		assert.Equal(t, 1, f.calls)
+	})
+}
+
 func TestSwapBuild_ErrorMapping(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {

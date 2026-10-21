@@ -345,3 +345,58 @@ func TestLifiBadTokenDecimals(t *testing.T) {
 		}
 	}
 }
+
+func slippageRecorder(t *testing.T, env xdr.TransactionEnvelope, body []byte) (*LifiSource, *[]string) {
+	t.Helper()
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.URL.Query().Get("slippage"))
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	maxTime := int64(env.V1.Tx.Cond.TimeBounds.MaxTime)
+	return NewLifiSource(LifiConfig{
+		Client:         NewLifiClient(srv.URL, "", srv.Client()),
+		SwapContract:   lifiSwapContract,
+		FeeRecipient:   lifiFeeRecipient,
+		Aggregator:     lifiAggregator,
+		MaxResourceFee: 3000000,
+		Now:            func() time.Time { return time.Unix(maxTime-300, 0) },
+	}, nil), &got
+}
+
+func TestLifiSlippageSentToClient(t *testing.T) {
+	body := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
+	env := decodeEnv(t, trustFixtureXDR(t))
+
+	src, got := slippageRecorder(t, env, body)
+	req := lifiBuildReq(t, env)
+	req.Slippage = "2"
+	_, err := src.BuildTx(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"0.02"}, *got)
+
+	src, got = slippageRecorder(t, env, body)
+	_, err = src.BuildTx(context.Background(), lifiBuildReq(t, env))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"0.005"}, *got)
+
+	var q LifiQuote
+	require.NoError(t, json.Unmarshal(body, &q))
+	src, got = slippageRecorder(t, env, body)
+	_, err = src.Quote(context.Background(), lifiReq(fmtRaw(t, q.Action.FromAmount, 7)))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"0.005"}, *got)
+}
+
+func TestSlippageFraction(t *testing.T) {
+	for in, want := range map[string]string{"1": "0.01", "2": "0.02", "9": "0.09", "10": "0.1", "05": "0.05"} {
+		got, err := SlippageFraction(in)
+		require.NoError(t, err, in)
+		assert.Equal(t, want, got, in)
+	}
+	for _, in := range []string{"", "0", "00", "0.5", "1.25", "2.0", "11", "-1", "abc", "1e1", " 1", "+1", "100"} {
+		_, err := SlippageFraction(in)
+		assert.Error(t, err, in)
+	}
+}

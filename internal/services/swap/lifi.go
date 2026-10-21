@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/stellar/go-stellar-sdk/txnbuild"
@@ -16,6 +18,23 @@ import (
 )
 
 const lifiName = "lifi"
+
+// lifiDefaultSlippage is the LI.FI fraction used when the caller gave none.
+const lifiDefaultSlippage = "0.005"
+
+// SlippageFraction converts a whole-number slippage percent in [1, 10] to the
+// decimal fraction LI.FI expects ("2" -> "0.02"). Anything else is rejected.
+func SlippageFraction(percent string) (string, error) {
+	if len(percent) == 0 || len(percent) > 2 || strings.Trim(percent, "0123456789") != "" {
+		return "", errors.New("invalid slippage")
+	}
+	n, _ := strconv.Atoi(percent)
+	if n < 1 || n > 10 {
+		return "", errors.New("invalid slippage")
+	}
+	r := big.NewRat(int64(n), 100)
+	return strings.TrimRight(r.FloatString(2), "0"), nil
+}
 
 // ErrLifiMissingTx is a 200 from LI.FI without a usable transaction.
 var ErrLifiMissingTx = errors.New("lifi returned no usable transaction")
@@ -80,7 +99,7 @@ func (s *LifiSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (*ty
 		return nil, fmt.Errorf("%w: amount %q", ErrBadRequest, req.Amount)
 	}
 
-	q, err := s.cfg.Client.Quote(ctx, fromContract, toContract, raw.String(), req.Account)
+	q, err := s.cfg.Client.Quote(ctx, fromContract, toContract, raw.String(), req.Account, lifiDefaultSlippage)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +207,13 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 		inclusion.SetInt64(txnbuild.MinBaseFee)
 	}
 
-	q, err := s.cfg.Client.Quote(ctx, fromContract, toContract, raw.String(), req.Account)
+	slippage := lifiDefaultSlippage
+	if req.Slippage != "" {
+		if slippage, err = SlippageFraction(req.Slippage); err != nil {
+			return "", fmt.Errorf("%w: slippage %q", ErrBadRequest, req.Slippage)
+		}
+	}
+	q, err := s.cfg.Client.Quote(ctx, fromContract, toContract, raw.String(), req.Account, slippage)
 	if errors.Is(err, ErrNoRoute) || errors.Is(err, ErrInsufficientBalance) {
 		return "", fmt.Errorf("lifi: %v: %w", err, ErrQuoteMoved)
 	}

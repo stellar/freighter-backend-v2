@@ -148,6 +148,12 @@ func (h *SwapHandler) Build(w http.ResponseWriter, r *http.Request) error {
 		return swapBadRequest("invalid fee")
 	}
 
+	if req.Slippage != "" {
+		if _, err := swap.SlippageFraction(req.Slippage); err != nil {
+			return swapBadRequest("invalid slippage")
+		}
+	}
+
 	out, err := h.svc.Build(r.Context(), req)
 	if err != nil {
 		logger.ErrorWithContext(r.Context(), "swap build failed", "account", req.Account, "source", req.Source, "error", err)

@@ -59,7 +59,7 @@ type LifiQuote struct {
 	} `json:"transactionRequest"`
 }
 
-func (c *LifiClient) Quote(ctx context.Context, fromContract, toContract, rawAmount, fromAddress string) (*LifiQuote, error) {
+func (c *LifiClient) Quote(ctx context.Context, fromContract, toContract, rawAmount, fromAddress, slippage string) (*LifiQuote, error) {
 	q := url.Values{}
 	q.Set("fromChain", LifiStellarChainID)
 	q.Set("toChain", LifiStellarChainID)
@@ -67,7 +67,7 @@ func (c *LifiClient) Quote(ctx context.Context, fromContract, toContract, rawAmo
 	q.Set("toToken", toContract)
 	q.Set("fromAmount", rawAmount)
 	q.Set("fromAddress", fromAddress)
-	q.Set("slippage", "0.005")
+	q.Set("slippage", slippage)
 	var out LifiQuote
 	if err := c.getJSON(ctx, "/v1/quote", q, &out); err != nil {
 		return nil, err

@@ -42,7 +42,7 @@ func TestLifiClient_Quote(t *testing.T) {
 	defer srv.Close()
 
 	c := NewLifiClient(srv.URL, "test-key", srv.Client())
-	q, err := c.Quote(context.Background(), "CFROM", "CTO", "100", "GADDR")
+	q, err := c.Quote(context.Background(), "CFROM", "CTO", "100", "GADDR", "0.02")
 	require.NoError(t, err)
 	assert.Equal(t, want.Action.FromAmount, q.Action.FromAmount)
 	assert.Equal(t, want.Estimate.ToAmount, q.Estimate.ToAmount)
@@ -55,7 +55,7 @@ func TestLifiClient_Quote(t *testing.T) {
 	assert.Equal(t, []string{"CTO"}, gotQuery["toToken"])
 	assert.Equal(t, []string{"100"}, gotQuery["fromAmount"])
 	assert.Equal(t, []string{"GADDR"}, gotQuery["fromAddress"])
-	assert.Equal(t, []string{"0.005"}, gotQuery["slippage"])
+	assert.Equal(t, []string{"0.02"}, gotQuery["slippage"])
 }
 
 func TestLifiClient_NoKeyHeaderWhenUnset(t *testing.T) {
@@ -65,7 +65,7 @@ func TestLifiClient_NoKeyHeaderWhenUnset(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
-	_, err := NewLifiClient(srv.URL, "", srv.Client()).Quote(context.Background(), "a", "b", "1", "c")
+	_, err := NewLifiClient(srv.URL, "", srv.Client()).Quote(context.Background(), "a", "b", "1", "c", "0.005")
 	require.NoError(t, err)
 	assert.False(t, has)
 }
@@ -106,7 +106,7 @@ func TestLifiClient_Errors(t *testing.T) {
 				_, _ = w.Write(tt.body)
 			}))
 			defer srv.Close()
-			_, err := NewLifiClient(srv.URL, "k", srv.Client()).Quote(context.Background(), "a", "b", "1", "c")
+			_, err := NewLifiClient(srv.URL, "k", srv.Client()).Quote(context.Background(), "a", "b", "1", "c", "0.005")
 			require.Error(t, err)
 			tt.check(t, err)
 		})
@@ -165,7 +165,7 @@ func TestLifiClient_OversizedBody(t *testing.T) {
 		_, _ = w.Write([]byte(`"}`))
 	}))
 	defer srv.Close()
-	_, err := NewLifiClient(srv.URL, "k", srv.Client()).Quote(context.Background(), "a", "b", "1", "c")
+	_, err := NewLifiClient(srv.URL, "k", srv.Client()).Quote(context.Background(), "a", "b", "1", "c", "0.005")
 	require.Error(t, err)
 	var ue *metrics.UpstreamError
 	assert.ErrorAs(t, err, &ue)
@@ -177,7 +177,7 @@ func TestLifiClient_TransportErrorOmitsAccount(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	srv.Close()
-	_, err := NewLifiClient(srv.URL, "k", srv.Client()).Quote(context.Background(), "a", "b", "1", "GADDRMUSTNOTLEAK")
+	_, err := NewLifiClient(srv.URL, "k", srv.Client()).Quote(context.Background(), "a", "b", "1", "GADDRMUSTNOTLEAK", "0.005")
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "GADDRMUSTNOTLEAK")
 	var ue *metrics.UpstreamError
