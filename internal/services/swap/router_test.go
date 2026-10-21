@@ -146,3 +146,42 @@ func TestRouterHungSourceTimesOut(t *testing.T) {
 	require.Len(t, res.Routes, 1)
 	assert.Equal(t, []types.SwapUnavailable{{Source: "lifi", Reason: "timeout"}}, res.Unavailable)
 }
+
+func TestRouterNilRouteIsError(t *testing.T) {
+	t.Parallel()
+	r := NewRouter([]Source{
+		&fakeSource{name: "lifi"},
+		&fakeSource{name: "classic", route: route("classic", "100", "17.9")},
+	}, time.Second, nil)
+	res, err := r.Quote(context.Background(), sendReq)
+	require.NoError(t, err)
+	require.Len(t, res.Routes, 1)
+	assert.Equal(t, []types.SwapUnavailable{{Source: "lifi", Reason: "error"}}, res.Unavailable)
+
+	r = NewRouter([]Source{&fakeSource{name: "lifi"}}, time.Second, nil)
+	_, err = r.Quote(context.Background(), sendReq)
+	assert.ErrorIs(t, err, ErrAllSourcesFailed)
+}
+
+func TestRouterUnparseableRankingAmountIsDropped(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		mode      string
+		bad, good *types.SwapRoute
+	}{
+		{types.SwapModeSend, route("bad", "100", "abc"), route("good", "100", "17.9")},
+		{types.SwapModeReceive, route("bad", "abc", "1"), route("good", "3", "1")},
+	} {
+		r := NewRouter([]Source{
+			&fakeSource{name: "bad", route: tc.bad},
+			&fakeSource{name: "good", route: tc.good},
+		}, time.Second, nil)
+		req := sendReq
+		req.Mode = tc.mode
+		res, err := r.Quote(context.Background(), req)
+		require.NoError(t, err, tc.mode)
+		require.Len(t, res.Routes, 1, tc.mode)
+		assert.Equal(t, "good", res.Routes[0].Source, tc.mode)
+		assert.Equal(t, []types.SwapUnavailable{{Source: "bad", Reason: "error"}}, res.Unavailable, tc.mode)
+	}
+}

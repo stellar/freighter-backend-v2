@@ -14,6 +14,8 @@ import (
 
 var ErrAllSourcesFailed = errors.New("all swap sources failed")
 
+var errMalformedRoute = errors.New("source returned a malformed route")
+
 type Router struct {
 	sources []Source
 	timeout time.Duration
@@ -63,6 +65,9 @@ func (r *Router) Quote(ctx context.Context, req types.SwapQuoteRequest) (types.S
 		if errors.Is(res.err, ErrUnsupportedMode) {
 			continue
 		}
+		if res.err == nil && !validRoute(req, res.route) {
+			res.err = errMalformedRoute
+		}
 		reason := Reason(res.err)
 		metrics.RecordSwapSource(r.m, res.src.Name(), "quote", reason)
 		if res.err != nil {
@@ -90,6 +95,20 @@ func countAsked(results []result) int {
 		}
 	}
 	return n
+}
+
+// validRoute reports whether rt is non-nil and its ranking amount parses;
+// rat() maps garbage to 0, which would let a bad route win in receive mode.
+func validRoute(req types.SwapQuoteRequest, rt *types.SwapRoute) bool {
+	if rt == nil {
+		return false
+	}
+	amt := rt.ToAmount
+	if req.Mode == types.SwapModeReceive {
+		amt = rt.FromAmount
+	}
+	_, ok := new(big.Rat).SetString(amt)
+	return ok
 }
 
 func rat(s string) *big.Rat {
