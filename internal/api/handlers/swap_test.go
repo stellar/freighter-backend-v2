@@ -237,6 +237,7 @@ func TestSwapBuild_ErrorMapping(t *testing.T) {
 		"no route":             {swap.ErrNoRoute, http.StatusConflict},
 		"insufficient balance": {swap.ErrInsufficientBalance, http.StatusConflict},
 		"check failed":         {swap.ErrCheckFailed, http.StatusBadGateway},
+		"lifi missing tx":      {swap.ErrLifiMissingTx, http.StatusBadGateway},
 		"account not found":    {swap.ErrAccountNotFound, http.StatusBadRequest},
 		"bad request":          {swap.ErrBadRequest, http.StatusBadRequest},
 		"all failed":           {swap.ErrAllSourcesFailed, http.StatusBadGateway},

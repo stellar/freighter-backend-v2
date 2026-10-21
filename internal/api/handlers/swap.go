@@ -168,6 +168,8 @@ func mapSwapError(err error, build bool) *httperror.HttpError {
 		return httperror.BadRequest("invalid swap request", err)
 	case errors.Is(err, swap.ErrCheckFailed):
 		return httperror.BadGateway("swap transaction check failed", err)
+	case errors.Is(err, swap.ErrLifiMissingTx):
+		return httperror.BadGateway("swap source returned no transaction", err)
 	case errors.Is(err, swap.ErrQuoteMoved):
 		return httperror.Conflict("quote_moved", err)
 	case build && (errors.Is(err, swap.ErrNoRoute) || errors.Is(err, swap.ErrInsufficientBalance)):

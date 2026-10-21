@@ -3,9 +3,11 @@ package swap
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -118,7 +120,7 @@ func TestLifiQuoteMissingTransaction(t *testing.T) {
 			src := lifiServer(t, 200, []byte(body))
 			var err error
 			require.NotPanics(t, func() { _, err = src.Quote(context.Background(), lifiReq("10")) })
-			require.ErrorIs(t, err, errLifiMissingTx)
+			require.ErrorIs(t, err, ErrLifiMissingTx)
 			assert.Equal(t, "error", Reason(err))
 
 			r := NewRouter([]Source{src, &fakeSource{name: "classic", route: route("classic", "10", "1.8")}}, time.Second, nil)
@@ -151,7 +153,7 @@ func lifiBuildSource(t *testing.T, env xdr.TransactionEnvelope, status int, body
 		SwapContract:   lifiSwapContract,
 		FeeRecipient:   lifiFeeRecipient,
 		Aggregator:     lifiAggregator,
-		MaxResourceFee: 1000000,
+		MaxResourceFee: 3000000,
 		Now:            func() time.Time { return time.Unix(maxTime-300, 0) },
 	}, nil)
 }
@@ -174,6 +176,7 @@ func TestLifiBuildTrustFixture(t *testing.T) {
 	require.NoError(t, err)
 	out := decodeEnv(t, x)
 	assert.Equal(t, uint32(out.V1.Tx.Ext.SorobanData.ResourceFee)+1000, uint32(out.V1.Tx.Fee))
+	assert.Empty(t, out.V1.Signatures)
 	adds, err := AddsTrustline(x, lifiTestAccount, contractIDOf(t, "USDC:"+usdcIssuer))
 	require.NoError(t, err)
 	assert.True(t, adds)
@@ -219,7 +222,7 @@ func TestLifiBuildTamperedIsCheckFailed(t *testing.T) {
 	require.NoError(t, json.Unmarshal(lifiFixture(t, "lifi_quote_xlm_usdc_trust.json"), &q))
 	env := decodeEnv(t, trustFixtureXDR(t))
 	tampered := decodeEnv(t, trustFixtureXDR(t))
-	tampered.V1.Tx.Ext.SorobanData.ResourceFee = 1000001
+	tampered.V1.Tx.Ext.SorobanData.ResourceFee = 3000001
 	b64, err := xdr.MarshalBase64(tampered)
 	require.NoError(t, err)
 	q["transactionRequest"].(map[string]any)["data"] = b64
@@ -264,5 +267,77 @@ func TestLifiQuoteFromAmountComparedNumerically(t *testing.T) {
 				assert.NoError(t, err)
 			}
 		})
+	}
+}
+
+// LI.FI's signatures cannot authorize anything for the user; they are dropped.
+func TestLifiBuildClearsSignatures(t *testing.T) {
+	var q map[string]any
+	require.NoError(t, json.Unmarshal(lifiFixture(t, "lifi_quote_xlm_usdc_trust.json"), &q))
+	env := decodeEnv(t, trustFixtureXDR(t))
+	signed := decodeEnv(t, trustFixtureXDR(t))
+	signed.V1.Signatures = []xdr.DecoratedSignature{{Hint: xdr.SignatureHint{1, 2, 3, 4}, Signature: xdr.Signature{5}}}
+	b64, err := xdr.MarshalBase64(signed)
+	require.NoError(t, err)
+	q["transactionRequest"].(map[string]any)["data"] = b64
+	body, err := json.Marshal(q)
+	require.NoError(t, err)
+	x, err := lifiBuildSource(t, env, 200, body).BuildTx(context.Background(), lifiBuildReq(t, env))
+	require.NoError(t, err)
+	assert.Empty(t, decodeEnv(t, x).V1.Signatures)
+}
+
+func TestLifiBuildMissingTransaction(t *testing.T) {
+	env := decodeEnv(t, trustFixtureXDR(t))
+	for name, body := range map[string]string{
+		"no transactionRequest": `{"action":{"fromAmount":"100000000"}}`,
+		"undecodable xdr":       `{"action":{"fromAmount":"100000000"},"transactionRequest":{"data":"not-xdr"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := lifiBuildSource(t, env, 200, []byte(body)).BuildTx(context.Background(), lifiBuildReq(t, env))
+			require.ErrorIs(t, err, ErrLifiMissingTx)
+			assert.Equal(t, "error", Reason(err))
+		})
+	}
+}
+
+// Out-of-range token decimals make the source error rather than panic in
+// ParseUnits or allocate a huge string.
+func TestLifiBadTokenDecimals(t *testing.T) {
+	env := decodeEnv(t, trustFixtureXDR(t))
+	quote := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
+	for _, d := range []int{40, -1} {
+		for _, side := range []string{"from", "to"} {
+			t.Run(fmt.Sprintf("%s %d", side, d), func(t *testing.T) {
+				var tokenCalls int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/v1/token" {
+						atomic.AddInt32(&tokenCalls, 1)
+						_, _ = fmt.Fprintf(w, `{"decimals":%d}`, d)
+						return
+					}
+					_, _ = w.Write(quote)
+				}))
+				defer srv.Close()
+				src := NewLifiSource(LifiConfig{Client: NewLifiClient(srv.URL, "", srv.Client())}, nil)
+				qreq := lifiReq("10")
+				breq := lifiBuildReq(t, env)
+				if side == "from" {
+					qreq.FromAsset, breq.FromAsset = otherContract, otherContract
+				} else {
+					qreq.ToAsset, breq.ToAsset = otherContract, otherContract
+				}
+				var qerr, berr error
+				require.NotPanics(t, func() {
+					_, qerr = src.Quote(context.Background(), qreq)
+					_, berr = src.BuildTx(context.Background(), breq)
+				})
+				require.Error(t, qerr)
+				require.Error(t, berr)
+				assert.Equal(t, "error", Reason(qerr))
+				assert.Equal(t, "error", Reason(berr))
+				assert.EqualValues(t, 2, atomic.LoadInt32(&tokenCalls), "bad decimals must not be cached")
+			})
+		}
 	}
 }

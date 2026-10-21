@@ -64,7 +64,7 @@ func trustExpect(t *testing.T, env xdr.TransactionEnvelope) lifiExpect {
 		ToClassic:      true,
 		Amount:         big.NewInt(100000000),
 		MinOut:         new(big.Int).Set(call.MinAmountOut),
-		MaxResourceFee: 1000000,
+		MaxResourceFee: 3000000,
 		MaxValidUntil:  int64(tb.MaxTime),
 	}
 }
@@ -206,6 +206,22 @@ func TestLifiChecksTamperFails(t *testing.T) {
 			syncRoot(e)
 		}},
 		// 3. swap params
+		{"token_in changed", "token_in", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			setField(t, swapParams(e), "token_in", anyAddrVal(t, otherContract))
+			syncRoot(e)
+		}},
+		{"args[0] changed", "args account", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			scVec(mustField(t, swapParams(e), "args"))[0] = anyAddrVal(t, other)
+			syncRoot(e)
+		}},
+		{"args[1] changed", "args token in", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			scVec(mustField(t, swapParams(e), "args"))[1] = anyAddrVal(t, otherContract)
+			syncRoot(e)
+		}},
+		{"args[4] differs from min_amount_out", "args min out", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			scVec(mustField(t, swapParams(e), "args"))[4] = i128Val(1)
+			syncRoot(e)
+		}},
 		{"token_out changed", "token_out", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
 			setField(t, swapParams(e), "token_out", anyAddrVal(t, otherContract))
 			syncRoot(e)
@@ -283,9 +299,56 @@ func TestLifiChecksTamperFails(t *testing.T) {
 		{"no auth", "auth entries", func(_ *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
 			hostFn(e).Auth = nil
 		}},
+		{"two auth entries", "auth entries", func(_ *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			hostFn(e).Auth = append(hostFn(e).Auth, hostFn(e).Auth[0])
+		}},
+		{"duplicate fee transfer", "auth child", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			dup := *childByFn(t, e, "transfer")
+			*rootChildren(e) = append(*rootChildren(e), dup)
+		}},
+		{"duplicate trust", "auth child", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			dup := *childByFn(t, e, "trust")
+			*rootChildren(e) = append(*rootChildren(e), dup)
+		}},
+		{"duplicate aggregator", "auth aggregator", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			dup := *childByFn(t, e, "swap_exact_in")
+			*rootChildren(e) = append(*rootChildren(e), dup)
+		}},
+		{"trust wrong args", "auth child", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			childByFn(t, e, "trust").Function.ContractFn.Args = []xdr.ScVal{anyAddrVal(t, other)}
+		}},
+		{"trust with child", "auth child", func(t *testing.T, e *xdr.TransactionEnvelope, w *lifiExpect) {
+			childByFn(t, e, "trust").SubInvocations = []xdr.SorobanAuthorizedInvocation{
+				contractCall(t, w.FromContract, "transfer", anyAddrVal(t, lifiTestAccount), anyAddrVal(t, other), i128Val(1))}
+		}},
+		{"fee transfer with child", "auth child", func(t *testing.T, e *xdr.TransactionEnvelope, w *lifiExpect) {
+			childByFn(t, e, "transfer").SubInvocations = []xdr.SorobanAuthorizedInvocation{
+				contractCall(t, w.FromContract, "transfer", anyAddrVal(t, lifiTestAccount), anyAddrVal(t, other), i128Val(1))}
+		}},
+		{"aggregator grandchild", "auth aggregator", func(t *testing.T, e *xdr.TransactionEnvelope, w *lifiExpect) {
+			agg := childByFn(t, e, "swap_exact_in")
+			agg.SubInvocations[0].SubInvocations = []xdr.SorobanAuthorizedInvocation{
+				contractCall(t, w.FromContract, "transfer", anyAddrVal(t, lifiTestAccount), anyAddrVal(t, other), i128Val(1))}
+		}},
+		{"aggregator args[0] changed", "auth aggregator", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			childByFn(t, e, "swap_exact_in").Function.ContractFn.Args[0] = anyAddrVal(t, other)
+		}},
+		{"aggregator args[1] changed", "auth aggregator", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			childByFn(t, e, "swap_exact_in").Function.ContractFn.Args[1] = anyAddrVal(t, otherContract)
+		}},
+		{"aggregator args[3] changed", "auth aggregator", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			childByFn(t, e, "swap_exact_in").Function.ContractFn.Args[3] = anyAddrVal(t, otherContract)
+		}},
 		// 5. resource fee
 		{"resource fee above cap", "resource fee", func(_ *testing.T, e *xdr.TransactionEnvelope, w *lifiExpect) {
 			e.V1.Tx.Ext.SorobanData.ResourceFee = xdr.Int64(w.MaxResourceFee + 1)
+		}},
+		{"negative resource fee", "resource fee", func(_ *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			e.V1.Tx.Ext.SorobanData.ResourceFee = -1
+		}},
+		{"precond v2", "time bounds", func(_ *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			tb := *e.V1.Tx.Cond.TimeBounds
+			e.V1.Tx.Cond = xdr.Preconditions{Type: xdr.PreconditionTypePrecondV2, V2: &xdr.PreconditionsV2{TimeBounds: &tb}}
 		}},
 		// 6. time bounds
 		{"max time zero", "time bounds", func(_ *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {

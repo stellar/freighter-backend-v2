@@ -17,7 +17,8 @@ import (
 
 const lifiName = "lifi"
 
-var errLifiMissingTx = errors.New("missing transaction")
+// ErrLifiMissingTx is a 200 from LI.FI without a usable transaction.
+var ErrLifiMissingTx = errors.New("lifi returned no usable transaction")
 
 type LifiConfig struct {
 	Client         *LifiClient
@@ -92,15 +93,15 @@ func (s *LifiSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (*ty
 		return nil, ErrInsufficientBalance
 	}
 	if q.TransactionRequest == nil {
-		return nil, fmt.Errorf("lifi: %w", errLifiMissingTx)
+		return nil, fmt.Errorf("lifi: %w", ErrLifiMissingTx)
 	}
 	var env xdr.TransactionEnvelope
 	if err := xdr.SafeUnmarshalBase64(q.TransactionRequest.Data, &env); err != nil {
-		return nil, fmt.Errorf("lifi: %w", errLifiMissingTx)
+		return nil, fmt.Errorf("lifi: %w", ErrLifiMissingTx)
 	}
 	call, err := decodeLifiCall(env)
 	if err != nil {
-		return nil, fmt.Errorf("lifi: %w", errLifiMissingTx)
+		return nil, fmt.Errorf("lifi: %w", ErrLifiMissingTx)
 	}
 
 	toAmount, ok := new(big.Int).SetString(q.Estimate.ToAmount, 10)
@@ -202,11 +203,11 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 		return "", fmt.Errorf("lifi: amount shrank: %w", ErrQuoteMoved)
 	}
 	if q.TransactionRequest == nil {
-		return "", fmt.Errorf("lifi: %w", errLifiMissingTx)
+		return "", fmt.Errorf("lifi: %w", ErrLifiMissingTx)
 	}
 	var env xdr.TransactionEnvelope
 	if err := xdr.SafeUnmarshalBase64(q.TransactionRequest.Data, &env); err != nil {
-		return "", fmt.Errorf("lifi: %w", errLifiMissingTx)
+		return "", fmt.Errorf("lifi: %w", ErrLifiMissingTx)
 	}
 	if err := checkLifiTx(env, lifiExpect{
 		Account:        req.Account,
@@ -230,5 +231,6 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 		return "", fmt.Errorf("%w: fee %q", ErrBadRequest, req.Fee)
 	}
 	env.V1.Tx.Fee = xdr.Uint32(total.Uint64())
+	env.V1.Signatures = nil
 	return xdr.MarshalBase64(env)
 }
