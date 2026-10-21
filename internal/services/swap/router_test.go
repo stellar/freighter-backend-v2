@@ -23,12 +23,18 @@ type fakeSource struct {
 	delay    time.Duration
 	buildXDR string
 	buildErr error
-	calls    int
+	// buildBlock makes BuildTx wait for ctx to end.
+	buildBlock bool
+	calls      int
 }
 
 func (f *fakeSource) Name() string           { return f.name }
 func (f *fakeSource) Supports(n string) bool { return f.networks == nil || f.networks[n] }
-func (f *fakeSource) BuildTx(context.Context, types.SwapBuildRequest) (string, error) {
+func (f *fakeSource) BuildTx(ctx context.Context, _ types.SwapBuildRequest) (string, error) {
+	if f.buildBlock {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
 	return f.buildXDR, f.buildErr
 }
 func (f *fakeSource) Quote(ctx context.Context, _ types.SwapQuoteRequest) (*types.SwapRoute, error) {
@@ -57,7 +63,7 @@ func TestRouterRanksSendByMostOut(t *testing.T) {
 	r := NewRouter([]Source{
 		&fakeSource{name: "lifi", route: route("lifi", "100", "17.80")},
 		&fakeSource{name: "classic", route: route("classic", "100", "17.90")},
-	}, time.Second, m)
+	}, time.Second, time.Second, m)
 	res, err := r.Quote(context.Background(), sendReq)
 	require.NoError(t, err)
 	require.Len(t, res.Routes, 2)
@@ -71,7 +77,7 @@ func TestRouterRanksReceiveByLeastIn(t *testing.T) {
 	r := NewRouter([]Source{
 		&fakeSource{name: "a", route: route("a", "3.0", "0.5")},
 		&fakeSource{name: "b", route: route("b", "2.9", "0.5")},
-	}, time.Second, nil)
+	}, time.Second, time.Second, nil)
 	req := sendReq
 	req.Mode = types.SwapModeReceive
 	res, err := r.Quote(context.Background(), req)
@@ -84,7 +90,7 @@ func TestRouterOneSourceFailingDoesNotFailRequest(t *testing.T) {
 	r := NewRouter([]Source{
 		&fakeSource{name: "lifi", err: ErrRateLimited},
 		&fakeSource{name: "classic", route: route("classic", "100", "17.9")},
-	}, time.Second, nil)
+	}, time.Second, time.Second, nil)
 	res, err := r.Quote(context.Background(), sendReq)
 	require.NoError(t, err)
 	require.Len(t, res.Routes, 1)
@@ -96,7 +102,7 @@ func TestRouterAllNoRouteIsEmpty200(t *testing.T) {
 	r := NewRouter([]Source{
 		&fakeSource{name: "lifi", err: ErrNoRoute},
 		&fakeSource{name: "classic", err: ErrNoRoute},
-	}, time.Second, nil)
+	}, time.Second, time.Second, nil)
 	res, err := r.Quote(context.Background(), sendReq)
 	require.NoError(t, err)
 	assert.Empty(t, res.Routes)
@@ -108,7 +114,7 @@ func TestRouterAllErroringIsAllSourcesFailed(t *testing.T) {
 	r := NewRouter([]Source{
 		&fakeSource{name: "lifi", err: errors.New("boom")},
 		&fakeSource{name: "classic", err: errors.New("boom")},
-	}, time.Second, nil)
+	}, time.Second, time.Second, nil)
 	_, err := r.Quote(context.Background(), sendReq)
 	assert.ErrorIs(t, err, ErrAllSourcesFailed)
 }
@@ -116,7 +122,7 @@ func TestRouterAllErroringIsAllSourcesFailed(t *testing.T) {
 func TestRouterUnsupportedNetworkAndMode(t *testing.T) {
 	t.Parallel()
 	lifi := &fakeSource{name: "lifi", networks: map[string]bool{types.PUBLIC: true}, err: ErrUnsupportedMode}
-	r := NewRouter([]Source{lifi, &fakeSource{name: "classic", route: route("classic", "1", "1")}}, time.Second, nil)
+	r := NewRouter([]Source{lifi, &fakeSource{name: "classic", route: route("classic", "1", "1")}}, time.Second, time.Second, nil)
 
 	req := sendReq
 	req.Network = types.TESTNET
@@ -138,7 +144,7 @@ func TestRouterHungSourceTimesOut(t *testing.T) {
 	r := NewRouter([]Source{
 		&fakeSource{name: "lifi", delay: time.Hour},
 		&fakeSource{name: "classic", route: route("classic", "100", "17.9")},
-	}, 50*time.Millisecond, nil)
+	}, 50*time.Millisecond, time.Second, nil)
 	start := time.Now()
 	res, err := r.Quote(context.Background(), sendReq)
 	require.NoError(t, err)
@@ -152,13 +158,13 @@ func TestRouterNilRouteIsError(t *testing.T) {
 	r := NewRouter([]Source{
 		&fakeSource{name: "lifi"},
 		&fakeSource{name: "classic", route: route("classic", "100", "17.9")},
-	}, time.Second, nil)
+	}, time.Second, time.Second, nil)
 	res, err := r.Quote(context.Background(), sendReq)
 	require.NoError(t, err)
 	require.Len(t, res.Routes, 1)
 	assert.Equal(t, []types.SwapUnavailable{{Source: "lifi", Reason: "error"}}, res.Unavailable)
 
-	r = NewRouter([]Source{&fakeSource{name: "lifi"}}, time.Second, nil)
+	r = NewRouter([]Source{&fakeSource{name: "lifi"}}, time.Second, time.Second, nil)
 	_, err = r.Quote(context.Background(), sendReq)
 	assert.ErrorIs(t, err, ErrAllSourcesFailed)
 }
@@ -175,7 +181,7 @@ func TestRouterUnparseableRankingAmountIsDropped(t *testing.T) {
 		r := NewRouter([]Source{
 			&fakeSource{name: "bad", route: tc.bad},
 			&fakeSource{name: "good", route: tc.good},
-		}, time.Second, nil)
+		}, time.Second, time.Second, nil)
 		req := sendReq
 		req.Mode = tc.mode
 		res, err := r.Quote(context.Background(), req)
@@ -189,7 +195,7 @@ func TestRouterUnparseableRankingAmountIsDropped(t *testing.T) {
 func TestRouterBuildDispatchesAndDetectsTrustline(t *testing.T) {
 	t.Parallel()
 	x, acct := classicTx(t, true)
-	r := NewRouter([]Source{&fakeSource{name: "classic", buildXDR: x}}, time.Second, nil)
+	r := NewRouter([]Source{&fakeSource{name: "classic", buildXDR: x}}, time.Second, time.Second, nil)
 	res, err := r.Build(context.Background(), types.SwapBuildRequest{Network: types.PUBLIC, Account: acct,
 		Source: "classic", FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer})
 	require.NoError(t, err)
@@ -208,11 +214,42 @@ func TestRouterQuoteParentCancelled(t *testing.T) {
 	r := NewRouter([]Source{
 		&fakeSource{name: "lifi", delay: time.Hour},
 		&fakeSource{name: "classic", delay: time.Hour},
-	}, time.Hour, m)
+	}, time.Hour, time.Second, m)
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(20*time.Millisecond, cancel)
 	_, err := r.Quote(ctx, sendReq)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.NotErrorIs(t, err, ErrAllSourcesFailed)
+	assert.Equal(t, 0, testutil.CollectAndCount(m.SourceRequests))
+}
+
+func TestRouterBuildTimesOut(t *testing.T) {
+	t.Parallel()
+	m := metrics.NewSwap(prometheus.NewRegistry())
+	r := NewRouter([]Source{&fakeSource{name: "lifi", buildBlock: true}}, time.Second, 50*time.Millisecond, m)
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		_, err := r.Build(context.Background(), types.SwapBuildRequest{Network: types.PUBLIC, Source: "lifi"})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.Less(t, time.Since(start), time.Second)
+		assert.Equal(t, 1.0, testutil.ToFloat64(m.SourceRequests.WithLabelValues("lifi", "build", "timeout")))
+	case <-time.After(2 * time.Second):
+		t.Fatal("Build did not return after the build timeout")
+	}
+}
+
+func TestRouterBuildParentCancelled(t *testing.T) {
+	t.Parallel()
+	m := metrics.NewSwap(prometheus.NewRegistry())
+	r := NewRouter([]Source{&fakeSource{name: "lifi", buildBlock: true}}, time.Second, time.Hour, m)
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(20*time.Millisecond, cancel)
+	_, err := r.Build(ctx, types.SwapBuildRequest{Network: types.PUBLIC, Source: "lifi"})
+	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, 0, testutil.CollectAndCount(m.SourceRequests))
 }

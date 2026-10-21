@@ -143,6 +143,7 @@ type SwapConfig struct {
 	ClassicEnabled        bool
 	LifiEnabled           bool
 	SourceTimeoutSeconds  int
+	BuildTimeoutSeconds   int
 	LifiAPIKey            string
 	LifiBaseURL           string
 	LifiSwapContract      string

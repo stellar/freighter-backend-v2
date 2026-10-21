@@ -124,7 +124,7 @@ func TestLifiQuoteMissingTransaction(t *testing.T) {
 			require.ErrorIs(t, err, ErrLifiMissingTx)
 			assert.Equal(t, "error", Reason(err))
 
-			r := NewRouter([]Source{src, &fakeSource{name: "classic", route: route("classic", "10", "1.8")}}, time.Second, nil)
+			r := NewRouter([]Source{src, &fakeSource{name: "classic", route: route("classic", "10", "1.8")}}, time.Second, time.Second, nil)
 			res, err := r.Quote(context.Background(), lifiReq("10"))
 			require.NoError(t, err)
 			require.Len(t, res.Routes, 1)

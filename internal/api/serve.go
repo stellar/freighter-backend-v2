@@ -180,7 +180,8 @@ func (s *ApiServer) initServices() error {
 		}, s.appMetrics.Swap))
 	}
 	s.swapService = swap.NewRouter(sources,
-		time.Duration(s.cfg.SwapConfig.SourceTimeoutSeconds)*time.Second, s.appMetrics.Swap)
+		time.Duration(s.cfg.SwapConfig.SourceTimeoutSeconds)*time.Second,
+		time.Duration(s.cfg.SwapConfig.BuildTimeoutSeconds)*time.Second, s.appMetrics.Swap)
 
 	return nil
 }

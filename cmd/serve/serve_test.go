@@ -548,6 +548,7 @@ func TestServeCmd_SwapDefaults(t *testing.T) {
 	assert.True(t, cfg.SwapConfig.ClassicEnabled)
 	assert.False(t, cfg.SwapConfig.LifiEnabled)
 	assert.Equal(t, 4, cfg.SwapConfig.SourceTimeoutSeconds)
+	assert.Equal(t, 8, cfg.SwapConfig.BuildTimeoutSeconds)
 	assert.Equal(t, "", cfg.SwapConfig.LifiAPIKey)
 	assert.Equal(t, "https://li.quest", cfg.SwapConfig.LifiBaseURL)
 	assert.Equal(t, "CDCNXZHYWRDHNAQEY5EX3WCF7BCWVJBS64ZBVUGRTQBFTHUKG6NAXFTR", cfg.SwapConfig.LifiSwapContract)
@@ -563,9 +564,18 @@ func TestServeCmd_SwapEnvOverrides(t *testing.T) {
 	t.Setenv("SWAP_LIFI_ENABLED", "true")
 	t.Setenv("SWAP_LIFI_API_KEY", "k")
 	t.Setenv("SWAP_SOURCE_TIMEOUT_SECONDS", "2")
+	t.Setenv("SWAP_BUILD_TIMEOUT_SECONDS", "5")
 
 	cfg := executeServeWithArgs(t)
 	assert.True(t, cfg.SwapConfig.LifiEnabled)
 	assert.Equal(t, "k", cfg.SwapConfig.LifiAPIKey)
 	assert.Equal(t, 2, cfg.SwapConfig.SourceTimeoutSeconds)
+	assert.Equal(t, 5, cfg.SwapConfig.BuildTimeoutSeconds)
+}
+
+func TestServeCmd_RejectsZeroSwapBuildTimeout(t *testing.T) {
+	t.Parallel()
+	_, err := execServe(t, "--swap-build-timeout-seconds", "0")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--swap-build-timeout-seconds=0 must be positive")
 }

@@ -18,13 +18,14 @@ var ErrAllSourcesFailed = errors.New("all swap sources failed")
 var errMalformedRoute = errors.New("source returned a malformed route")
 
 type Router struct {
-	sources []Source
-	timeout time.Duration
-	m       *metrics.Swap
+	sources      []Source
+	timeout      time.Duration
+	buildTimeout time.Duration
+	m            *metrics.Swap
 }
 
-func NewRouter(sources []Source, timeout time.Duration, m *metrics.Swap) *Router {
-	return &Router{sources: sources, timeout: timeout, m: m}
+func NewRouter(sources []Source, timeout, buildTimeout time.Duration, m *metrics.Swap) *Router {
+	return &Router{sources: sources, timeout: timeout, buildTimeout: buildTimeout, m: m}
 }
 
 type result struct {
@@ -171,7 +172,9 @@ func (r *Router) Build(ctx context.Context, req types.SwapBuildRequest) (types.S
 		if !s.Supports(req.Network) {
 			return types.SwapBuildResponse{}, fmt.Errorf("%w: source %s does not support %s", ErrBadRequest, req.Source, req.Network)
 		}
-		x, err := s.BuildTx(ctx, req)
+		bctx, cancel := context.WithTimeout(ctx, r.buildTimeout)
+		x, err := s.BuildTx(bctx, req)
+		cancel()
 		if cerr := ctx.Err(); cerr != nil {
 			return types.SwapBuildResponse{}, cerr
 		}
