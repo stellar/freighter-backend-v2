@@ -54,6 +54,7 @@ type Metrics struct {
 	Service *Service
 	Auth    *Auth
 	Prices  *Prices
+	Swap    *Swap
 }
 
 // NewMetrics creates and registers all application metrics with the given registerer.
@@ -63,6 +64,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		Service: NewService(reg),
 		Auth:    NewAuth(reg),
 		Prices:  NewPrices(reg),
+		Swap:    NewSwap(reg),
 	}
 }
 
