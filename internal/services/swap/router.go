@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
@@ -53,7 +55,10 @@ func (r *Router) Quote(ctx context.Context, req types.SwapQuoteRequest) (types.S
 			defer wg.Done()
 			sctx, cancel := context.WithTimeout(ctx, r.timeout)
 			defer cancel()
-			rt, err := s.Quote(sctx, req)
+			rt, err := func() (rt *types.SwapRoute, err error) {
+				defer recoverSource(s.Name(), "quote", &err)
+				return s.Quote(sctx, req)
+			}()
 			if err == nil && sctx.Err() != nil {
 				err = sctx.Err()
 			}
@@ -80,6 +85,7 @@ func (r *Router) Quote(ctx context.Context, req types.SwapQuoteRequest) (types.S
 			out.Unavailable = append(out.Unavailable, types.SwapUnavailable{Source: res.src.Name(), Reason: reason})
 			if reason == "timeout" || reason == "rate_limited" || reason == "error" {
 				failed++
+				logger.Warn("swap source quote failed", "source", res.src.Name(), "reason", reason, "error", res.err)
 			}
 			continue
 		}
@@ -91,6 +97,15 @@ func (r *Router) Quote(ctx context.Context, req types.SwapQuoteRequest) (types.S
 	}
 	r.rank(req, out.Routes)
 	return out, nil
+}
+
+// recoverSource turns a panicking source call into an error, so one source
+// cannot crash the process. Must be deferred directly.
+func recoverSource(source, op string, err *error) {
+	if p := recover(); p != nil {
+		logger.Error("swap source panicked", "source", source, "op", op, "panic", p, "stack", string(debug.Stack()))
+		*err = fmt.Errorf("swap source %s panicked: %v", source, p)
+	}
 }
 
 func countAsked(results []result) int {
@@ -173,7 +188,10 @@ func (r *Router) Build(ctx context.Context, req types.SwapBuildRequest) (types.S
 			return types.SwapBuildResponse{}, fmt.Errorf("%w: source %s does not support %s", ErrBadRequest, req.Source, req.Network)
 		}
 		bctx, cancel := context.WithTimeout(ctx, r.buildTimeout)
-		x, err := s.BuildTx(bctx, req)
+		x, err := func() (x string, err error) {
+			defer recoverSource(s.Name(), "build", &err)
+			return s.BuildTx(bctx, req)
+		}()
 		cancel()
 		if cerr := ctx.Err(); cerr != nil {
 			return types.SwapBuildResponse{}, cerr

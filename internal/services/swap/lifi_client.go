@@ -3,6 +3,7 @@ package swap
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -106,6 +107,11 @@ func (c *LifiClient) getJSON(ctx context.Context, path string, q url.Values, des
 	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
+		// Drop the URL: the quote query carries the user's account.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = fmt.Errorf("lifi %s: %w", path, ue.Err)
+		}
 		return &metrics.UpstreamError{Kind: "http_error", Err: err}
 	}
 	defer resp.Body.Close() //nolint:errcheck

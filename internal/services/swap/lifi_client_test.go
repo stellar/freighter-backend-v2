@@ -170,3 +170,16 @@ func TestLifiClient_OversizedBody(t *testing.T) {
 	var ue *metrics.UpstreamError
 	assert.ErrorAs(t, err, &ue)
 }
+
+// The quote URL carries fromAddress; transport errors must not echo it, since
+// the router logs source errors.
+func TestLifiClient_TransportErrorOmitsAccount(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	srv.Close()
+	_, err := NewLifiClient(srv.URL, "k", srv.Client()).Quote(context.Background(), "a", "b", "1", "GADDRMUSTNOTLEAK")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "GADDRMUSTNOTLEAK")
+	var ue *metrics.UpstreamError
+	assert.ErrorAs(t, err, &ue)
+}

@@ -1,8 +1,10 @@
 package swap
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
@@ -25,12 +28,16 @@ type fakeSource struct {
 	buildErr error
 	// buildBlock makes BuildTx wait for ctx to end.
 	buildBlock bool
+	panics     bool
 	calls      int
 }
 
 func (f *fakeSource) Name() string           { return f.name }
 func (f *fakeSource) Supports(n string) bool { return f.networks == nil || f.networks[n] }
 func (f *fakeSource) BuildTx(ctx context.Context, _ types.SwapBuildRequest) (string, error) {
+	if f.panics {
+		panic("build boom")
+	}
 	if f.buildBlock {
 		<-ctx.Done()
 		return "", ctx.Err()
@@ -39,6 +46,9 @@ func (f *fakeSource) BuildTx(ctx context.Context, _ types.SwapBuildRequest) (str
 }
 func (f *fakeSource) Quote(ctx context.Context, _ types.SwapQuoteRequest) (*types.SwapRoute, error) {
 	f.calls++
+	if f.panics {
+		panic("quote boom")
+	}
 	if f.delay > 0 {
 		select {
 		case <-time.After(f.delay):
@@ -252,4 +262,52 @@ func TestRouterBuildParentCancelled(t *testing.T) {
 	_, err := r.Build(ctx, types.SwapBuildRequest{Network: types.PUBLIC, Source: "lifi"})
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, 0, testutil.CollectAndCount(m.SourceRequests))
+}
+
+// Not parallel: it swaps the global logger's output.
+func TestRouterLogsSourceFailures(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(func() { logger.SetOutput(os.Stdout) })
+
+	r := NewRouter([]Source{
+		&fakeSource{name: "lifi", err: ErrRateLimited},
+		&fakeSource{name: "classic", err: ErrNoRoute},
+		&fakeSource{name: "other", err: errors.New("boom")},
+	}, time.Second, time.Second, nil)
+	req := sendReq
+	req.Account = "GACCOUNTMUSTNOTBELOGGED"
+	_, err := r.Quote(context.Background(), req)
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "level=WARN")
+	assert.Contains(t, out, "source=lifi reason=rate_limited")
+	assert.Contains(t, out, "source=other reason=error error=boom")
+	assert.NotContains(t, out, "source=classic")
+	assert.NotContains(t, out, req.Account)
+}
+
+func TestRouterQuoteSourcePanics(t *testing.T) {
+	t.Parallel()
+	m := metrics.NewSwap(prometheus.NewRegistry())
+	r := NewRouter([]Source{
+		&fakeSource{name: "lifi", panics: true},
+		&fakeSource{name: "classic", route: route("classic", "100", "17.9")},
+	}, time.Second, time.Second, m)
+	res, err := r.Quote(context.Background(), sendReq)
+	require.NoError(t, err)
+	require.Len(t, res.Routes, 1)
+	assert.Equal(t, []types.SwapUnavailable{{Source: "lifi", Reason: "error"}}, res.Unavailable)
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.SourceRequests.WithLabelValues("lifi", "quote", "error")))
+}
+
+func TestRouterBuildSourcePanics(t *testing.T) {
+	t.Parallel()
+	m := metrics.NewSwap(prometheus.NewRegistry())
+	r := NewRouter([]Source{&fakeSource{name: "lifi", panics: true}}, time.Second, time.Second, m)
+	_, err := r.Build(context.Background(), types.SwapBuildRequest{Network: types.PUBLIC, Source: "lifi"})
+	require.Error(t, err)
+	assert.Equal(t, "error", Reason(err))
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.SourceRequests.WithLabelValues("lifi", "build", "error")))
 }
