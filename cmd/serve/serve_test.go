@@ -579,3 +579,10 @@ func TestServeCmd_RejectsZeroSwapBuildTimeout(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--swap-build-timeout-seconds=0 must be positive")
 }
+
+func TestServeCmd_RejectsNonPositiveSwapMaxResourceFee(t *testing.T) {
+	t.Parallel()
+	_, err := execServe(t, "--swap-max-resource-fee-stroops", "0")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--swap-max-resource-fee-stroops=0 must be positive")
+}

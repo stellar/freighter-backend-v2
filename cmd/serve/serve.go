@@ -54,6 +54,9 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.PricesConfig.MaxTokensPerRequest; n <= 0 {
 				return fmt.Errorf("--max-tokens-per-request=%d must be positive", n)
 			}
+			if n := s.Cfg.SwapConfig.MaxResourceFeeStroops; n <= 0 {
+				return fmt.Errorf("--swap-max-resource-fee-stroops=%d must be positive", n)
+			}
 			// Every integer-seconds flag that internal/api/serve.go multiplies
 			// by time.Second, bounded on both sides in one place. Past
 			// maxDurationSeconds the multiply wraps and the override is
