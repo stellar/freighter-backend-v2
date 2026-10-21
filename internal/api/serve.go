@@ -23,6 +23,7 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/services"
+	"github.com/stellar/freighter-backend-v2/internal/services/swap"
 	"github.com/stellar/freighter-backend-v2/internal/store"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
@@ -47,6 +48,7 @@ type ApiServer struct {
 	pricesService        types.PricesService
 	priceHistoryService  types.PriceHistoryService
 	tokenStatsService    types.TokenStatsService
+	swapService          types.SwapService
 	registry             *prometheus.Registry
 	appMetrics           *metrics.Metrics
 	authMode             auth.Mode
@@ -157,6 +159,17 @@ func (s *ApiServer) initServices() error {
 	s.priceHistoryService = historyAndStats
 	s.tokenStatsService = historyAndStats
 
+	var sources []swap.Source
+	if s.cfg.SwapConfig.ClassicEnabled {
+		sources = append(sources, swap.NewClassicSource(swap.ClassicConfig{HorizonURLs: map[string]string{
+			types.PUBLIC:    s.cfg.HorizonConfig.HorizonPubnetURL,
+			types.TESTNET:   s.cfg.HorizonConfig.HorizonTestnetURL,
+			types.FUTURENET: s.cfg.HorizonConfig.HorizonFuturenetURL,
+		}}, s.rpcService))
+	}
+	s.swapService = swap.NewRouter(sources,
+		time.Duration(s.cfg.SwapConfig.SourceTimeoutSeconds)*time.Second, s.appMetrics.Swap)
+
 	return nil
 }
 
@@ -242,6 +255,7 @@ func (s *ApiServer) routes() ([]route, error) {
 	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest, s.appMetrics.Prices)
 	tokenPriceHistoryHandler := handlers.NewTokenPriceHistoryHandler(s.priceHistoryService)
 	tokenStatsHandler := handlers.NewTokenStatsHandler(s.tokenStatsService)
+	swapHandler := handlers.NewSwapHandler(s.swapService)
 	accountHistoryHandler, err := handlers.NewAccountHistoryHandler(
 		s.walletBackendService,
 		s.cfg.AppConfig.AccountHistoryDefaultLimit,
@@ -286,6 +300,8 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
 
 		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true, true},
+		{http.MethodPost, "/api/v1/swap/quotes", handlers.CustomHandler(swapHandler.Quotes), true, true},
+		{http.MethodPost, "/api/v1/swap/tx", handlers.CustomHandler(swapHandler.Build), true, true},
 		{http.MethodGet, "/api/v1/token-price-history", handlers.CustomHandler(tokenPriceHistoryHandler.GetTokenPriceHistory), true, true},
 		{http.MethodGet, "/api/v1/token-stats", handlers.CustomHandler(tokenStatsHandler.GetTokenStats), true, true},
 		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, true},

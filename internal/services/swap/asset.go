@@ -36,7 +36,7 @@ func ParseAsset(s string) (Asset, error) {
 		return Asset{}, fmt.Errorf("%w: %q", errBadAsset, s)
 	}
 	for _, r := range code {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
 			return Asset{}, fmt.Errorf("%w: %q", errBadAsset, s)
 		}
 	}
