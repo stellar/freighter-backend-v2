@@ -1154,3 +1154,37 @@ func TestPrices_CacheWriteOutlivesTheFetchBudget(t *testing.T) {
 	assert.Equal(t, "0.16", res["XLM"].CurrentPrice)
 	assert.Equal(t, 1, expert.CallCount("XLM"), "the second request is a cache hit, not a second upstream fetch")
 }
+
+// SEP-41 contract tokens are withheld even when upstream prices them and a
+// positive entry is already cached: both clients multiply currentPrice by the
+// raw contract balance (not scaled by decimals), inflating the value by 10^decimals.
+func TestPrices_ContractTokensReturnNullWithoutCacheOrUpstream(t *testing.T) {
+	t.Parallel()
+
+	stellarExpert := newFakeStellarExpert()
+	stellarExpert.Set(solvBTCContract, &types.StellarExpertAsset{Price: 81597.03})
+	stellarExpert.Set("USDC-"+testIssuer+"-1", &types.StellarExpertAsset{Price: 1.0})
+	cache := newFakeJSONCache()
+	require.NoError(t, cache.SetJSON(context.Background(), cacheKey("public", solvBTCContract),
+		cachedPriceEntry{CurrentPrice: "81597.03"}, time.Minute))
+	svc := NewPricesService(stellarExpert, cache, PricesServiceConfig{}, nil, nil)
+
+	got, err := svc.GetPrices(context.Background(), []string{solvBTCContract, "USDC:" + testIssuer}, types.PUBLIC)
+	require.NoError(t, err)
+
+	entry, ok := got[solvBTCContract]
+	require.True(t, ok, "contract token must be present as an explicit null")
+	assert.Nil(t, entry)
+	assert.Equal(t, 0, stellarExpert.CallCount(solvBTCContract))
+
+	require.NotNil(t, got["USDC:"+testIssuer], "classic assets stay priced")
+	assert.Equal(t, "1", got["USDC:"+testIssuer].CurrentPrice)
+
+	uncached := NewPricesService(stellarExpert, nil, PricesServiceConfig{}, nil, nil)
+	got, err = uncached.GetPrices(context.Background(), []string{solvBTCContract}, types.PUBLIC)
+	require.NoError(t, err)
+	entry, ok = got[solvBTCContract]
+	require.True(t, ok)
+	assert.Nil(t, entry)
+	assert.Equal(t, 0, stellarExpert.CallCount(solvBTCContract))
+}
