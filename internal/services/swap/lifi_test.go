@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -135,4 +136,133 @@ func TestLifiSupportsPublicOnly(t *testing.T) {
 	assert.Equal(t, "lifi", src.Name())
 	assert.True(t, src.Supports(types.PUBLIC))
 	assert.False(t, src.Supports(types.TESTNET))
+}
+
+func lifiBuildSource(t *testing.T, env xdr.TransactionEnvelope, status int, body []byte) *LifiSource {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	maxTime := int64(env.V1.Tx.Cond.TimeBounds.MaxTime)
+	return NewLifiSource(LifiConfig{
+		Client:         NewLifiClient(srv.URL, "", srv.Client()),
+		SwapContract:   lifiSwapContract,
+		FeeRecipient:   lifiFeeRecipient,
+		Aggregator:     lifiAggregator,
+		MaxResourceFee: 1000000,
+		Now:            func() time.Time { return time.Unix(maxTime-300, 0) },
+	}, nil)
+}
+
+func lifiBuildReq(t *testing.T, env xdr.TransactionEnvelope) types.SwapBuildRequest {
+	t.Helper()
+	call, err := decodeLifiCall(env)
+	require.NoError(t, err)
+	return types.SwapBuildRequest{Network: types.PUBLIC, Account: lifiTestAccount, Source: "lifi",
+		FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "10",
+		MinOut: FormatUnits(call.MinAmountOut, 7), Fee: "0.0001"}
+}
+
+func TestLifiBuildTrustFixture(t *testing.T) {
+	body := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
+	env := decodeEnv(t, trustFixtureXDR(t))
+	src := lifiBuildSource(t, env, 200, body)
+
+	x, err := src.BuildTx(context.Background(), lifiBuildReq(t, env))
+	require.NoError(t, err)
+	out := decodeEnv(t, x)
+	assert.Equal(t, uint32(out.V1.Tx.Ext.SorobanData.ResourceFee)+1000, uint32(out.V1.Tx.Fee))
+	adds, err := AddsTrustline(x, lifiTestAccount, contractIDOf(t, "USDC:"+usdcIssuer))
+	require.NoError(t, err)
+	assert.True(t, adds)
+}
+
+func TestLifiBuildInclusionFeeFloor(t *testing.T) {
+	env := decodeEnv(t, trustFixtureXDR(t))
+	req := lifiBuildReq(t, env)
+	req.Fee = "0.0000001"
+	x, err := lifiBuildSource(t, env, 200, lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")).BuildTx(context.Background(), req)
+	require.NoError(t, err)
+	out := decodeEnv(t, x)
+	assert.Equal(t, uint32(out.V1.Tx.Ext.SorobanData.ResourceFee)+100, uint32(out.V1.Tx.Fee))
+}
+
+func TestLifiBuildPriceMovedIsQuoteMoved(t *testing.T) {
+	env := decodeEnv(t, trustFixtureXDR(t))
+	req := lifiBuildReq(t, env)
+	call, err := decodeLifiCall(env)
+	require.NoError(t, err)
+	req.MinOut = FormatUnits(new(big.Int).Add(call.MinAmountOut, big.NewInt(1)), 7)
+	_, err = lifiBuildSource(t, env, 200, lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")).BuildTx(context.Background(), req)
+	assert.ErrorIs(t, err, ErrQuoteMoved)
+}
+
+func TestLifiBuildNoRouteIsQuoteMoved(t *testing.T) {
+	env := decodeEnv(t, trustFixtureXDR(t))
+	_, err := lifiBuildSource(t, env, 404, []byte(`{"code":1002,"message":"no quote"}`)).BuildTx(context.Background(), lifiBuildReq(t, env))
+	assert.ErrorIs(t, err, ErrQuoteMoved)
+}
+
+func TestLifiBuildShrinkIsQuoteMoved(t *testing.T) {
+	env := decodeEnv(t, trustFixtureXDR(t))
+	req := lifiBuildReq(t, env)
+	req.Amount = "11"
+	_, err := lifiBuildSource(t, env, 200, lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")).BuildTx(context.Background(), req)
+	assert.ErrorIs(t, err, ErrQuoteMoved)
+}
+
+// A tampered transaction from LI.FI is refused, not handed to the user.
+func TestLifiBuildTamperedIsCheckFailed(t *testing.T) {
+	var q map[string]any
+	require.NoError(t, json.Unmarshal(lifiFixture(t, "lifi_quote_xlm_usdc_trust.json"), &q))
+	env := decodeEnv(t, trustFixtureXDR(t))
+	tampered := decodeEnv(t, trustFixtureXDR(t))
+	tampered.V1.Tx.Ext.SorobanData.ResourceFee = 1000001
+	b64, err := xdr.MarshalBase64(tampered)
+	require.NoError(t, err)
+	q["transactionRequest"].(map[string]any)["data"] = b64
+	body, err := json.Marshal(q)
+	require.NoError(t, err)
+	_, err = lifiBuildSource(t, env, 200, body).BuildTx(context.Background(), lifiBuildReq(t, env))
+	assert.ErrorIs(t, err, ErrCheckFailed)
+}
+
+func TestLifiBuildBadRequest(t *testing.T) {
+	env := decodeEnv(t, trustFixtureXDR(t))
+	src := lifiBuildSource(t, env, 200, lifiFixture(t, "lifi_quote_xlm_usdc_trust.json"))
+	for name, mut := range map[string]func(r *types.SwapBuildRequest){
+		"from asset": func(r *types.SwapBuildRequest) { r.FromAsset = "nope" },
+		"to asset":   func(r *types.SwapBuildRequest) { r.ToAsset = "nope" },
+		"amount":     func(r *types.SwapBuildRequest) { r.Amount = "x" },
+		"min out":    func(r *types.SwapBuildRequest) { r.MinOut = "x" },
+		"fee":        func(r *types.SwapBuildRequest) { r.Fee = "x" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := lifiBuildReq(t, env)
+			mut(&req)
+			_, err := src.BuildTx(context.Background(), req)
+			assert.ErrorIs(t, err, ErrBadRequest)
+		})
+	}
+}
+
+func TestLifiQuoteFromAmountComparedNumerically(t *testing.T) {
+	var q map[string]any
+	require.NoError(t, json.Unmarshal(lifiFixture(t, "lifi_quote_xlm_usdc_trust.json"), &q))
+	for fromAmount, wantErr := range map[string]bool{"0100000000": false, "1e8": true, "": true} {
+		t.Run(fromAmount, func(t *testing.T) {
+			q["action"].(map[string]any)["fromAmount"] = fromAmount
+			body, err := json.Marshal(q)
+			require.NoError(t, err)
+			_, err = lifiServer(t, 200, body).Quote(context.Background(), lifiReq("10"))
+			if wantErr {
+				require.Error(t, err)
+				assert.NotErrorIs(t, err, ErrInsufficientBalance)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

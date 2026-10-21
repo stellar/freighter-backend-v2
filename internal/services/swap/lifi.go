@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"time"
 
+	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
@@ -82,7 +84,11 @@ func (s *LifiSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (*ty
 		return nil, err
 	}
 	// LI.FI silently lowers fromAmount to the spendable balance.
-	if q.Action.FromAmount != raw.String() {
+	quoted, err := lifiFromAmount(q)
+	if err != nil {
+		return nil, err
+	}
+	if quoted.Cmp(raw) != 0 {
 		return nil, ErrInsufficientBalance
 	}
 	if q.TransactionRequest == nil {
@@ -129,6 +135,100 @@ func (s *LifiSource) decimals(ctx context.Context, a Asset) (int, error) {
 	return s.cfg.Client.TokenDecimals(ctx, a.Contract)
 }
 
-func (s *LifiSource) BuildTx(context.Context, types.SwapBuildRequest) (string, error) {
-	return "", errors.New("not implemented")
+func lifiFromAmount(q *LifiQuote) (*big.Int, error) {
+	v, ok := new(big.Int).SetString(q.Action.FromAmount, 10)
+	if !ok {
+		return nil, fmt.Errorf("lifi: bad fromAmount %q", q.Action.FromAmount)
+	}
+	return v, nil
+}
+
+// lifiValidFor bounds how far in the future LI.FI's transaction may expire.
+const lifiValidFor = 600
+
+func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (string, error) {
+	from, err := ParseAsset(req.FromAsset)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	to, err := ParseAsset(req.ToAsset)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	fromContract, err := from.ContractID(req.Network)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	toContract, err := to.ContractID(req.Network)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	fromDecimals, err := s.decimals(ctx, from)
+	if err != nil {
+		return "", err
+	}
+	toDecimals, err := s.decimals(ctx, to)
+	if err != nil {
+		return "", err
+	}
+	raw, err := ParseUnits(req.Amount, fromDecimals)
+	if err != nil {
+		return "", fmt.Errorf("%w: amount %q", ErrBadRequest, req.Amount)
+	}
+	minOut, err := ParseUnits(req.MinOut, toDecimals)
+	if err != nil {
+		return "", fmt.Errorf("%w: minOut %q", ErrBadRequest, req.MinOut)
+	}
+	inclusion, err := ParseUnits(req.Fee, ClassicDecimals)
+	if err != nil {
+		return "", fmt.Errorf("%w: fee %q", ErrBadRequest, req.Fee)
+	}
+	if inclusion.Cmp(big.NewInt(txnbuild.MinBaseFee)) < 0 {
+		inclusion.SetInt64(txnbuild.MinBaseFee)
+	}
+
+	q, err := s.cfg.Client.Quote(ctx, fromContract, toContract, raw.String(), req.Account)
+	if errors.Is(err, ErrNoRoute) || errors.Is(err, ErrInsufficientBalance) {
+		return "", fmt.Errorf("lifi: %v: %w", err, ErrQuoteMoved)
+	}
+	if err != nil {
+		return "", err
+	}
+	quoted, err := lifiFromAmount(q)
+	if err != nil {
+		return "", err
+	}
+	if quoted.Cmp(raw) != 0 {
+		return "", fmt.Errorf("lifi: amount shrank: %w", ErrQuoteMoved)
+	}
+	if q.TransactionRequest == nil {
+		return "", fmt.Errorf("lifi: %w", errLifiMissingTx)
+	}
+	var env xdr.TransactionEnvelope
+	if err := xdr.SafeUnmarshalBase64(q.TransactionRequest.Data, &env); err != nil {
+		return "", fmt.Errorf("lifi: %w", errLifiMissingTx)
+	}
+	if err := checkLifiTx(env, lifiExpect{
+		Account:        req.Account,
+		FromContract:   fromContract,
+		ToContract:     toContract,
+		SwapContract:   s.cfg.SwapContract,
+		Aggregator:     s.cfg.Aggregator,
+		FeeRecipient:   s.cfg.FeeRecipient,
+		ToClassic:      to.IsClassic() && !to.IsNative(),
+		Amount:         raw,
+		MinOut:         minOut,
+		MaxResourceFee: s.cfg.MaxResourceFee,
+		MaxValidUntil:  s.cfg.Now().Unix() + lifiValidFor,
+	}); err != nil {
+		return "", err
+	}
+
+	// checkLifiTx guarantees V1 and SorobanData with 0 <= ResourceFee <= MaxResourceFee.
+	total := new(big.Int).Add(big.NewInt(int64(env.V1.Tx.Ext.SorobanData.ResourceFee)), inclusion)
+	if total.Cmp(big.NewInt(math.MaxUint32)) > 0 {
+		return "", fmt.Errorf("%w: fee %q", ErrBadRequest, req.Fee)
+	}
+	env.V1.Tx.Fee = xdr.Uint32(total.Uint64())
+	return xdr.MarshalBase64(env)
 }

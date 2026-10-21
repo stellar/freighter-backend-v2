@@ -167,6 +167,18 @@ func (s *ApiServer) initServices() error {
 			types.FUTURENET: s.cfg.HorizonConfig.HorizonFuturenetURL,
 		}}, s.rpcService))
 	}
+	if s.cfg.SwapConfig.LifiEnabled {
+		if s.cfg.SwapConfig.LifiAPIKey == "" {
+			return fmt.Errorf("SWAP_LIFI_API_KEY is required when SWAP_LIFI_ENABLED is true")
+		}
+		sources = append(sources, swap.NewLifiSource(swap.LifiConfig{
+			Client:         swap.NewLifiClient(s.cfg.SwapConfig.LifiBaseURL, s.cfg.SwapConfig.LifiAPIKey, nil),
+			SwapContract:   s.cfg.SwapConfig.LifiSwapContract,
+			FeeRecipient:   s.cfg.SwapConfig.LifiFeeRecipient,
+			Aggregator:     s.cfg.SwapConfig.AggregatorContract,
+			MaxResourceFee: s.cfg.SwapConfig.MaxResourceFeeStroops,
+		}, s.appMetrics.Swap))
+	}
 	s.swapService = swap.NewRouter(sources,
 		time.Duration(s.cfg.SwapConfig.SourceTimeoutSeconds)*time.Second, s.appMetrics.Swap)
 

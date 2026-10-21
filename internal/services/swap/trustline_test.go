@@ -42,3 +42,16 @@ func TestAddsTrustlineClassic(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, got)
 }
+
+func TestAddsTrustlineLifi(t *testing.T) {
+	t.Parallel()
+	x := trustFixtureXDR(t)
+	usdc := contractIDOf(t, "USDC:"+usdcIssuer)
+	got, err := AddsTrustline(x, lifiTestAccount, usdc)
+	require.NoError(t, err)
+	assert.True(t, got)
+
+	got, err = AddsTrustline(x, lifiTestAccount, otherContract)
+	require.NoError(t, err)
+	assert.False(t, got)
+}

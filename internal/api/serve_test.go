@@ -98,6 +98,23 @@ func TestApiServer_initServices_AcceptsAPIKey(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestApiServer_initServices_LifiRequiresAPIKey(t *testing.T) {
+	s := &ApiServer{
+		cfg: &config.Config{
+			PricesConfig: config.PricesConfig{StellarExpertAPIKey: "test-key"},
+			AppConfig:    config.AppConfig{WalletBackendBalanceConcurrency: 10},
+			SwapConfig:   config.SwapConfig{LifiEnabled: true},
+		},
+		appMetrics: metrics.NewMetrics(prometheus.NewRegistry()),
+	}
+	err := s.initServices()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SWAP_LIFI_API_KEY")
+
+	s.cfg.SwapConfig.LifiAPIKey = "k"
+	assert.NoError(t, s.initServices())
+}
+
 func TestApiServer_initServices_RejectsNonPositiveBalanceConcurrency(t *testing.T) {
 	for _, n := range []int{0, -1} {
 		s := &ApiServer{
