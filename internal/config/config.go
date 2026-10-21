@@ -18,6 +18,7 @@ type Config struct {
 	BlockaidConfig      BlockaidConfig
 	CoinbaseConfig      CoinbaseConfig
 	WalletBackendConfig WalletBackendConfig
+	SwapConfig          SwapConfig
 }
 
 type AppConfig struct {
@@ -133,8 +134,21 @@ func (c DatabaseConfig) ValidatePoolConfig() error {
 }
 
 type HorizonConfig struct {
-	HorizonPubnetURL  string
-	HorizonTestnetURL string
+	HorizonPubnetURL    string
+	HorizonTestnetURL   string
+	HorizonFuturenetURL string
+}
+
+type SwapConfig struct {
+	ClassicEnabled        bool
+	LifiEnabled           bool
+	SourceTimeoutSeconds  int
+	LifiAPIKey            string
+	LifiBaseURL           string
+	LifiSwapContract      string
+	LifiFeeRecipient      string
+	AggregatorContract    string
+	MaxResourceFeeStroops int64
 }
 
 type PricesConfig struct {

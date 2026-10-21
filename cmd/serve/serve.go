@@ -76,6 +76,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 				{"price-history-cache-ttl-all-seconds", s.Cfg.PriceHistoryConfig.CacheTTLALLSeconds, false},
 				{"price-history-fetch-timeout-seconds", s.Cfg.PriceHistoryConfig.FetchTimeoutSeconds, false},
 				{"token-stats-cache-ttl-seconds", s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds, false},
+				{"swap-source-timeout-seconds", s.Cfg.SwapConfig.SourceTimeoutSeconds, false},
 			} {
 				switch {
 				case f.zeroOK && f.value < 0:
@@ -172,6 +173,16 @@ func (s *ServeCmd) Command() *cobra.Command {
 	// Horizon Config
 	cmd.Flags().StringVar(&s.Cfg.HorizonConfig.HorizonPubnetURL, "horizon-pubnet-url", "https://horizon.stellar.org/", "The URL of the pubnet Horizon")
 	cmd.Flags().StringVar(&s.Cfg.HorizonConfig.HorizonTestnetURL, "horizon-testnet-url", "https://horizon-testnet.stellar.org", "The URL of the testnet Horizon")
+	cmd.Flags().StringVar(&s.Cfg.HorizonConfig.HorizonFuturenetURL, "horizon-futurenet-url", "https://horizon-futurenet.stellar.org", "The URL of the futurenet Horizon")
+	cmd.Flags().BoolVar(&s.Cfg.SwapConfig.ClassicEnabled, "swap-classic-enabled", true, "Enable the classic (Horizon path-finding) swap source")
+	cmd.Flags().BoolVar(&s.Cfg.SwapConfig.LifiEnabled, "swap-lifi-enabled", false, "Enable the LI.FI swap source")
+	cmd.Flags().IntVar(&s.Cfg.SwapConfig.SourceTimeoutSeconds, "swap-source-timeout-seconds", 4, "Per-source timeout in seconds for swap quote requests")
+	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiAPIKey, "swap-lifi-api-key", "", "LI.FI API key")
+	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiBaseURL, "swap-lifi-base-url", "https://li.quest", "LI.FI API base URL")
+	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiSwapContract, "swap-lifi-swap-contract", "CDCNXZHYWRDHNAQEY5EX3WCF7BCWVJBS64ZBVUGRTQBFTHUKG6NAXFTR", "LI.FI swap contract ID the backend accepts in quotes")
+	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiFeeRecipient, "swap-lifi-fee-recipient", "GAZYY5SJZNAVWZWVKJ2E74W2WKZP5BACLVV6FVHC5NZWXPKTQEDOYUR4", "LI.FI fee recipient account the backend accepts in quotes")
+	cmd.Flags().StringVar(&s.Cfg.SwapConfig.AggregatorContract, "swap-aggregator-contract", "CARVQXFP4JF5ELLXUMQ6DALR346YVGBMQOHB4ENA7SSVXAYABXLBDDC4", "Soroswap aggregator contract ID")
+	cmd.Flags().Int64Var(&s.Cfg.SwapConfig.MaxResourceFeeStroops, "swap-max-resource-fee-stroops", 1000000, "Maximum Soroban resource fee in stroops accepted for a swap (1000000 = 0.1 XLM)")
 
 	// Redis Config
 	cmd.Flags().StringVar(&s.Cfg.RedisConfig.ConnectionName, "redis-connection-name", "freighter-redis", "The name of the Redis connection")

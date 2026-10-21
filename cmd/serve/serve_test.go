@@ -527,3 +527,45 @@ func TestServeCmd_RejectsDurationSecondsThatOverflow(t *testing.T) {
 		assert.EqualValues(t, maxDurationSeconds, serveCmd.Cfg.PriceHistoryConfig.CacheTTL1DSeconds)
 	})
 }
+
+func executeServeWithArgs(t *testing.T) *config.Config {
+	t.Helper()
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--db-enabled=false"})
+	require.NoError(t, cmd.Execute())
+	return serveCmd.Cfg
+}
+
+func TestServeCmd_SwapDefaults(t *testing.T) {
+	// No t.Parallel(): t.Setenv is incompatible with parallel tests.
+	t.Setenv("DATABASE_URL", "")
+
+	cfg := executeServeWithArgs(t)
+	assert.True(t, cfg.SwapConfig.ClassicEnabled)
+	assert.False(t, cfg.SwapConfig.LifiEnabled)
+	assert.Equal(t, 4, cfg.SwapConfig.SourceTimeoutSeconds)
+	assert.Equal(t, "", cfg.SwapConfig.LifiAPIKey)
+	assert.Equal(t, "https://li.quest", cfg.SwapConfig.LifiBaseURL)
+	assert.Equal(t, "CDCNXZHYWRDHNAQEY5EX3WCF7BCWVJBS64ZBVUGRTQBFTHUKG6NAXFTR", cfg.SwapConfig.LifiSwapContract)
+	assert.Equal(t, "GAZYY5SJZNAVWZWVKJ2E74W2WKZP5BACLVV6FVHC5NZWXPKTQEDOYUR4", cfg.SwapConfig.LifiFeeRecipient)
+	assert.Equal(t, "CARVQXFP4JF5ELLXUMQ6DALR346YVGBMQOHB4ENA7SSVXAYABXLBDDC4", cfg.SwapConfig.AggregatorContract)
+	assert.Equal(t, int64(1000000), cfg.SwapConfig.MaxResourceFeeStroops)
+	assert.Equal(t, "https://horizon-futurenet.stellar.org", cfg.HorizonConfig.HorizonFuturenetURL)
+}
+
+func TestServeCmd_SwapEnvOverrides(t *testing.T) {
+	// No t.Parallel(): t.Setenv is incompatible with parallel tests.
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("SWAP_LIFI_ENABLED", "true")
+	t.Setenv("SWAP_LIFI_API_KEY", "k")
+	t.Setenv("SWAP_SOURCE_TIMEOUT_SECONDS", "2")
+
+	cfg := executeServeWithArgs(t)
+	assert.True(t, cfg.SwapConfig.LifiEnabled)
+	assert.Equal(t, "k", cfg.SwapConfig.LifiAPIKey)
+	assert.Equal(t, 2, cfg.SwapConfig.SourceTimeoutSeconds)
+}
