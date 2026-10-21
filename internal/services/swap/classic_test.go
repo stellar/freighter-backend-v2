@@ -1,6 +1,7 @@
 package swap
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -196,4 +197,20 @@ func TestClassicBuildAccountNotFound(t *testing.T) {
 		Account: keypair.MustRandom().Address(), FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer,
 		Amount: "1", MinOut: "0.1", Fee: "0.00001"})
 	assert.ErrorIs(t, err, ErrAccountNotFound)
+}
+
+// A body past maxUpstreamBody is cut off: a decode error, not an empty page
+// read as no_route.
+func TestClassicOversizedBody(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"_embedded":{"records":[]},"pad":"`))
+		_, _ = w.Write(bytes.Repeat([]byte("a"), 3<<20))
+		_, _ = w.Write([]byte(`"}`))
+	}))
+	defer srv.Close()
+	src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: srv.URL}}, nil)
+	_, err := src.Quote(context.Background(), sendReq)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrNoRoute)
 }

@@ -165,12 +165,13 @@ func (c *ClassicSource) getJSON(ctx context.Context, network, path string, q url
 	if err != nil {
 		return &metrics.UpstreamError{Kind: "http_error", Err: err}
 	}
-	defer resp.Body.Close()              //nolint:errcheck
-	defer io.Copy(io.Discard, resp.Body) //nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck
+	body := io.LimitReader(resp.Body, maxUpstreamBody)
+	defer io.Copy(io.Discard, body) //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
 		return &metrics.UpstreamError{Kind: "http_error", Code: resp.StatusCode, Err: fmt.Errorf("horizon %s: %d", path, resp.StatusCode)}
 	}
-	return json.NewDecoder(resp.Body).Decode(dest)
+	return json.NewDecoder(body).Decode(dest)
 }
 
 func (c *ClassicSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (string, error) {

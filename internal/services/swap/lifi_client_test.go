@@ -1,6 +1,7 @@
 package swap
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -153,4 +154,19 @@ func TestLifiClient_TokenDecimalsNotCachedOnError(t *testing.T) {
 	_, err = c.TokenDecimals(context.Background(), "CTOKEN")
 	require.Error(t, err)
 	assert.EqualValues(t, 2, atomic.LoadInt32(&calls))
+}
+
+// A body past maxUpstreamBody is cut off rather than read in full.
+func TestLifiClient_OversizedBody(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"action":{"fromAmount":"1"},"pad":"`))
+		_, _ = w.Write(bytes.Repeat([]byte("a"), 3<<20))
+		_, _ = w.Write([]byte(`"}`))
+	}))
+	defer srv.Close()
+	_, err := NewLifiClient(srv.URL, "k", srv.Client()).Quote(context.Background(), "a", "b", "1", "c")
+	require.Error(t, err)
+	var ue *metrics.UpstreamError
+	assert.ErrorAs(t, err, &ue)
 }

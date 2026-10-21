@@ -18,6 +18,9 @@ const LifiStellarChainID = "1201081091099710"
 
 const maxTokenDecimals = 18
 
+// maxUpstreamBody caps how much of a LI.FI or Horizon response is read.
+const maxUpstreamBody = 1 << 20
+
 type LifiClient struct {
 	base     string
 	apiKey   string
@@ -105,11 +108,15 @@ func (c *LifiClient) getJSON(ctx context.Context, path string, q url.Values, des
 	if err != nil {
 		return &metrics.UpstreamError{Kind: "http_error", Err: err}
 	}
-	defer resp.Body.Close()              //nolint:errcheck
-	defer io.Copy(io.Discard, resp.Body) //nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck
+	body := io.LimitReader(resp.Body, maxUpstreamBody)
+	defer io.Copy(io.Discard, body) //nolint:errcheck
 	switch resp.StatusCode {
 	case http.StatusOK:
-		return json.NewDecoder(resp.Body).Decode(dest)
+		if err := json.NewDecoder(body).Decode(dest); err != nil {
+			return &metrics.UpstreamError{Kind: "invalid_response", Err: fmt.Errorf("lifi %s: %w", path, err)}
+		}
+		return nil
 	case http.StatusTooManyRequests:
 		return ErrRateLimited
 	case http.StatusNotFound:
@@ -117,7 +124,7 @@ func (c *LifiClient) getJSON(ctx context.Context, path string, q url.Values, des
 			Code    int    `json:"code"`
 			Message string `json:"message"`
 		}
-		if json.NewDecoder(resp.Body).Decode(&e) == nil {
+		if json.NewDecoder(body).Decode(&e) == nil {
 			switch e.Code {
 			case 1002, 1003, 1011:
 				return ErrNoRoute
