@@ -26,11 +26,15 @@ var (
 	ErrAccountNotFound     = errors.New("account not found")
 )
 
-// Reason maps a Source error to the reason string reported in SwapUnavailable.
+// Reason maps a Source error to the reason string reported in SwapUnavailable
+// and the result label of freighter_swap_source_requests_total.
 func Reason(err error) string {
 	switch {
 	case err == nil:
 		return "ok"
+	// First: a build wraps the quote-time ErrNoRoute/ErrInsufficientBalance in it.
+	case errors.Is(err, ErrQuoteMoved):
+		return "quote_moved"
 	case errors.Is(err, ErrNoRoute):
 		return "no_route"
 	case errors.Is(err, ErrInsufficientBalance):

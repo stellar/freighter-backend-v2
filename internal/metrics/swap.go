@@ -22,7 +22,7 @@ func NewSwap(reg prometheus.Registerer) *Swap {
 	s := &Swap{
 		SourceRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_swap_source_requests_total",
-			Help: "Swap source calls by source, op (quote|build) and result.",
+			Help: "Swap source calls by source, op (quote|build) and result (ok|no_route|insufficient_balance|rate_limited|timeout|check_failed|quote_moved|error).",
 		}, []string{"source", "op", "result"}),
 		UnknownHops: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_swap_lifi_unknown_hop_total",

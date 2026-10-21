@@ -199,3 +199,20 @@ func TestRouterBuildDispatchesAndDetectsTrustline(t *testing.T) {
 	_, err = r.Build(context.Background(), types.SwapBuildRequest{Network: types.PUBLIC, Source: "nope"})
 	assert.ErrorIs(t, err, ErrBadRequest)
 }
+
+// A client disconnect is not a source failure: no source metric, no
+// ErrAllSourcesFailed.
+func TestRouterQuoteParentCancelled(t *testing.T) {
+	t.Parallel()
+	m := metrics.NewSwap(prometheus.NewRegistry())
+	r := NewRouter([]Source{
+		&fakeSource{name: "lifi", delay: time.Hour},
+		&fakeSource{name: "classic", delay: time.Hour},
+	}, time.Hour, m)
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(20*time.Millisecond, cancel)
+	_, err := r.Quote(ctx, sendReq)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.NotErrorIs(t, err, ErrAllSourcesFailed)
+	assert.Equal(t, 0, testutil.CollectAndCount(m.SourceRequests))
+}

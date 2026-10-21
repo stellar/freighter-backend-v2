@@ -60,6 +60,10 @@ func (r *Router) Quote(ctx context.Context, req types.SwapQuoteRequest) (types.S
 		}()
 	}
 	wg.Wait()
+	// The client went away: not a source failure, so nothing to record.
+	if err := ctx.Err(); err != nil {
+		return out, err
+	}
 
 	failed := 0
 	for _, res := range results {
@@ -168,6 +172,9 @@ func (r *Router) Build(ctx context.Context, req types.SwapBuildRequest) (types.S
 			return types.SwapBuildResponse{}, fmt.Errorf("%w: source %s does not support %s", ErrBadRequest, req.Source, req.Network)
 		}
 		x, err := s.BuildTx(ctx, req)
+		if cerr := ctx.Err(); cerr != nil {
+			return types.SwapBuildResponse{}, cerr
+		}
 		metrics.RecordSwapSource(r.m, s.Name(), "build", Reason(err))
 		if err != nil {
 			return types.SwapBuildResponse{}, err
