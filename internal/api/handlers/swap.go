@@ -33,6 +33,11 @@ func NewSwapHandler(svc types.SwapService) *SwapHandler {
 	return &SwapHandler{svc: svc}
 }
 
+func maxInt64StroopsBig() *big.Int {
+	v, _ := new(big.Int).SetString(maxInt64Stroops, 10)
+	return v
+}
+
 func swapBadRequest(msg string) *httperror.HttpError {
 	return httperror.BadRequest(msg, errors.New(msg))
 }
@@ -89,8 +94,7 @@ func validateSwapCommon(network, account, from, to, amount string) *httperror.Ht
 		return swapBadRequest("invalid amount")
 	}
 	if fromAsset.IsClassic() {
-		limit, _ := new(big.Int).SetString(maxInt64Stroops, 10)
-		if units.Cmp(limit) > 0 {
+		if units.Cmp(maxInt64StroopsBig()) > 0 {
 			return swapBadRequest("invalid amount")
 		}
 	}
@@ -138,7 +142,8 @@ func (h *SwapHandler) Build(w http.ResponseWriter, r *http.Request) error {
 	if _, err := swap.ParseUnits(req.MinOut, unitsFor(toAsset)); err != nil {
 		return swapBadRequest("invalid minOut")
 	}
-	if _, err := swap.ParseUnits(req.Fee, swap.ClassicDecimals); err != nil {
+	fee, err := swap.ParseUnits(req.Fee, swap.ClassicDecimals)
+	if err != nil || fee.Cmp(maxInt64StroopsBig()) > 0 {
 		return swapBadRequest("invalid fee")
 	}
 
@@ -157,7 +162,9 @@ func mapSwapError(err error, build bool) *httperror.HttpError {
 		return httperror.ServiceUnavailable("swap temporarily unavailable", err)
 	case errors.Is(err, swap.ErrAllSourcesFailed):
 		return httperror.BadGateway("swap sources unavailable", err)
-	case errors.Is(err, swap.ErrBadRequest), errors.Is(err, swap.ErrAccountNotFound):
+	case errors.Is(err, swap.ErrAccountNotFound):
+		return httperror.BadRequest("account not found", err)
+	case errors.Is(err, swap.ErrBadRequest):
 		return httperror.BadRequest("invalid swap request", err)
 	case errors.Is(err, swap.ErrCheckFailed):
 		return httperror.BadGateway("swap transaction check failed", err)

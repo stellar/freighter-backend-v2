@@ -209,6 +209,7 @@ func TestSwapBuild_Validation(t *testing.T) {
 		"missing source": strings.Replace(good, `"source":"classic"`, `"source":""`, 1),
 		"bad minOut":     strings.Replace(good, `"minOut":"9.5"`, `"minOut":"x"`, 1),
 		"zero minOut":    strings.Replace(good, `"minOut":"9.5"`, `"minOut":"0"`, 1),
+		"fee over int64": strings.Replace(good, `"fee":"0.00001"`, `"fee":"922337203685.4775808"`, 1),
 		"bad fee":        strings.Replace(good, `"fee":"0.00001"`, `"fee":"x"`, 1),
 		"same asset":     swapBuildBody("XLM", testnetNativeID, "10"),
 		"zero amount":    swapBuildBody("XLM", swapUSDC, "0"),
@@ -251,4 +252,14 @@ func TestSwapBuild_ErrorMapping(t *testing.T) {
 			assert.Equal(t, tc.want, statusOf(t, err))
 		})
 	}
+}
+
+func TestSwapBuild_AccountNotFoundMessage(t *testing.T) {
+	t.Parallel()
+	f := &fakeSwapService{buildErr: swap.ErrAccountNotFound}
+	_, err := doBuild(NewSwapHandler(f), "TESTNET", swapBuildBody("XLM", swapUSDC, "10"))
+	var he *httperror.HttpError
+	require.ErrorAs(t, err, &he)
+	assert.Equal(t, http.StatusBadRequest, he.HttpStatus())
+	assert.Contains(t, he.Message, "account not found")
 }
