@@ -65,7 +65,7 @@ type SwapBuildRequest struct {
 	MinOut    string     `json:"minOut"`
 	Fee       string     `json:"fee"`
 	Paths     []SwapPath `json:"paths,omitempty"`
-	// Slippage is the user's tolerance as a whole percent, 1-10 (e.g. "2"); only the LI.FI source reads it.
+	// Slippage is the user's tolerance in percent, 0-10 (e.g. "0.5"); only the LI.FI source reads it.
 	Slippage string `json:"slippage,omitempty"`
 }
 

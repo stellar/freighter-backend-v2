@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,18 +21,25 @@ const lifiName = "lifi"
 // lifiDefaultSlippage is the LI.FI fraction used when the caller gave none.
 const lifiDefaultSlippage = "0.005"
 
-// SlippageFraction converts a whole-number slippage percent in [1, 10] to the
-// decimal fraction LI.FI expects ("2" -> "0.02"). Anything else is rejected.
+// SlippageFraction converts a slippage percent in [0, 10], written as digits
+// with an optional ".digits" part, to the decimal fraction LI.FI expects
+// ("0.5" -> "0.005"). big.Rat alone would also accept "1e1" and "1/2".
 func SlippageFraction(percent string) (string, error) {
-	if len(percent) == 0 || len(percent) > 2 || strings.Trim(percent, "0123456789") != "" {
+	intPart, frac, hasDot := strings.Cut(percent, ".")
+	if len(percent) > 18 || intPart == "" || (hasDot && frac == "") ||
+		strings.Trim(intPart+frac, "0123456789") != "" {
 		return "", errors.New("invalid slippage")
 	}
-	n, _ := strconv.Atoi(percent)
-	if n < 1 || n > 10 {
+	r, ok := new(big.Rat).SetString(percent)
+	if !ok || r.Cmp(big.NewRat(10, 1)) > 0 {
 		return "", errors.New("invalid slippage")
 	}
-	r := big.NewRat(int64(n), 100)
-	return strings.TrimRight(r.FloatString(2), "0"), nil
+	r.Quo(r, big.NewRat(100, 1))
+	out := r.FloatString(len(frac) + 2)
+	if strings.Contains(out, ".") {
+		out = strings.TrimRight(strings.TrimRight(out, "0"), ".")
+	}
+	return out, nil
 }
 
 // ErrLifiMissingTx is a 200 from LI.FI without a usable transaction.

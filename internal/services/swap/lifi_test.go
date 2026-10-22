@@ -390,12 +390,12 @@ func TestLifiSlippageSentToClient(t *testing.T) {
 }
 
 func TestSlippageFraction(t *testing.T) {
-	for in, want := range map[string]string{"1": "0.01", "2": "0.02", "9": "0.09", "10": "0.1", "05": "0.05"} {
+	for in, want := range map[string]string{"0": "0", "0.5": "0.005", "1.5": "0.015", "2": "0.02", "10": "0.1", "2.0": "0.02", "1.25": "0.0125", "10.0": "0.1", "05": "0.05"} {
 		got, err := SlippageFraction(in)
 		require.NoError(t, err, in)
 		assert.Equal(t, want, got, in)
 	}
-	for _, in := range []string{"", "0", "00", "0.5", "1.25", "2.0", "11", "-1", "abc", "1e1", " 1", "+1", "100"} {
+	for _, in := range []string{"", "10.01", "11", "-1", "abc", "1,5", ".5", "1.", "1e1", "1/2", " 1", "+1", "100", "1.2.3", "0x1", "1234567890123456789012"} {
 		_, err := SlippageFraction(in)
 		assert.Error(t, err, in)
 	}

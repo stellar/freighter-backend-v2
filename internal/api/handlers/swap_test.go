@@ -234,7 +234,7 @@ func TestSwapBuild_Slippage(t *testing.T) {
 	withSlippage := func(v string) string {
 		return strings.Replace(good, `"fee"`, `"slippage":`+v+`,"fee"`, 1)
 	}
-	for _, v := range []string{`"11"`, `"-1"`, `"abc"`, `"1e1"`, `"1/2"`, `"10.01"`, `"0"`, `"0.5"`, `"1.25"`, `"2.0"`} {
+	for _, v := range []string{`"11"`, `"-1"`, `"abc"`, `"1e1"`, `"1/2"`, `"10.01"`, `"1,5"`, `".5"`, `"1."`} {
 		t.Run("rejects "+v, func(t *testing.T) {
 			t.Parallel()
 			f := &fakeSwapService{}
@@ -245,7 +245,7 @@ func TestSwapBuild_Slippage(t *testing.T) {
 			assert.Zero(t, f.calls)
 		})
 	}
-	for _, v := range []string{"1", "2", "10"} {
+	for _, v := range []string{"0", "0.5", "1.5", "2", "10", "2.0"} {
 		t.Run("accepts "+v, func(t *testing.T) {
 			t.Parallel()
 			f := &fakeSwapService{}
