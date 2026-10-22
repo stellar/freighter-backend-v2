@@ -33,6 +33,12 @@ func NewLifiClient(baseURL, apiKey string, hc *http.Client) *LifiClient {
 	if hc == nil {
 		hc = &http.Client{Timeout: 30 * time.Second}
 	}
+	if hc.CheckRedirect == nil {
+		// Go forwards custom headers such as x-lifi-api-key on redirects.
+		cp := *hc
+		cp.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		hc = &cp
+	}
 	return &LifiClient{base: strings.TrimRight(baseURL, "/"), apiKey: apiKey, hc: hc}
 }
 

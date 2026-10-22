@@ -183,3 +183,17 @@ func TestLifiClient_TransportErrorOmitsAccount(t *testing.T) {
 	var ue *metrics.UpstreamError
 	assert.ErrorAs(t, err, &ue)
 }
+
+func TestLifiClient_DoesNotFollowRedirects(t *testing.T) {
+	var hits atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
+	defer other.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL, http.StatusFound)
+	}))
+	defer srv.Close()
+
+	_, err := NewLifiClient(srv.URL, "test-key", srv.Client()).Quote(context.Background(), "a", "b", "1", "c", "0.005")
+	require.Error(t, err)
+	assert.Zero(t, hits.Load())
+}
