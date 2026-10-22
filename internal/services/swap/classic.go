@@ -280,7 +280,7 @@ func (c *ClassicSource) BuildTx(ctx context.Context, req types.SwapBuildRequest)
 		IncrementSequenceNum: true,
 		Operations:           ops,
 		BaseFee:              perOp,
-		Preconditions:        txnbuild.Preconditions{TimeBounds: txnbuild.NewTimeout(300)},
+		Preconditions:        txnbuild.Preconditions{TimeBounds: txnbuild.NewTimeout(TimeoutSeconds(req))},
 	})
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)

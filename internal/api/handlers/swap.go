@@ -153,6 +153,9 @@ func (h *SwapHandler) Build(w http.ResponseWriter, r *http.Request) error {
 			return swapBadRequest("invalid slippage")
 		}
 	}
+	if req.Timeout != nil && (*req.Timeout < 1 || *req.Timeout > swap.MaxTimeoutSeconds) {
+		return swapBadRequest("invalid timeout")
+	}
 
 	out, err := h.svc.Build(r.Context(), req)
 	if err != nil {

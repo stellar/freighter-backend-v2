@@ -67,6 +67,9 @@ type SwapBuildRequest struct {
 	Paths     []SwapPath `json:"paths,omitempty"`
 	// Slippage is the user's tolerance in percent, 0-10 (e.g. "0.5"); only the LI.FI source reads it.
 	Slippage string `json:"slippage,omitempty"`
+	// Timeout is the user's transaction timeout in seconds; nil means the default.
+	// A pointer so an explicit 0 (no expiry) is rejected, not defaulted.
+	Timeout *int64 `json:"timeout,omitempty"`
 }
 
 type SwapBuildResponse struct {

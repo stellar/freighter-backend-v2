@@ -42,6 +42,21 @@ func SlippageFraction(percent string) (string, error) {
 	return out, nil
 }
 
+// DefaultTimeoutSeconds and MaxTimeoutSeconds bound a built swap's validity.
+// The default matches both clients' default transaction timeout.
+const (
+	DefaultTimeoutSeconds = 180
+	MaxTimeoutSeconds     = 86400
+)
+
+// TimeoutSeconds is the request's validated timeout, or the default.
+func TimeoutSeconds(req types.SwapBuildRequest) int64 {
+	if req.Timeout == nil {
+		return DefaultTimeoutSeconds
+	}
+	return *req.Timeout
+}
+
 // ErrLifiMissingTx is a 200 from LI.FI without a usable transaction.
 var ErrLifiMissingTx = errors.New("lifi returned no usable transaction")
 
@@ -262,6 +277,8 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 		return "", fmt.Errorf("%w: fee %q", ErrBadRequest, req.Fee)
 	}
 	env.V1.Tx.Fee = xdr.Uint32(total.Uint64())
+	// Safe to move: the tx is unsigned and its source-account auth has no expiry of its own.
+	env.V1.Tx.Cond.TimeBounds.MaxTime = xdr.TimePoint(s.cfg.Now().Unix() + TimeoutSeconds(req))
 	env.V1.Signatures = nil
 	return xdr.MarshalBase64(env)
 }

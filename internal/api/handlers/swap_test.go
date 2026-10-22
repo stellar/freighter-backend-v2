@@ -264,6 +264,43 @@ func TestSwapBuild_Slippage(t *testing.T) {
 	})
 }
 
+func TestSwapBuild_Timeout(t *testing.T) {
+	t.Parallel()
+	good := swapBuildBody("XLM", swapUSDC, "10")
+	withTimeout := func(v string) string {
+		return strings.Replace(good, `"fee"`, `"timeout":`+v+`,"fee"`, 1)
+	}
+	for _, v := range []string{"0", "-1", "86401"} {
+		t.Run("rejects "+v, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeSwapService{}
+			_, err := doBuild(NewSwapHandler(f), "TESTNET", withTimeout(v))
+			require.Error(t, err)
+			assert.Equal(t, http.StatusBadRequest, statusOf(t, err))
+			assert.Contains(t, err.Error(), "invalid timeout")
+			assert.Zero(t, f.calls)
+		})
+	}
+	for _, v := range []int64{1, 180, 86400} {
+		t.Run(fmt.Sprint("accepts ", v), func(t *testing.T) {
+			t.Parallel()
+			f := &fakeSwapService{}
+			_, err := doBuild(NewSwapHandler(f), "TESTNET", withTimeout(fmt.Sprint(v)))
+			require.NoError(t, err)
+			require.NotNil(t, f.lastB.Timeout)
+			assert.Equal(t, v, *f.lastB.Timeout)
+		})
+	}
+	t.Run("absent stays nil", func(t *testing.T) {
+		t.Parallel()
+		f := &fakeSwapService{}
+		_, err := doBuild(NewSwapHandler(f), "TESTNET", good)
+		require.NoError(t, err)
+		assert.Nil(t, f.lastB.Timeout)
+		assert.Equal(t, 1, f.calls)
+	})
+}
+
 func TestSwapBuild_ErrorMapping(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {

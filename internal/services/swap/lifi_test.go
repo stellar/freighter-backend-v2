@@ -271,6 +271,23 @@ func TestLifiQuoteFromAmountComparedNumerically(t *testing.T) {
 	}
 }
 
+func TestLifiBuildTimeout(t *testing.T) {
+	body := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
+	env := decodeEnv(t, trustFixtureXDR(t))
+	now := int64(env.V1.Tx.Cond.TimeBounds.MaxTime) - 300
+	long := int64(3600)
+	for _, tc := range []struct {
+		timeout *int64
+		want    int64
+	}{{nil, now + 180}, {&long, now + 3600}} {
+		req := lifiBuildReq(t, env)
+		req.Timeout = tc.timeout
+		x, err := lifiBuildSource(t, env, 200, body).BuildTx(context.Background(), req)
+		require.NoError(t, err)
+		assert.Equal(t, xdr.TimePoint(tc.want), decodeEnv(t, x).V1.Tx.Cond.TimeBounds.MaxTime)
+	}
+}
+
 // LI.FI's signatures cannot authorize anything for the user; they are dropped.
 func TestLifiBuildClearsSignatures(t *testing.T) {
 	var q map[string]any

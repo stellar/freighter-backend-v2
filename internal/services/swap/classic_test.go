@@ -189,6 +189,32 @@ func TestClassicBuild(t *testing.T) {
 	}
 }
 
+func TestClassicBuildTimeout(t *testing.T) {
+	t.Parallel()
+	sixty := int64(60)
+	for _, tc := range []struct {
+		timeout *int64
+		want    int64
+	}{{nil, 180}, {&sixty, 60}} {
+		acct := keypair.MustRandom().Address()
+		src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: "unused"}}, newFakeLedger(t, acct, 41, true))
+		before := time.Now().Unix()
+		xdrB64, err := src.BuildTx(context.Background(), types.SwapBuildRequest{
+			Network: types.PUBLIC, Account: acct, Source: "classic",
+			FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0001",
+			Timeout: tc.timeout,
+			Paths: []types.SwapPath{{Share: "1", Hops: []types.SwapHop{
+				{Venue: "stellar-dex", From: "XLM", To: "USDC:" + usdcIssuer}}}},
+		})
+		require.NoError(t, err)
+		var env xdr.TransactionEnvelope
+		require.NoError(t, xdr.SafeUnmarshalBase64(xdrB64, &env))
+		maxTime := int64(env.Preconditions().TimeBounds.MaxTime)
+		assert.GreaterOrEqual(t, maxTime, before+tc.want)
+		assert.LessOrEqual(t, maxTime, time.Now().Unix()+tc.want)
+	}
+}
+
 func TestClassicBuildAccountNotFound(t *testing.T) {
 	t.Parallel()
 	rpc := newFakeLedger(t, "", 0, false)
