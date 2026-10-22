@@ -179,7 +179,7 @@ func (s *LifiSource) decimals(ctx context.Context, a Asset) (int, error) {
 func lifiFromAmount(q *LifiQuote) (*big.Int, error) {
 	v, ok := new(big.Int).SetString(q.Action.FromAmount, 10)
 	if !ok {
-		return nil, fmt.Errorf("lifi: bad fromAmount %q", q.Action.FromAmount)
+		return nil, &metrics.UpstreamError{Kind: "invalid_response", Err: fmt.Errorf("lifi: bad fromAmount %q", q.Action.FromAmount)}
 	}
 	return v, nil
 }

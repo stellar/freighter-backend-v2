@@ -436,3 +436,20 @@ func TestSlippageFraction(t *testing.T) {
 		assert.Error(t, err, in)
 	}
 }
+
+// A 200 whose fromAmount is unusable is an upstream fault (502), not a 500.
+func TestLifiMalformedFromAmountIsUpstreamError(t *testing.T) {
+	env := decodeEnv(t, trustFixtureXDR(t))
+	for name, body := range map[string]string{
+		"missing":     `{"action":{},"estimate":{"toAmount":"1"}}`,
+		"non-numeric": `{"action":{"fromAmount":"1e8"},"estimate":{"toAmount":"1"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := lifiServer(t, 200, []byte(body)).Quote(context.Background(), lifiReq("10"))
+			assert.ErrorAs(t, err, new(*metrics.UpstreamError))
+
+			_, err = lifiBuildSource(t, env, 200, []byte(body)).BuildTx(context.Background(), lifiBuildReq(t, env))
+			assert.ErrorAs(t, err, new(*metrics.UpstreamError))
+		})
+	}
+}
