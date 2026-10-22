@@ -30,11 +30,15 @@ type fakeSource struct {
 	buildBlock bool
 	panics     bool
 	calls      int
+	builds     int
+	// lateOK makes Quote wait for ctx to end, then succeed anyway.
+	lateOK bool
 }
 
 func (f *fakeSource) Name() string           { return f.name }
 func (f *fakeSource) Supports(n string) bool { return f.networks == nil || f.networks[n] }
 func (f *fakeSource) BuildTx(ctx context.Context, _ types.SwapBuildRequest) (string, error) {
+	f.builds++
 	if f.panics {
 		panic("build boom")
 	}
@@ -48,6 +52,10 @@ func (f *fakeSource) Quote(ctx context.Context, _ types.SwapQuoteRequest) (*type
 	f.calls++
 	if f.panics {
 		panic("quote boom")
+	}
+	if f.lateOK {
+		<-ctx.Done()
+		return f.route, nil
 	}
 	if f.delay > 0 {
 		select {
@@ -310,4 +318,26 @@ func TestRouterBuildSourcePanics(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, "error", Reason(err))
 	assert.Equal(t, 1.0, testutil.ToFloat64(m.SourceRequests.WithLabelValues("lifi", "build", "error")))
+}
+
+func TestRouterDiscardsQuoteThatSucceedsAfterDeadline(t *testing.T) {
+	t.Parallel()
+	r := NewRouter([]Source{
+		&fakeSource{name: "lifi", lateOK: true, route: route("lifi", "100", "99")},
+		&fakeSource{name: "classic", route: route("classic", "100", "17.9")},
+	}, 20*time.Millisecond, time.Second, nil)
+	res, err := r.Quote(context.Background(), sendReq)
+	require.NoError(t, err)
+	require.Len(t, res.Routes, 1)
+	assert.Equal(t, "classic", res.Routes[0].Source)
+	assert.Equal(t, []types.SwapUnavailable{{Source: "lifi", Reason: "timeout"}}, res.Unavailable)
+}
+
+func TestRouterBuildUnsupportedNetworkDoesNotBuild(t *testing.T) {
+	t.Parallel()
+	src := &fakeSource{name: "lifi", networks: map[string]bool{types.PUBLIC: true}, buildXDR: "x"}
+	r := NewRouter([]Source{src}, time.Second, time.Second, nil)
+	_, err := r.Build(context.Background(), types.SwapBuildRequest{Network: types.TESTNET, Source: "lifi"})
+	assert.ErrorIs(t, err, ErrBadRequest)
+	assert.Zero(t, src.builds)
 }

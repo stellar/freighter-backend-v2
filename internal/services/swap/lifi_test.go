@@ -453,3 +453,30 @@ func TestLifiMalformedFromAmountIsUpstreamError(t *testing.T) {
 		})
 	}
 }
+
+func TestLifiBuildFeeOverflowIsBadRequest(t *testing.T) {
+	env := decodeEnv(t, trustFixtureXDR(t))
+	req := lifiBuildReq(t, env)
+	req.Fee = "430"
+	_, err := lifiBuildSource(t, env, 200, lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")).BuildTx(context.Background(), req)
+	assert.ErrorIs(t, err, ErrBadRequest)
+}
+
+// The trust fixture opens a trustline on the destination, which only a classic
+// asset may have; the same contract as a non-SAC token must be refused.
+func TestLifiBuildTrustOnNonClassicDestinationIsCheckFailed(t *testing.T) {
+	env := decodeEnv(t, trustFixtureXDR(t))
+	req := lifiBuildReq(t, env)
+	req.ToAsset = contractIDOf(t, "USDC:"+usdcIssuer)
+	req.MinOut = FormatUnits(new(big.Int).Set(mustLifiCall(t, env).MinAmountOut), 0)
+	_, err := lifiBuildSource(t, env, 200, lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")).BuildTx(context.Background(), req)
+	require.ErrorIs(t, err, ErrCheckFailed)
+	assert.Contains(t, err.Error(), "auth trust")
+}
+
+func mustLifiCall(t *testing.T, env xdr.TransactionEnvelope) *lifiCall {
+	t.Helper()
+	call, err := decodeLifiCall(env)
+	require.NoError(t, err)
+	return call
+}

@@ -339,6 +339,36 @@ func TestLifiChecksTamperFails(t *testing.T) {
 		{"aggregator args[3] changed", "auth aggregator", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
 			childByFn(t, e, "swap_exact_in").Function.ContractFn.Args[3] = anyAddrVal(t, otherContract)
 		}},
+		{"fee transfer to other", "auth child", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			childByFn(t, e, "transfer").Function.ContractFn.Args[1] = anyAddrVal(t, other)
+		}},
+		{"fee transfer from other", "auth child", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			childByFn(t, e, "transfer").Function.ContractFn.Args[0] = anyAddrVal(t, other)
+		}},
+		{"aggregator transfer to other", "auth aggregator", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			childByFn(t, e, "swap_exact_in").SubInvocations[0].Function.ContractFn.Args[1] = anyAddrVal(t, other)
+		}},
+		{"aggregator transfer from other", "auth aggregator", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			childByFn(t, e, "swap_exact_in").SubInvocations[0].Function.ContractFn.Args[0] = anyAddrVal(t, other)
+		}},
+		{"aggregator transfer on other token", "auth aggregator", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			a, err := utils.ScAddressFromString(otherContract)
+			require.NoError(t, err)
+			childByFn(t, e, "swap_exact_in").SubInvocations[0].Function.ContractFn.ContractAddress = *a
+		}},
+		{"aggregator extra child", "auth aggregator", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			agg := childByFn(t, e, "swap_exact_in")
+			agg.SubInvocations = append(agg.SubInvocations,
+				contractCall(t, otherContract, "transfer", anyAddrVal(t, lifiTestAccount), anyAddrVal(t, other), i128Val(1)))
+		}},
+		{"aggregator amount zero", "auth aggregator", func(t *testing.T, e *xdr.TransactionEnvelope, w *lifiExpect) {
+			// Amount 1 lets a fee of 1 stand for the whole sum, so only y > 0 rejects.
+			w.Amount = big.NewInt(1)
+			childByFn(t, e, "transfer").Function.ContractFn.Args[2] = i128Val(1)
+			agg := childByFn(t, e, "swap_exact_in")
+			agg.Function.ContractFn.Args[2] = i128Val(0)
+			agg.SubInvocations[0].Function.ContractFn.Args[2] = i128Val(0)
+		}},
 		// 5. resource fee
 		{"resource fee above cap", "resource fee", func(_ *testing.T, e *xdr.TransactionEnvelope, w *lifiExpect) {
 			e.V1.Tx.Ext.SorobanData.ResourceFee = xdr.Int64(w.MaxResourceFee + 1)

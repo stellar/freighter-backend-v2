@@ -179,6 +179,9 @@ func TestClassicBuild(t *testing.T) {
 		pp := last.PathPaymentStrictSendOp
 		assert.Equal(t, xdr.Int64(175000000), pp.DestMin)
 		assert.Equal(t, xdr.Int64(1000000000), pp.SendAmount)
+		assert.Equal(t, acct, pp.Destination.Address())
+		assert.Equal(t, xdr.AssetTypeAssetTypeNative, pp.SendAsset.Type)
+		assert.Equal(t, "USDC", pp.DestAsset.GetCode())
 		require.Len(t, pp.Path, 1)
 		assert.Equal(t, "AQUA", pp.Path[0].GetCode())
 
@@ -239,4 +242,20 @@ func TestClassicOversizedBody(t *testing.T) {
 	_, err := src.Quote(context.Background(), sendReq)
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, ErrNoRoute)
+}
+
+func TestClassicBuildFeeFloor(t *testing.T) {
+	t.Parallel()
+	for _, hasTrustline := range []bool{true, false} {
+		acct := keypair.MustRandom().Address()
+		src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: "unused"}}, newFakeLedger(t, acct, 41, hasTrustline))
+		xdrB64, err := src.BuildTx(context.Background(), types.SwapBuildRequest{
+			Network: types.PUBLIC, Account: acct, Source: "classic",
+			FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0000001",
+		})
+		require.NoError(t, err)
+		var env xdr.TransactionEnvelope
+		require.NoError(t, xdr.SafeUnmarshalBase64(xdrB64, &env))
+		assert.Equal(t, int64(100*len(env.Operations())), int64(env.Fee()))
+	}
 }
