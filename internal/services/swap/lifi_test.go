@@ -288,6 +288,25 @@ func TestLifiBuildTimeout(t *testing.T) {
 	}
 }
 
+// A MinTime past the user's expiry would make an unsubmittable tx.
+func TestLifiBuildMinTimeAfterTimeoutIsCheckFailed(t *testing.T) {
+	var q map[string]any
+	require.NoError(t, json.Unmarshal(lifiFixture(t, "lifi_quote_xlm_usdc_trust.json"), &q))
+	env := decodeEnv(t, trustFixtureXDR(t))
+	late := decodeEnv(t, trustFixtureXDR(t))
+	late.V1.Tx.Cond.TimeBounds.MinTime = late.V1.Tx.Cond.TimeBounds.MaxTime - 200 // now+100
+	b64, err := xdr.MarshalBase64(late)
+	require.NoError(t, err)
+	q["transactionRequest"].(map[string]any)["data"] = b64
+	body, err := json.Marshal(q)
+	require.NoError(t, err)
+	req := lifiBuildReq(t, env)
+	one := int64(1)
+	req.Timeout = &one
+	_, err = lifiBuildSource(t, env, 200, body).BuildTx(context.Background(), req)
+	require.ErrorIs(t, err, ErrCheckFailed)
+}
+
 // LI.FI's signatures cannot authorize anything for the user; they are dropped.
 func TestLifiBuildClearsSignatures(t *testing.T) {
 	var q map[string]any

@@ -278,7 +278,11 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 	}
 	env.V1.Tx.Fee = xdr.Uint32(total.Uint64())
 	// Safe to move: the tx is unsigned and its source-account auth has no expiry of its own.
-	env.V1.Tx.Cond.TimeBounds.MaxTime = xdr.TimePoint(s.cfg.Now().Unix() + TimeoutSeconds(req))
+	tb := env.V1.Tx.Cond.TimeBounds
+	tb.MaxTime = xdr.TimePoint(s.cfg.Now().Unix() + TimeoutSeconds(req))
+	if tb.MinTime > tb.MaxTime {
+		return "", checkFailed("time bounds")
+	}
 	env.V1.Signatures = nil
 	return xdr.MarshalBase64(env)
 }
