@@ -7,13 +7,16 @@ import (
 	"math"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 const lifiName = "lifi"
@@ -66,12 +69,14 @@ type LifiConfig struct {
 	FeeRecipient   string
 	Aggregator     string
 	MaxResourceFee int64
+	RPC            types.RPCService
 	Now            func() time.Time
 }
 
 type LifiSource struct {
-	cfg LifiConfig
-	m   *metrics.Swap
+	cfg      LifiConfig
+	m        *metrics.Swap
+	decimals sync.Map // contract → int
 }
 
 func NewLifiSource(cfg LifiConfig, m *metrics.Swap) *LifiSource {
@@ -107,11 +112,7 @@ func (s *LifiSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (*ty
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBadRequest, err)
 	}
-	fromDecimals, err := s.decimals(ctx, from)
-	if err != nil {
-		return nil, err
-	}
-	toDecimals, err := s.decimals(ctx, to)
+	fromDecimals, toDecimals, err := s.pairDecimals(ctx, req.Account, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -169,11 +170,45 @@ func (s *LifiSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (*ty
 	}, nil
 }
 
-func (s *LifiSource) decimals(ctx context.Context, a Asset) (int, error) {
+// maxTokenDecimals bounds what ParseUnits and FormatUnits will size strings by.
+const maxTokenDecimals = 18
+
+// pairDecimals reads both tokens together so a cold pair costs one round trip.
+func (s *LifiSource) pairDecimals(ctx context.Context, account string, from, to Asset) (int, int, error) {
+	var fromDec, toDec int
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() (err error) { fromDec, err = s.tokenDecimals(gctx, account, from); return })
+	g.Go(func() (err error) { toDec, err = s.tokenDecimals(gctx, account, to); return })
+	if err := g.Wait(); err != nil {
+		return 0, 0, err
+	}
+	return fromDec, toDec, nil
+}
+
+// tokenDecimals reads a Soroban token's decimals() on-chain: LI.FI's own value
+// would make checkLifiTx compare its transaction against its own numbers.
+func (s *LifiSource) tokenDecimals(ctx context.Context, account string, a Asset) (int, error) {
 	if a.IsClassic() {
 		return ClassicDecimals, nil
 	}
-	return s.cfg.Client.TokenDecimals(ctx, a.Contract)
+	if v, ok := s.decimals.Load(a.Contract); ok {
+		return v.(int), nil
+	}
+	id, err := utils.ScAddressFromString(a.Contract)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	res, err := s.cfg.RPC.SimulateInvocation(ctx, *id, &txnbuild.SimpleAccount{AccountID: account}, "decimals", nil, txnbuild.NewTimeout(300), types.PUBLIC)
+	if err != nil {
+		return 0, &metrics.UpstreamError{Kind: "simulation_error", Err: fmt.Errorf("token %s decimals: %w", a.Contract, err)}
+	}
+	// Checked before caching: ParseUnits/FormatUnits size strings by decimals.
+	if res == nil || res.Type != xdr.ScValTypeScvU32 || res.U32 == nil || *res.U32 > maxTokenDecimals {
+		return 0, &metrics.UpstreamError{Kind: "invalid_response", Err: fmt.Errorf("token %s: unusable decimals() result", a.Contract)}
+	}
+	d := int(*res.U32)
+	s.decimals.Store(a.Contract, d)
+	return d, nil
 }
 
 func lifiFromAmount(q *LifiQuote) (*big.Int, error) {
@@ -204,11 +239,7 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
 	}
-	fromDecimals, err := s.decimals(ctx, from)
-	if err != nil {
-		return "", err
-	}
-	toDecimals, err := s.decimals(ctx, to)
+	fromDecimals, toDecimals, err := s.pairDecimals(ctx, req.Account, from, to)
 	if err != nil {
 		return "", err
 	}

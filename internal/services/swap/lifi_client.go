@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
@@ -17,16 +16,13 @@ import (
 
 const LifiStellarChainID = "1201081091099710"
 
-const maxTokenDecimals = 18
-
 // maxUpstreamBody caps how much of a LI.FI or Horizon response is read.
 const maxUpstreamBody = 1 << 20
 
 type LifiClient struct {
-	base     string
-	apiKey   string
-	hc       *http.Client
-	decimals sync.Map // contract → int
+	base   string
+	apiKey string
+	hc     *http.Client
 }
 
 func NewLifiClient(baseURL, apiKey string, hc *http.Client) *LifiClient {
@@ -79,27 +75,6 @@ func (c *LifiClient) Quote(ctx context.Context, fromContract, toContract, rawAmo
 		return nil, err
 	}
 	return &out, nil
-}
-
-func (c *LifiClient) TokenDecimals(ctx context.Context, contract string) (int, error) {
-	if v, ok := c.decimals.Load(contract); ok {
-		return v.(int), nil
-	}
-	q := url.Values{}
-	q.Set("chain", LifiStellarChainID)
-	q.Set("token", contract)
-	var tok struct {
-		Decimals int `json:"decimals"`
-	}
-	if err := c.getJSON(ctx, "/v1/token", q, &tok); err != nil {
-		return 0, err
-	}
-	// Checked before caching: ParseUnits/FormatUnits size strings by decimals.
-	if tok.Decimals < 0 || tok.Decimals > maxTokenDecimals {
-		return 0, &metrics.UpstreamError{Kind: "invalid_response", Err: fmt.Errorf("lifi: token %s decimals %d out of range", contract, tok.Decimals)}
-	}
-	c.decimals.Store(contract, tok.Decimals)
-	return tok.Decimals, nil
 }
 
 func (c *LifiClient) getJSON(ctx context.Context, path string, q url.Values, dest any) error {

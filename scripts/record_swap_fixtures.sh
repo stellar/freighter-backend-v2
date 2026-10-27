@@ -22,4 +22,3 @@ q $XLM $EURC_C 1000000000000 $BIG   > "$out/lifi_quote_xlm_eurc_split.json"   # 
 q $XLM $USDC_C 1000000000000 $BIG   > "$out/lifi_quote_xlm_usdc_100k.json"    # Aqua + Sushi split
 q $XLM $USDC_C 100000000000  $SMALL > "$out/lifi_quote_shrink.json"           # 10,000 XLM from ~99 XLM account
 q $XLM CB23WRDQWGSP6YPMY4UV5C4OW5CBTXKYN3XEATG7KJEZCXMJBYEHOUOV 10000000 $BIG > "$out/lifi_err_1003.json"
-curl -s "${K[@]}" "$L/token?chain=$C&token=CBI7UCH5KGSVQRO5H4SUCZUTZABCITZLRHQQZTWL2TK4RZ72TAR6IHRV" > "$out/lifi_token_dejtrsy.json"

@@ -113,49 +113,6 @@ func TestLifiClient_Errors(t *testing.T) {
 	}
 }
 
-func TestLifiClient_TokenDecimals(t *testing.T) {
-	body := lifiFixture(t, "lifi_token_dejtrsy.json")
-	var tok struct {
-		Decimals int `json:"decimals"`
-	}
-	require.NoError(t, json.Unmarshal(body, &tok))
-	require.Equal(t, 18, tok.Decimals)
-
-	var calls int32
-	var gotQuery map[string][]string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&calls, 1)
-		gotQuery = r.URL.Query()
-		assert.Equal(t, "/v1/token", r.URL.Path)
-		_, _ = w.Write(body)
-	}))
-	defer srv.Close()
-	c := NewLifiClient(srv.URL, "k", srv.Client())
-	for i := 0; i < 2; i++ {
-		d, err := c.TokenDecimals(context.Background(), "CTOKEN")
-		require.NoError(t, err)
-		assert.Equal(t, 18, d)
-	}
-	assert.EqualValues(t, 1, atomic.LoadInt32(&calls))
-	assert.Equal(t, []string{LifiStellarChainID}, gotQuery["chain"])
-	assert.Equal(t, []string{"CTOKEN"}, gotQuery["token"])
-}
-
-func TestLifiClient_TokenDecimalsNotCachedOnError(t *testing.T) {
-	var calls int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&calls, 1)
-		w.WriteHeader(500)
-	}))
-	defer srv.Close()
-	c := NewLifiClient(srv.URL, "k", srv.Client())
-	_, err := c.TokenDecimals(context.Background(), "CTOKEN")
-	require.Error(t, err)
-	_, err = c.TokenDecimals(context.Background(), "CTOKEN")
-	require.Error(t, err)
-	assert.EqualValues(t, 2, atomic.LoadInt32(&calls))
-}
-
 // A body past maxUpstreamBody is cut off rather than read in full.
 func TestLifiClient_OversizedBody(t *testing.T) {
 	t.Parallel()

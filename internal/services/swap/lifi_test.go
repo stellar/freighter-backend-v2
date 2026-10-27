@@ -3,30 +3,103 @@ package swap
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
+// USDC (Circle) mainnet SAC, the contract in the LI.FI fixtures.
+const usdcContract = "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75"
+
 func lifiServer(t *testing.T, status int, body []byte) *LifiSource {
+	t.Helper()
+	return lifiServerRPC(t, status, body, &fakeDecimalsRPC{fn: decimalsOf(7)})
+}
+
+func lifiServerRPC(t *testing.T, status int, body []byte, rpc types.RPCService) *LifiSource {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(status)
 		_, _ = w.Write(body)
 	}))
 	t.Cleanup(srv.Close)
-	return NewLifiSource(LifiConfig{Client: NewLifiClient(srv.URL, "", srv.Client())}, nil)
+	return NewLifiSource(LifiConfig{Client: NewLifiClient(srv.URL, "", srv.Client()), RPC: rpc}, nil)
+}
+
+// fakeDecimalsRPC answers decimals() simulations through fn and records them.
+type fakeDecimalsRPC struct {
+	utils.MockRPCService
+	fn func(contract string) (*xdr.ScVal, error)
+
+	mu       sync.Mutex
+	calls    map[string]int
+	last     simulated
+	inflight int
+	peak     int
+}
+
+type simulated struct {
+	function string
+	account  string
+	network  string
+}
+
+func (f *fakeDecimalsRPC) SimulateInvocation(_ context.Context, id xdr.ScAddress, acct *txnbuild.SimpleAccount, fn xdr.ScSymbol,
+	_ []xdr.ScVal, _ txnbuild.TimeBounds, network string) (types.SimulateTransactionResponse, error) {
+	contract := addrString(id)
+	f.mu.Lock()
+	if f.calls == nil {
+		f.calls = map[string]int{}
+	}
+	f.calls[contract]++
+	f.last = simulated{function: string(fn), account: acct.AccountID, network: network}
+	f.inflight++
+	f.peak = max(f.peak, f.inflight)
+	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		f.inflight--
+		f.mu.Unlock()
+	}()
+	return f.fn(contract)
+}
+
+func (f *fakeDecimalsRPC) callsTo(contract string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[contract]
+}
+
+func (f *fakeDecimalsRPC) total() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, c := range f.calls {
+		n += c
+	}
+	return n
+}
+
+func decimalsOf(n uint32) func(string) (*xdr.ScVal, error) {
+	return func(string) (*xdr.ScVal, error) {
+		v := u32Val(n)
+		return &v, nil
+	}
 }
 
 func lifiReq(amount string) types.SwapQuoteRequest {
@@ -95,18 +168,21 @@ func TestLifiQuoteContractTokenDecimals(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &q))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/token" {
-			_, _ = w.Write(lifiFixture(t, "lifi_token_dejtrsy.json"))
+			t.Errorf("decimals must not come from LI.FI")
+			_, _ = w.Write([]byte(`{"decimals":18}`))
 			return
 		}
 		_, _ = w.Write(body)
 	}))
 	defer srv.Close()
-	src := NewLifiSource(LifiConfig{Client: NewLifiClient(srv.URL, "", srv.Client())}, nil)
+	rpc := &fakeDecimalsRPC{fn: decimalsOf(7)}
+	src := NewLifiSource(LifiConfig{Client: NewLifiClient(srv.URL, "", srv.Client()), RPC: rpc}, nil)
 	req := lifiReq(fmtRaw(t, q.Action.FromAmount, 7))
-	req.ToAsset = "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75"
+	req.ToAsset = usdcContract
 	rt, err := src.Quote(context.Background(), req)
 	require.NoError(t, err)
-	assert.Equal(t, fmtRaw(t, q.Estimate.ToAmount, 18), rt.ToAmount)
+	assert.Equal(t, fmtRaw(t, q.Estimate.ToAmount, 7), rt.ToAmount)
+	assert.Equal(t, simulated{function: "decimals", account: req.Account, network: types.PUBLIC}, rpc.last)
 }
 
 // Review Focus 4: a 200 without a usable transaction is reason "error", and
@@ -143,6 +219,11 @@ func TestLifiSupportsPublicOnly(t *testing.T) {
 
 func lifiBuildSource(t *testing.T, env xdr.TransactionEnvelope, status int, body []byte) *LifiSource {
 	t.Helper()
+	return lifiBuildSourceRPC(t, env, status, body, &fakeDecimalsRPC{fn: decimalsOf(7)})
+}
+
+func lifiBuildSourceRPC(t *testing.T, env xdr.TransactionEnvelope, status int, body []byte, rpc types.RPCService) *LifiSource {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(status)
 		_, _ = w.Write(body)
@@ -155,6 +236,7 @@ func lifiBuildSource(t *testing.T, env xdr.TransactionEnvelope, status int, body
 		FeeRecipient:   lifiFeeRecipient,
 		Aggregator:     lifiAggregator,
 		MaxResourceFee: 3000000,
+		RPC:            rpc,
 		Now:            func() time.Time { return time.Unix(maxTime-300, 0) },
 	}, nil)
 }
@@ -338,25 +420,27 @@ func TestLifiBuildMissingTransaction(t *testing.T) {
 	}
 }
 
-// Out-of-range token decimals make the source error rather than panic in
-// ParseUnits or allocate a huge string.
+// A bad decimals() result makes the source error rather than panic in
+// ParseUnits or allocate a huge string, and is never cached.
 func TestLifiBadTokenDecimals(t *testing.T) {
 	env := decodeEnv(t, trustFixtureXDR(t))
 	quote := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
-	for _, d := range []int{40, -1} {
+	str := xdr.ScString("7")
+	i32 := xdr.Int32(7)
+	for name, val := range map[string]*xdr.ScVal{
+		"u32 40":  ptr(u32Val(40)),
+		"u32 19":  ptr(u32Val(19)),
+		"i32":     {Type: xdr.ScValTypeScvI32, I32: &i32},
+		"string":  {Type: xdr.ScValTypeScvString, Str: &str},
+		"void":    {Type: xdr.ScValTypeScvVoid},
+		"nil":     nil,
+		"u32 nil": {Type: xdr.ScValTypeScvU32},
+	} {
 		for _, side := range []string{"from", "to"} {
-			t.Run(fmt.Sprintf("%s %d", side, d), func(t *testing.T) {
-				var tokenCalls int32
-				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.URL.Path == "/v1/token" {
-						atomic.AddInt32(&tokenCalls, 1)
-						_, _ = fmt.Fprintf(w, `{"decimals":%d}`, d)
-						return
-					}
-					_, _ = w.Write(quote)
-				}))
-				defer srv.Close()
-				src := NewLifiSource(LifiConfig{Client: NewLifiClient(srv.URL, "", srv.Client())}, nil)
+			t.Run(fmt.Sprintf("%s %s", side, name), func(t *testing.T) {
+				rpc := &fakeDecimalsRPC{fn: func(string) (*xdr.ScVal, error) { return val, nil }}
+				src := lifiServerRPC(t, 200, quote, rpc)
+				bsrc := lifiBuildSourceRPC(t, env, 200, quote, rpc)
 				qreq := lifiReq("10")
 				breq := lifiBuildReq(t, env)
 				if side == "from" {
@@ -367,19 +451,143 @@ func TestLifiBadTokenDecimals(t *testing.T) {
 				var qerr, berr error
 				require.NotPanics(t, func() {
 					_, qerr = src.Quote(context.Background(), qreq)
-					_, berr = src.BuildTx(context.Background(), breq)
+					_, berr = bsrc.BuildTx(context.Background(), breq)
 				})
 				require.Error(t, qerr)
 				require.Error(t, berr)
 				assert.Equal(t, "error", Reason(qerr))
 				assert.Equal(t, "error", Reason(berr))
 				var ue *metrics.UpstreamError
-				assert.ErrorAs(t, qerr, &ue)
-				assert.ErrorAs(t, berr, &ue)
-				assert.EqualValues(t, 2, atomic.LoadInt32(&tokenCalls), "bad decimals must not be cached")
+				require.ErrorAs(t, qerr, &ue)
+				assert.Equal(t, "invalid_response", ue.Kind)
+				require.ErrorAs(t, berr, &ue)
+				assert.Equal(t, "invalid_response", ue.Kind)
+				assert.Equal(t, 2, rpc.callsTo(otherContract), "bad decimals must not be cached (quote and build each read)")
 			})
 		}
 	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+// Build decides minOut with the chain's decimals: a value LI.FI would accept
+// (7) is refused when the chain says 8, and a build is accepted at the chain's
+// value even though LI.FI's own token metadata would disagree.
+func TestLifiBuildUsesChainDecimals(t *testing.T) {
+	body := lifiFixture(t, "lifi_quote_xlm_usdc_100k.json")
+	var q LifiQuote
+	require.NoError(t, json.Unmarshal(body, &q))
+	env := decodeEnv(t, q.TransactionRequest.Data)
+	req := lifiBuildReq(t, env)
+	req.Account = "GDHF3HIKWM5KJAVLZBSZWUFDOEOT7IBMY22UXG4QBE326O354INLPAND"
+	req.ToAsset = usdcContract
+	req.Amount = "100000"
+	min := mustLifiCall(t, env).MinAmountOut
+
+	ok := &fakeDecimalsRPC{fn: decimalsOf(7)}
+	req.MinOut = FormatUnits(min, 7)
+	_, err := lifiBuildSourceRPC(t, env, 200, body, ok).BuildTx(context.Background(), req)
+	require.NoError(t, err)
+
+	moved := &fakeDecimalsRPC{fn: decimalsOf(8)}
+	_, err = lifiBuildSourceRPC(t, env, 200, body, moved).BuildTx(context.Background(), req)
+	assert.ErrorIs(t, err, ErrQuoteMoved)
+}
+
+func TestLifiDecimalsCachedPerContract(t *testing.T) {
+	body := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
+	var q LifiQuote
+	require.NoError(t, json.Unmarshal(body, &q))
+
+	rpc := &fakeDecimalsRPC{fn: decimalsOf(7)}
+	src := lifiServerRPC(t, 200, body, rpc)
+	req := lifiReq(fmtRaw(t, q.Action.FromAmount, 7))
+	req.ToAsset = usdcContract
+	for range 2 {
+		_, err := src.Quote(context.Background(), req)
+		require.NoError(t, err)
+	}
+	assert.Equal(t, 1, rpc.callsTo(usdcContract))
+	assert.Equal(t, 1, rpc.total())
+
+	req.FromAsset = otherContract
+	_, _ = src.Quote(context.Background(), req)
+	_, _ = src.Quote(context.Background(), req)
+	assert.Equal(t, 1, rpc.callsTo(otherContract))
+	assert.Equal(t, 1, rpc.callsTo(usdcContract))
+
+	classic := &fakeDecimalsRPC{fn: decimalsOf(7)}
+	csrc := lifiServerRPC(t, 200, body, classic)
+	_, err := csrc.Quote(context.Background(), lifiReq(fmtRaw(t, q.Action.FromAmount, 7)))
+	require.NoError(t, err)
+	assert.Zero(t, classic.total())
+}
+
+func TestLifiDecimalsErrorNotCached(t *testing.T) {
+	body := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
+	var q LifiQuote
+	require.NoError(t, json.Unmarshal(body, &q))
+	env := decodeEnv(t, trustFixtureXDR(t))
+
+	var n atomic.Int32
+	rpc := &fakeDecimalsRPC{fn: func(string) (*xdr.ScVal, error) {
+		if n.Add(1) == 1 {
+			return nil, errors.New("rpc down")
+		}
+		v := u32Val(7)
+		return &v, nil
+	}}
+	src := lifiServerRPC(t, 200, body, rpc)
+	req := lifiReq(fmtRaw(t, q.Action.FromAmount, 7))
+	req.ToAsset = usdcContract
+
+	_, err := src.Quote(context.Background(), req)
+	require.Error(t, err)
+	assert.Equal(t, "error", Reason(err))
+	assert.ErrorAs(t, err, new(*metrics.UpstreamError), "mapSwapError answers 502 for an UpstreamError")
+
+	_, err = src.Quote(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, 2, rpc.callsTo(usdcContract))
+
+	brpc := &fakeDecimalsRPC{fn: func(string) (*xdr.ScVal, error) { return nil, errors.New("rpc down") }}
+	breq := lifiBuildReq(t, env)
+	breq.ToAsset = usdcContract
+	_, err = lifiBuildSourceRPC(t, env, 200, body, brpc).BuildTx(context.Background(), breq)
+	assert.ErrorAs(t, err, new(*metrics.UpstreamError))
+	assert.Equal(t, "error", Reason(err))
+
+	erpc := &fakeDecimalsRPC{fn: func(string) (*xdr.ScVal, error) { return nil, errors.New("rpc down") }}
+	res, err := NewRouter([]Source{lifiServerRPC(t, 200, body, erpc), &fakeSource{name: "classic", route: route("classic", "10", "1.8")}},
+		time.Second, time.Second, nil).Quote(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, []types.SwapUnavailable{{Source: "lifi", Reason: "error"}}, res.Unavailable)
+}
+
+// Both tokens are read together, so a cold quote costs one round trip.
+func TestLifiDecimalsReadConcurrently(t *testing.T) {
+	body := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
+	var arrived atomic.Int32
+	ready := make(chan struct{})
+	rpc := &fakeDecimalsRPC{fn: func(string) (*xdr.ScVal, error) {
+		if arrived.Add(1) == 2 {
+			close(ready)
+		}
+		select {
+		case <-ready:
+		case <-time.After(2 * time.Second):
+			return nil, errors.New("second read never started")
+		}
+		v := u32Val(7)
+		return &v, nil
+	}}
+	req := lifiReq("10")
+	req.FromAsset, req.ToAsset = otherContract, usdcContract
+	_, _ = lifiServerRPC(t, 200, body, rpc).Quote(context.Background(), req)
+	rpc.mu.Lock()
+	defer rpc.mu.Unlock()
+	assert.Equal(t, 2, rpc.peak)
+	assert.Equal(t, 2, len(rpc.calls))
 }
 
 func slippageRecorder(t *testing.T, env xdr.TransactionEnvelope, body []byte) (*LifiSource, *[]string) {

@@ -177,6 +177,7 @@ func (s *ApiServer) initServices() error {
 			FeeRecipient:   s.cfg.SwapConfig.LifiFeeRecipient,
 			Aggregator:     s.cfg.SwapConfig.AggregatorContract,
 			MaxResourceFee: s.cfg.SwapConfig.MaxResourceFeeStroops,
+			RPC:            s.rpcService,
 		}, s.appMetrics.Swap))
 	}
 	s.swapService = swap.NewRouter(sources,
