@@ -91,6 +91,9 @@ func (s *ServeCmd) Command() *cobra.Command {
 					return fmt.Errorf("--%s=%d overflows when converted to a duration; must be <= %d", f.name, f.value, maxDurationSeconds)
 				}
 			}
+			if d := time.Duration(s.Cfg.SwapConfig.BuildTimeoutSeconds) * time.Second; d >= api.DefaultWriteTimeout {
+				return fmt.Errorf("--swap-build-timeout-seconds=%d must be below the server write timeout (%s)", s.Cfg.SwapConfig.BuildTimeoutSeconds, api.DefaultWriteTimeout)
+			}
 			// The volume threshold and conversion divisor are magnitudes
 			// where 0 is meaningful ("guard disabled" / "conversion not
 			// enabled") but negatives are operator error.
@@ -181,7 +184,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().BoolVar(&s.Cfg.SwapConfig.ClassicEnabled, "swap-classic-enabled", true, "Enable the classic (Horizon path-finding) swap source")
 	cmd.Flags().BoolVar(&s.Cfg.SwapConfig.LifiEnabled, "swap-lifi-enabled", false, "Enable the LI.FI swap source")
 	cmd.Flags().IntVar(&s.Cfg.SwapConfig.SourceTimeoutSeconds, "swap-source-timeout-seconds", 4, "Per-source timeout in seconds for swap quote requests")
-	cmd.Flags().IntVar(&s.Cfg.SwapConfig.BuildTimeoutSeconds, "swap-build-timeout-seconds", 8, "Timeout in seconds for building a swap transaction; keep below the server's 10s write timeout")
+	cmd.Flags().IntVar(&s.Cfg.SwapConfig.BuildTimeoutSeconds, "swap-build-timeout-seconds", 8, "Timeout in seconds for building a swap transaction; must stay below the server write timeout")
 	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiAPIKey, "swap-lifi-api-key", "", "LI.FI API key")
 	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiBaseURL, "swap-lifi-base-url", "https://li.quest", "LI.FI API base URL")
 	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiSwapContract, "swap-lifi-swap-contract", "CDCNXZHYWRDHNAQEY5EX3WCF7BCWVJBS64ZBVUGRTQBFTHUKG6NAXFTR", "LI.FI swap contract ID the backend accepts in quotes")

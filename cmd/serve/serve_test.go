@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/freighter-backend-v2/internal/api"
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/services"
@@ -579,6 +580,18 @@ func TestServeCmd_RejectsZeroSwapBuildTimeout(t *testing.T) {
 	_, err := execServe(t, "--swap-build-timeout-seconds", "0")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--swap-build-timeout-seconds=0 must be positive")
+}
+
+func TestServeCmd_SwapBuildTimeoutStaysBelowWriteTimeout(t *testing.T) {
+	t.Parallel()
+	limit := int(api.DefaultWriteTimeout / time.Second)
+	_, err := execServe(t, "--db-enabled=false", "--swap-build-timeout-seconds", strconv.Itoa(limit))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--swap-build-timeout-seconds="+strconv.Itoa(limit)+" must be below the server write timeout")
+
+	s, err := execServe(t, "--db-enabled=false", "--swap-build-timeout-seconds", strconv.Itoa(limit-1))
+	require.NoError(t, err)
+	assert.Equal(t, limit-1, s.Cfg.SwapConfig.BuildTimeoutSeconds)
 }
 
 func TestServeCmd_RejectsNonPositiveSwapMaxResourceFee(t *testing.T) {
