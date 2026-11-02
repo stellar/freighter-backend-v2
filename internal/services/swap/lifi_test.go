@@ -824,6 +824,17 @@ func TestLifiToClassic(t *testing.T) {
 		assert.Equal(t, 1, rpc.ledgerReads())
 	})
 
+	t.Run("missing instance is not cached", func(t *testing.T) {
+		rpc := &fakeDecimalsRPC{}
+		src := NewLifiSource(LifiConfig{RPC: rpc}, nil)
+		for i := 1; i <= 2; i++ {
+			got, err := src.toClassic(ctx, types.PUBLIC, asset(usdc))
+			require.NoError(t, err)
+			assert.False(t, got)
+			assert.Equal(t, i, rpc.ledgerReads())
+		}
+	})
+
 	t.Run("rpc error is an upstream error and is not cached", func(t *testing.T) {
 		rpc := &fakeDecimalsRPC{ledger: func([]string) (map[string]string, error) { return nil, errors.New("rpc down") }}
 		src := NewLifiSource(LifiConfig{RPC: rpc}, nil)
@@ -836,6 +847,18 @@ func TestLifiToClassic(t *testing.T) {
 			assert.Equal(t, i, rpc.ledgerReads())
 		}
 	})
+}
+
+// RPC can't reliably tell "not a token" from a failed simulation, so both stay a visible error.
+func TestLifiDecimalsSimulationErrorIsError(t *testing.T) {
+	rpc := &fakeDecimalsRPC{fn: func(string) (*xdr.ScVal, error) {
+		return nil, &metrics.UpstreamError{Kind: "simulation_error", Err: errors.New("host error")}
+	}}
+	src := NewLifiSource(LifiConfig{RPC: rpc}, nil)
+	a, err := ParseAsset(otherContract)
+	require.NoError(t, err)
+	_, err = src.tokenDecimals(context.Background(), lifiTestAccount, a)
+	assert.Equal(t, "error", Reason(err))
 }
 
 func mustLifiCall(t *testing.T, env xdr.TransactionEnvelope) *lifiCall {

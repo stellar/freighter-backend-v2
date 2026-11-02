@@ -250,16 +250,19 @@ func (s *LifiSource) toClassic(ctx context.Context, net string, to Asset) (bool,
 	if err != nil {
 		return false, &metrics.UpstreamError{Kind: "rpc_error", Err: fmt.Errorf("contract %s instance: %w", to.Contract, err)}
 	}
+	b64, ok := entries[keyB64]
+	if !ok {
+		// Not cached: the entry may be archived or briefly missing, not absent for good.
+		return false, nil
+	}
+	var data xdr.LedgerEntryData
+	if err := xdr.SafeUnmarshalBase64(b64, &data); err != nil {
+		return false, &metrics.UpstreamError{Kind: "invalid_response", Err: fmt.Errorf("contract %s instance: %w", to.Contract, err)}
+	}
 	isSAC := false
-	if b64, ok := entries[keyB64]; ok {
-		var data xdr.LedgerEntryData
-		if err := xdr.SafeUnmarshalBase64(b64, &data); err != nil {
-			return false, &metrics.UpstreamError{Kind: "invalid_response", Err: fmt.Errorf("contract %s instance: %w", to.Contract, err)}
-		}
-		if cd, ok := data.GetContractData(); ok {
-			if inst, ok := cd.Val.GetInstance(); ok {
-				isSAC = inst.Executable.Type == xdr.ContractExecutableTypeContractExecutableStellarAsset
-			}
+	if cd, ok := data.GetContractData(); ok {
+		if inst, ok := cd.Val.GetInstance(); ok {
+			isSAC = inst.Executable.Type == xdr.ContractExecutableTypeContractExecutableStellarAsset
 		}
 	}
 	s.sac.Store(to.Contract, isSAC)
