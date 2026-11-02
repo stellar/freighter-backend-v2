@@ -201,6 +201,11 @@ func (s *LifiSource) tokenDecimals(ctx context.Context, account string, a Asset)
 	}
 	res, err := s.cfg.RPC.SimulateInvocation(ctx, *id, &txnbuild.SimpleAccount{AccountID: account}, "decimals", nil, txnbuild.NewTimeout(300), types.PUBLIC)
 	if err != nil {
+		// The RPC answered but the call failed: not a token, or no decimals().
+		var ue *metrics.UpstreamError
+		if errors.As(err, &ue) && ue.Kind == "simulation_error" {
+			return 0, fmt.Errorf("%w: token %s decimals: %v", ErrNoRoute, a.Contract, err)
+		}
 		return 0, &metrics.UpstreamError{Kind: "simulation_error", Err: fmt.Errorf("token %s decimals: %w", a.Contract, err)}
 	}
 	// Checked before caching: ParseUnits/FormatUnits size strings by decimals.
