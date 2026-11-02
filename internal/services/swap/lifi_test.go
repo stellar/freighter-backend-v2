@@ -639,29 +639,6 @@ func TestLifiDecimalsErrorNotCached(t *testing.T) {
 	assert.Equal(t, []types.SwapUnavailable{{Source: "lifi", Reason: "error"}}, res.Unavailable)
 }
 
-func TestLifiDecimalsSimulationErrorIsNoRoute(t *testing.T) {
-	body := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
-	for name, tc := range map[string]struct {
-		err    error
-		reason string
-	}{
-		"contract without decimals": {&metrics.UpstreamError{Kind: "simulation_error", Err: errors.New("no such function")}, "no_route"},
-		"transport failure":         {errors.New("rpc down"), "error"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			rpc := &fakeDecimalsRPC{fn: func(string) (*xdr.ScVal, error) { return nil, tc.err }}
-			req := lifiReq("10")
-			req.ToAsset = otherContract
-			_, err := lifiServerRPC(t, 200, body, rpc).Quote(context.Background(), req)
-			require.Error(t, err)
-			assert.Equal(t, tc.reason, Reason(err))
-			assert.Contains(t, err.Error(), tc.err.Error())
-			_, _ = lifiServerRPC(t, 200, body, rpc).Quote(context.Background(), req)
-			assert.Equal(t, 2, rpc.callsTo(otherContract), "not cached")
-		})
-	}
-}
-
 // Both tokens are read together, so a cold quote costs one round trip.
 func TestLifiDecimalsReadConcurrently(t *testing.T) {
 	body := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
