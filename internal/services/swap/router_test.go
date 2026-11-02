@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -125,6 +126,18 @@ func TestRouterAllNoRouteIsEmpty200(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, res.Routes)
 	assert.Len(t, res.Unavailable, 2)
+}
+
+// A bad request is the caller's fault, not a source failure.
+func TestRouterBadRequestIsNotASourceFailure(t *testing.T) {
+	t.Parallel()
+	r := NewRouter([]Source{
+		&fakeSource{name: "lifi", err: fmt.Errorf("amount: %w", ErrBadRequest)},
+		&fakeSource{name: "classic", err: errors.New("boom")},
+	}, time.Second, time.Second, nil)
+	res, err := r.Quote(context.Background(), sendReq)
+	require.NoError(t, err)
+	assert.Equal(t, []types.SwapUnavailable{{Source: "lifi", Reason: "bad_request"}, {Source: "classic", Reason: "error"}}, res.Unavailable)
 }
 
 func TestRouterAllErroringIsAllSourcesFailed(t *testing.T) {

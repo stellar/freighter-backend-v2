@@ -24,6 +24,8 @@ func TestReason(t *testing.T) {
 		{"quote_moved", ErrQuoteMoved},
 		{"quote_moved", fmt.Errorf("lifi: %w: %w", ErrNoRoute, ErrQuoteMoved)},
 		{"quote_moved", fmt.Errorf("lifi: %w: %w", ErrInsufficientBalance, ErrQuoteMoved)},
+		{"bad_request", fmt.Errorf("amount: %w", ErrBadRequest)},
+		{"account_not_found", ErrAccountNotFound},
 		{"error", errors.New("boom")},
 	}
 	for _, tc := range cases {

@@ -45,6 +45,10 @@ func Reason(err error) string {
 		return "timeout"
 	case errors.Is(err, ErrCheckFailed):
 		return "check_failed"
+	case errors.Is(err, ErrBadRequest):
+		return "bad_request"
+	case errors.Is(err, ErrAccountNotFound):
+		return "account_not_found"
 	}
 	return "error"
 }
