@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -491,4 +492,22 @@ func TestApiServer_initHandlers_AllUserFacingRoutesGatedInStrict(t *testing.T) {
 			rt.method, rt.pattern)
 	}
 	require.Positive(t, gated, "expected routes() to contain at least one gated route")
+}
+
+// The swap routes spend a rate-limited LI.FI key, so they reject anonymous
+// requests even while --auth-mode is permissive.
+func TestApiServer_initHandlers_SwapRoutesRequireTokenInPermissive(t *testing.T) {
+	s := newTestAPIServer(t, testCfg("permissive"))
+	mux, err := s.initHandlers()
+	require.NoError(t, err)
+
+	for _, path := range []string{"/api/v1/swap/quotes", "/api/v1/swap/tx"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}")))
+		assert.Equal(t, http.StatusUnauthorized, rec.Code, path)
+	}
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami", nil))
+	assert.Equal(t, http.StatusOK, rec.Code, "other gated routes stay anonymous-friendly in permissive")
 }

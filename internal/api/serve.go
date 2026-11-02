@@ -242,6 +242,8 @@ type route struct {
 	// on config) but is skipped by initHandlers, leaving its path to 404. Config-
 	// driven toggles belong here; everything permanently registered declares true.
 	enabled bool
+	// tokenRequired rejects anonymous requests even under --auth-mode permissive.
+	tokenRequired bool
 }
 
 // routes builds the full endpoint table. It constructs each handler with its
@@ -286,18 +288,18 @@ func (s *ApiServer) routes() ([]route, error) {
 		// per-request JWTs, and db-health is designed never to fail the request;
 		// gating any of these would 401 probes under `--auth-mode strict` and cause
 		// pod churn.
-		{http.MethodGet, "/api/v1/ping", handlers.CustomHandler(healthHandler.CheckHealth), false, true},
-		{http.MethodGet, "/api/v1/rpc-health", handlers.CustomHandler(rpcHealthHandler.CheckRPCHealth), false, true},
-		{http.MethodGet, "/api/v1/db-health", handlers.CustomHandler(dbHealthHandler.CheckDBHealth), false, true},
+		{http.MethodGet, "/api/v1/ping", handlers.CustomHandler(healthHandler.CheckHealth), false, true, false},
+		{http.MethodGet, "/api/v1/rpc-health", handlers.CustomHandler(rpcHealthHandler.CheckRPCHealth), false, true, false},
+		{http.MethodGet, "/api/v1/db-health", handlers.CustomHandler(dbHealthHandler.CheckDBHealth), false, true, false},
 
 		// User-facing routes: gated=true, wrapped in the shared Auth middleware.
 		// Flipping --auth-mode permissive<->strict moves all of these together.
 		// whoami reads the user ID from context and reports authenticated:false when
 		// absent (permissive anonymous).
-		{http.MethodGet, "/api/v1/protocols", handlers.CustomHandler(protocolsHandler.GetProtocols), true, true},
-		{http.MethodPost, "/api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles), true, true},
-		{http.MethodPost, "/api/v1/ledger-key/accounts", handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts), true, true},
-		{http.MethodGet, "/api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags), true, true},
+		{http.MethodGet, "/api/v1/protocols", handlers.CustomHandler(protocolsHandler.GetProtocols), true, true, false},
+		{http.MethodPost, "/api/v1/collectibles", handlers.CustomHandler(collectiblesHandler.GetCollectibles), true, true, false},
+		{http.MethodPost, "/api/v1/ledger-key/accounts", handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts), true, true, false},
+		{http.MethodGet, "/api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags), true, true, false},
 		// The wallet-backend-fronted routes, config-gated together by
 		// --wallet-backend-routes-enabled. These are the ONLY two routes that touch
 		// walletBackendService, and both fail identically when it is unconfigured:
@@ -310,15 +312,16 @@ func (s *ApiServer) routes() ([]route, error) {
 		// mode, so there is no state where enabling exactly one is correct. If a route
 		// is ever added here that can work without wallet-backend, give it its own
 		// gate rather than widening this one.
-		{http.MethodPost, "/api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
-		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
+		{http.MethodPost, "/api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances), true, s.cfg.AppConfig.WalletBackendRoutesEnabled, false},
+		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled, false},
 
-		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true, true},
-		{http.MethodPost, "/api/v1/swap/quotes", handlers.CustomHandler(swapHandler.Quotes), true, true},
-		{http.MethodPost, "/api/v1/swap/tx", handlers.CustomHandler(swapHandler.Build), true, true},
-		{http.MethodGet, "/api/v1/token-price-history", handlers.CustomHandler(tokenPriceHistoryHandler.GetTokenPriceHistory), true, true},
-		{http.MethodGet, "/api/v1/token-stats", handlers.CustomHandler(tokenStatsHandler.GetTokenStats), true, true},
-		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, true},
+		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true, true, false},
+		// Swap routes spend the rate-limited LI.FI key, so they always need a token.
+		{http.MethodPost, "/api/v1/swap/quotes", handlers.CustomHandler(swapHandler.Quotes), true, true, true},
+		{http.MethodPost, "/api/v1/swap/tx", handlers.CustomHandler(swapHandler.Build), true, true, true},
+		{http.MethodGet, "/api/v1/token-price-history", handlers.CustomHandler(tokenPriceHistoryHandler.GetTokenPriceHistory), true, true, false},
+		{http.MethodGet, "/api/v1/token-stats", handlers.CustomHandler(tokenStatsHandler.GetTokenStats), true, true, false},
+		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, true, false},
 	}, nil
 }
 
@@ -333,6 +336,7 @@ func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 	// to routes() with gated=true.
 	verifier := auth.NewVerifier(s.cfg.AppConfig.AuthClockSkewLeeway)
 	authed := middleware.Auth(verifier, s.authMode, s.appMetrics.Auth)
+	tokenRequired := middleware.Auth(verifier, auth.Required, s.appMetrics.Auth)
 
 	mux := http.NewServeMux()
 	for _, rt := range rts {
@@ -343,7 +347,10 @@ func (s *ApiServer) initHandlers() (*http.ServeMux, error) {
 			continue
 		}
 		h := rt.handler
-		if rt.gated {
+		switch {
+		case rt.tokenRequired:
+			h = tokenRequired(h)
+		case rt.gated:
 			h = authed(h)
 		}
 		mux.Handle(rt.method+" "+rt.pattern, h)
