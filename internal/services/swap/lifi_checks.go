@@ -13,7 +13,7 @@ const lifiMaxFeeBps = 25
 // lifiExpect is what the reviewed quote promised; checkLifiTx refuses any
 // transaction that does something else.
 type lifiExpect struct {
-	Account, FromContract, ToContract, SwapContract, Aggregator, FeeRecipient string
+	Account, FromContract, ToContract, SwapContract, Aggregator, FeeRecipient, PartnerID string
 	// ToClassic allows ToContract.trust(Account) in the auth tree.
 	ToClassic      bool
 	Amount, MinOut *big.Int
@@ -142,6 +142,11 @@ func checkLifiParams(call *lifiCall, want lifiExpect) error {
 	partnerBps, _ := scField(a[6], "bps")
 	if bps, ok := scU32(partnerBps); !ok || bps > lifiMaxFeeBps {
 		return checkFailed("partner bps")
+	}
+	// The aggregator resolves the partner's fee recipient from this id.
+	partnerID, _ := scField(a[6], "id")
+	if sym, ok := partnerID.GetSym(); !ok || string(sym) != want.PartnerID {
+		return checkFailed("partner id")
 	}
 	return nil
 }

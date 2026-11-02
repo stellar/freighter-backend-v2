@@ -148,6 +148,7 @@ type SwapConfig struct {
 	LifiBaseURL           string
 	LifiSwapContract      string
 	LifiFeeRecipient      string
+	LifiPartnerID         string
 	AggregatorContract    string
 	MaxResourceFeeStroops int64
 }

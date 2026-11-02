@@ -175,6 +175,7 @@ func (s *ApiServer) initServices() error {
 			Client:         swap.NewLifiClient(s.cfg.SwapConfig.LifiBaseURL, s.cfg.SwapConfig.LifiAPIKey, nil),
 			SwapContract:   s.cfg.SwapConfig.LifiSwapContract,
 			FeeRecipient:   s.cfg.SwapConfig.LifiFeeRecipient,
+			PartnerID:      s.cfg.SwapConfig.LifiPartnerID,
 			Aggregator:     s.cfg.SwapConfig.AggregatorContract,
 			MaxResourceFee: s.cfg.SwapConfig.MaxResourceFeeStroops,
 			RPC:            s.rpcService,

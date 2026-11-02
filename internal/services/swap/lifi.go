@@ -67,6 +67,7 @@ type LifiConfig struct {
 	Client         *LifiClient
 	SwapContract   string
 	FeeRecipient   string
+	PartnerID      string
 	Aggregator     string
 	MaxResourceFee int64
 	RPC            types.RPCService
@@ -293,6 +294,7 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 		SwapContract:   s.cfg.SwapContract,
 		Aggregator:     s.cfg.Aggregator,
 		FeeRecipient:   s.cfg.FeeRecipient,
+		PartnerID:      s.cfg.PartnerID,
 		ToClassic:      to.IsClassic() && !to.IsNative(),
 		Amount:         raw,
 		MinOut:         minOut,

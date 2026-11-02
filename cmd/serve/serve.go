@@ -186,6 +186,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiBaseURL, "swap-lifi-base-url", "https://li.quest", "LI.FI API base URL")
 	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiSwapContract, "swap-lifi-swap-contract", "CDCNXZHYWRDHNAQEY5EX3WCF7BCWVJBS64ZBVUGRTQBFTHUKG6NAXFTR", "LI.FI swap contract ID the backend accepts in quotes")
 	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiFeeRecipient, "swap-lifi-fee-recipient", "GAZYY5SJZNAVWZWVKJ2E74W2WKZP5BACLVV6FVHC5NZWXPKTQEDOYUR4", "LI.FI fee recipient account the backend accepts in quotes")
+	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiPartnerID, "swap-lifi-partner-id", "104aaf592", "LI.FI aggregator partner id the backend accepts in quotes")
 	cmd.Flags().StringVar(&s.Cfg.SwapConfig.AggregatorContract, "swap-aggregator-contract", "CARVQXFP4JF5ELLXUMQ6DALR346YVGBMQOHB4ENA7SSVXAYABXLBDDC4", "Soroswap aggregator contract ID")
 	cmd.Flags().Int64Var(&s.Cfg.SwapConfig.MaxResourceFeeStroops, "swap-max-resource-fee-stroops", 3000000, "Maximum Soroban resource fee in stroops accepted for a swap (3000000 = 0.3 XLM)")
 

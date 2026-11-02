@@ -18,6 +18,7 @@ const (
 	lifiSwapContract = "CDCNXZHYWRDHNAQEY5EX3WCF7BCWVJBS64ZBVUGRTQBFTHUKG6NAXFTR"
 	lifiAggregator   = "CARVQXFP4JF5ELLXUMQ6DALR346YVGBMQOHB4ENA7SSVXAYABXLBDDC4"
 	lifiFeeRecipient = "GAZYY5SJZNAVWZWVKJ2E74W2WKZP5BACLVV6FVHC5NZWXPKTQEDOYUR4"
+	lifiPartnerID    = "104aaf592"
 	lifiTestAccount  = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7"
 	// EURC on mainnet: a contract the trust fixture does not touch.
 	otherContract = "CDTKPWPLOURQA2SGTKTUQOWRCBZEORB4BWBOMJ3D3ZTQQSGE5F6JBQLV"
@@ -61,6 +62,7 @@ func trustExpect(t *testing.T, env xdr.TransactionEnvelope) lifiExpect {
 		SwapContract:   lifiSwapContract,
 		Aggregator:     lifiAggregator,
 		FeeRecipient:   lifiFeeRecipient,
+		PartnerID:      lifiPartnerID,
 		ToClassic:      true,
 		Amount:         big.NewInt(100000000),
 		MinOut:         new(big.Int).Set(call.MinAmountOut),
@@ -246,6 +248,11 @@ func TestLifiChecksTamperFails(t *testing.T) {
 		{"partner bps 26", "partner bps", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
 			args := scVec(mustField(t, swapParams(e), "args"))
 			setField(t, args[6], "bps", u32Val(26))
+			syncRoot(e)
+		}},
+		{"partner id changed", "partner id", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			args := scVec(mustField(t, swapParams(e), "args"))
+			setField(t, args[6], "id", symVal("evilpartner"))
 			syncRoot(e)
 		}},
 		// 4. auth

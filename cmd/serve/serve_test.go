@@ -553,6 +553,7 @@ func TestServeCmd_SwapDefaults(t *testing.T) {
 	assert.Equal(t, "https://li.quest", cfg.SwapConfig.LifiBaseURL)
 	assert.Equal(t, "CDCNXZHYWRDHNAQEY5EX3WCF7BCWVJBS64ZBVUGRTQBFTHUKG6NAXFTR", cfg.SwapConfig.LifiSwapContract)
 	assert.Equal(t, "GAZYY5SJZNAVWZWVKJ2E74W2WKZP5BACLVV6FVHC5NZWXPKTQEDOYUR4", cfg.SwapConfig.LifiFeeRecipient)
+	assert.Equal(t, "104aaf592", cfg.SwapConfig.LifiPartnerID)
 	assert.Equal(t, "CARVQXFP4JF5ELLXUMQ6DALR346YVGBMQOHB4ENA7SSVXAYABXLBDDC4", cfg.SwapConfig.AggregatorContract)
 	assert.Equal(t, int64(3000000), cfg.SwapConfig.MaxResourceFeeStroops)
 	assert.Equal(t, "https://horizon-futurenet.stellar.org", cfg.HorizonConfig.HorizonFuturenetURL)
