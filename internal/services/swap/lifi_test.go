@@ -45,8 +45,11 @@ func lifiServerRPC(t *testing.T, status int, body []byte, rpc types.RPCService) 
 type fakeDecimalsRPC struct {
 	utils.MockRPCService
 	fn func(contract string) (*xdr.ScVal, error)
+	// ledger answers GetLedgerEntriesXDR; nil means every entry is missing.
+	ledger func(keys []string) (map[string]string, error)
 
 	mu       sync.Mutex
+	reads    int
 	calls    map[string]int
 	last     simulated
 	inflight int
@@ -77,6 +80,51 @@ func (f *fakeDecimalsRPC) SimulateInvocation(_ context.Context, id xdr.ScAddress
 		f.mu.Unlock()
 	}()
 	return f.fn(contract)
+}
+
+func (f *fakeDecimalsRPC) GetLedgerEntriesXDR(_ context.Context, keys []string, _ string) (map[string]string, error) {
+	f.mu.Lock()
+	f.reads++
+	f.mu.Unlock()
+	if f.ledger == nil {
+		return map[string]string{}, nil
+	}
+	return f.ledger(keys)
+}
+
+func (f *fakeDecimalsRPC) ledgerReads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reads
+}
+
+// instanceLedger serves contract's instance entry with the given executable.
+func instanceLedger(t *testing.T, contract string, typ xdr.ContractExecutableType) func([]string) (map[string]string, error) {
+	t.Helper()
+	addr, err := utils.ScAddressFromString(contract)
+	require.NoError(t, err)
+	key := xdr.ScVal{Type: xdr.ScValTypeScvLedgerKeyContractInstance}
+	lk := xdr.LedgerKey{Type: xdr.LedgerEntryTypeContractData, ContractData: &xdr.LedgerKeyContractData{
+		Contract: *addr, Key: key, Durability: xdr.ContractDataDurabilityPersistent}}
+	kb, err := xdr.MarshalBase64(lk)
+	require.NoError(t, err)
+	exec := xdr.ContractExecutable{Type: typ}
+	if typ == xdr.ContractExecutableTypeContractExecutableWasm {
+		exec.WasmHash = &xdr.Hash{1}
+	}
+	eb, err := xdr.MarshalBase64(xdr.LedgerEntryData{Type: xdr.LedgerEntryTypeContractData, ContractData: &xdr.ContractDataEntry{
+		Contract: *addr, Key: key, Durability: xdr.ContractDataDurabilityPersistent,
+		Val: xdr.ScVal{Type: xdr.ScValTypeScvContractInstance, Instance: &xdr.ScContractInstance{Executable: exec}}}})
+	require.NoError(t, err)
+	return func(keys []string) (map[string]string, error) {
+		out := map[string]string{}
+		for _, k := range keys {
+			if k == kb {
+				out[k] = eb
+			}
+		}
+		return out, nil
+	}
 }
 
 func (f *fakeDecimalsRPC) callsTo(contract string) int {
@@ -722,15 +770,95 @@ func TestLifiBuildFeeOverflowIsBadRequest(t *testing.T) {
 }
 
 // The trust fixture opens a trustline on the destination, which only a classic
-// asset may have; the same contract as a non-SAC token must be refused.
-func TestLifiBuildTrustOnNonClassicDestinationIsCheckFailed(t *testing.T) {
+// asset may have: its SAC id is allowed, the same id as a non-SAC token is not.
+func lifiTrustBuild(t *testing.T, rpc *fakeDecimalsRPC) (string, error) {
+	t.Helper()
 	env := decodeEnv(t, trustFixtureXDR(t))
 	req := lifiBuildReq(t, env)
 	req.ToAsset = contractIDOf(t, "USDC:"+usdcIssuer)
 	req.MinOut = FormatUnits(new(big.Int).Set(mustLifiCall(t, env).MinAmountOut), 0)
-	_, err := lifiBuildSource(t, env, 200, lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")).BuildTx(context.Background(), req)
-	require.ErrorIs(t, err, ErrCheckFailed)
-	assert.Contains(t, err.Error(), "auth trust")
+	return lifiBuildSourceRPC(t, env, 200, lifiFixture(t, "lifi_quote_xlm_usdc_trust.json"), rpc).BuildTx(context.Background(), req)
+}
+
+func TestLifiBuildTrustOnSACDestinationIsAllowed(t *testing.T) {
+	rpc := &fakeDecimalsRPC{fn: decimalsOf(0)}
+	rpc.ledger = instanceLedger(t, contractIDOf(t, "USDC:"+usdcIssuer), xdr.ContractExecutableTypeContractExecutableStellarAsset)
+	x, err := lifiTrustBuild(t, rpc)
+	require.NoError(t, err)
+	adds, err := AddsTrustline(x, lifiTestAccount, contractIDOf(t, "USDC:"+usdcIssuer))
+	require.NoError(t, err)
+	assert.True(t, adds)
+}
+
+func TestLifiBuildTrustOnNonClassicDestinationIsCheckFailed(t *testing.T) {
+	usdc := contractIDOf(t, "USDC:"+usdcIssuer)
+	for name, ledger := range map[string]func([]string) (map[string]string, error){
+		"wasm contract":    instanceLedger(t, usdc, xdr.ContractExecutableTypeContractExecutableWasm),
+		"missing instance": nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rpc := &fakeDecimalsRPC{fn: decimalsOf(0), ledger: ledger}
+			_, err := lifiTrustBuild(t, rpc)
+			require.ErrorIs(t, err, ErrCheckFailed)
+			assert.Contains(t, err.Error(), "auth trust")
+		})
+	}
+}
+
+func TestLifiToClassic(t *testing.T) {
+	ctx := context.Background()
+	usdc := contractIDOf(t, "USDC:"+usdcIssuer)
+	sac := xdr.ContractExecutableTypeContractExecutableStellarAsset
+	asset := func(s string) Asset {
+		a, err := ParseAsset(s)
+		require.NoError(t, err)
+		return a
+	}
+
+	t.Run("native SAC is not classic and is not read", func(t *testing.T) {
+		xlm := contractIDOf(t, "XLM")
+		rpc := &fakeDecimalsRPC{ledger: instanceLedger(t, xlm, sac)}
+		got, err := NewLifiSource(LifiConfig{RPC: rpc}, nil).toClassic(ctx, types.PUBLIC, asset(xlm))
+		require.NoError(t, err)
+		assert.False(t, got)
+		assert.Zero(t, rpc.ledgerReads())
+	})
+
+	t.Run("classic code:issuer needs no read", func(t *testing.T) {
+		rpc := &fakeDecimalsRPC{}
+		src := NewLifiSource(LifiConfig{RPC: rpc}, nil)
+		got, err := src.toClassic(ctx, types.PUBLIC, asset("USDC:"+usdcIssuer))
+		require.NoError(t, err)
+		assert.True(t, got)
+		got, err = src.toClassic(ctx, types.PUBLIC, asset("XLM"))
+		require.NoError(t, err)
+		assert.False(t, got)
+		assert.Zero(t, rpc.ledgerReads())
+	})
+
+	t.Run("answer is cached per contract", func(t *testing.T) {
+		rpc := &fakeDecimalsRPC{ledger: instanceLedger(t, usdc, sac)}
+		src := NewLifiSource(LifiConfig{RPC: rpc}, nil)
+		for range 2 {
+			got, err := src.toClassic(ctx, types.PUBLIC, asset(usdc))
+			require.NoError(t, err)
+			assert.True(t, got)
+		}
+		assert.Equal(t, 1, rpc.ledgerReads())
+	})
+
+	t.Run("rpc error is an upstream error and is not cached", func(t *testing.T) {
+		rpc := &fakeDecimalsRPC{ledger: func([]string) (map[string]string, error) { return nil, errors.New("rpc down") }}
+		src := NewLifiSource(LifiConfig{RPC: rpc}, nil)
+		for i := 1; i <= 2; i++ {
+			_, err := src.toClassic(ctx, types.PUBLIC, asset(usdc))
+			var ue *metrics.UpstreamError
+			require.ErrorAs(t, err, &ue)
+			assert.Equal(t, "rpc_error", ue.Kind)
+			assert.Equal(t, "error", Reason(err))
+			assert.Equal(t, i, rpc.ledgerReads())
+		}
+	})
 }
 
 func mustLifiCall(t *testing.T, env xdr.TransactionEnvelope) *lifiCall {

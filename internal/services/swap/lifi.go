@@ -78,6 +78,7 @@ type LifiSource struct {
 	cfg      LifiConfig
 	m        *metrics.Swap
 	decimals sync.Map // contract → int
+	sac      sync.Map // contract → bool: a non-native Stellar Asset Contract
 }
 
 func NewLifiSource(cfg LifiConfig, m *metrics.Swap) *LifiSource {
@@ -220,6 +221,56 @@ func (s *LifiSource) tokenDecimals(ctx context.Context, account string, a Asset)
 	return d, nil
 }
 
+// toClassic reports whether the destination is a classic asset LI.FI may open a
+// trustline for: written as CODE:ISSUER, or given as the SAC id of one. Only the
+// contract instance can tell a SAC from a token whose own trust() is arbitrary code.
+func (s *LifiSource) toClassic(ctx context.Context, net string, to Asset) (bool, error) {
+	if to.IsClassic() {
+		return !to.IsNative(), nil
+	}
+	native, err := Asset{ID: "XLM"}.ContractID(net)
+	if err != nil {
+		return false, fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	if to.Contract == native {
+		return false, nil
+	}
+	if v, ok := s.sac.Load(to.Contract); ok {
+		return v.(bool), nil
+	}
+	addr, err := utils.ScAddressFromString(to.Contract)
+	if err != nil {
+		return false, fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	key := xdr.LedgerKey{Type: xdr.LedgerEntryTypeContractData, ContractData: &xdr.LedgerKeyContractData{
+		Contract:   *addr,
+		Key:        xdr.ScVal{Type: xdr.ScValTypeScvLedgerKeyContractInstance},
+		Durability: xdr.ContractDataDurabilityPersistent,
+	}}
+	keyB64, err := xdr.MarshalBase64(key)
+	if err != nil {
+		return false, err
+	}
+	entries, err := s.cfg.RPC.GetLedgerEntriesXDR(ctx, []string{keyB64}, net)
+	if err != nil {
+		return false, &metrics.UpstreamError{Kind: "rpc_error", Err: fmt.Errorf("contract %s instance: %w", to.Contract, err)}
+	}
+	isSAC := false
+	if b64, ok := entries[keyB64]; ok {
+		var data xdr.LedgerEntryData
+		if err := xdr.SafeUnmarshalBase64(b64, &data); err != nil {
+			return false, &metrics.UpstreamError{Kind: "invalid_response", Err: fmt.Errorf("contract %s instance: %w", to.Contract, err)}
+		}
+		if cd, ok := data.GetContractData(); ok {
+			if inst, ok := cd.Val.GetInstance(); ok {
+				isSAC = inst.Executable.Type == xdr.ContractExecutableTypeContractExecutableStellarAsset
+			}
+		}
+	}
+	s.sac.Store(to.Contract, isSAC)
+	return isSAC, nil
+}
+
 func lifiFromAmount(q *LifiQuote) (*big.Int, error) {
 	v, ok := new(big.Int).SetString(q.Action.FromAmount, 10)
 	if !ok {
@@ -249,6 +300,10 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
 	}
 	fromDecimals, toDecimals, err := s.pairDecimals(ctx, req.Account, from, to)
+	if err != nil {
+		return "", err
+	}
+	toClassic, err := s.toClassic(ctx, req.Network, to)
 	if err != nil {
 		return "", err
 	}
@@ -303,7 +358,7 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 		Aggregator:     s.cfg.Aggregator,
 		FeeRecipient:   s.cfg.FeeRecipient,
 		PartnerID:      s.cfg.PartnerID,
-		ToClassic:      to.IsClassic() && !to.IsNative(),
+		ToClassic:      toClassic,
 		Amount:         raw,
 		MinOut:         minOut,
 		MaxResourceFee: s.cfg.MaxResourceFee,
