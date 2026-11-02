@@ -71,7 +71,8 @@ func (r *Router) Quote(ctx context.Context, req types.SwapQuoteRequest) (types.S
 		return out, err
 	}
 
-	failed := 0
+	failed, badReq := 0, 0
+	var firstBadReq error
 	for _, res := range results {
 		if errors.Is(res.err, ErrUnsupportedMode) {
 			continue
@@ -83,6 +84,12 @@ func (r *Router) Quote(ctx context.Context, req types.SwapQuoteRequest) (types.S
 		metrics.RecordSwapSource(r.m, res.src.Name(), "quote", reason)
 		if res.err != nil {
 			out.Unavailable = append(out.Unavailable, types.SwapUnavailable{Source: res.src.Name(), Reason: reason})
+			if reason == "bad_request" {
+				badReq++
+				if firstBadReq == nil {
+					firstBadReq = res.err
+				}
+			}
 			if reason == "timeout" || reason == "rate_limited" || reason == "error" {
 				failed++
 				logger.Warn("swap source quote failed", "source", res.src.Name(), "reason", reason, "error", res.err)
@@ -94,6 +101,9 @@ func (r *Router) Quote(ctx context.Context, req types.SwapQuoteRequest) (types.S
 
 	if len(out.Routes) == 0 && failed > 0 && failed == countAsked(results) {
 		return out, ErrAllSourcesFailed
+	}
+	if len(out.Routes) == 0 && badReq > 0 && badReq == countAsked(results) {
+		return out, firstBadReq
 	}
 	r.rank(req, out.Routes)
 	return out, nil

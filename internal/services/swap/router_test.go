@@ -140,6 +140,25 @@ func TestRouterBadRequestIsNotASourceFailure(t *testing.T) {
 	assert.Equal(t, []types.SwapUnavailable{{Source: "lifi", Reason: "bad_request"}, {Source: "classic", Reason: "error"}}, res.Unavailable)
 }
 
+// Input every source rejects can never quote; that is the caller's error, not "no route".
+func TestRouterAllBadRequestIsBadRequest(t *testing.T) {
+	t.Parallel()
+	r := NewRouter([]Source{
+		&fakeSource{name: "lifi", err: fmt.Errorf("amount: %w", ErrBadRequest)},
+		&fakeSource{name: "classic", err: fmt.Errorf("asset: %w", ErrBadRequest)},
+	}, time.Second, time.Second, nil)
+	_, err := r.Quote(context.Background(), sendReq)
+	assert.ErrorIs(t, err, ErrBadRequest)
+
+	mixed := NewRouter([]Source{
+		&fakeSource{name: "lifi", err: fmt.Errorf("amount: %w", ErrBadRequest)},
+		&fakeSource{name: "classic", err: ErrNoRoute},
+	}, time.Second, time.Second, nil)
+	res, err := mixed.Quote(context.Background(), sendReq)
+	require.NoError(t, err)
+	assert.Empty(t, res.Routes)
+}
+
 func TestRouterAllErroringIsAllSourcesFailed(t *testing.T) {
 	t.Parallel()
 	r := NewRouter([]Source{
