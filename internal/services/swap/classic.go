@@ -197,7 +197,8 @@ func (c *ClassicSource) BuildTx(ctx context.Context, req types.SwapBuildRequest)
 	}
 	keys := []string{acctKeyB64}
 	var tlKeyB64 string
-	if !to.IsNative() {
+	// An issuer holds no trustline to its own asset.
+	if !to.IsNative() && to.Issuer != req.Account {
 		toX, err := to.XDR()
 		if err != nil {
 			return "", fmt.Errorf("%w: %v", ErrBadRequest, err)

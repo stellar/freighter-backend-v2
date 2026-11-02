@@ -192,6 +192,21 @@ func TestClassicBuild(t *testing.T) {
 	}
 }
 
+func TestClassicBuildIssuerNeedsNoTrustline(t *testing.T) {
+	t.Parallel()
+	rpc := newFakeLedger(t, usdcIssuer, 41, false)
+	src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: "unused"}}, rpc)
+	xdrB64, err := src.BuildTx(context.Background(), types.SwapBuildRequest{
+		Network: types.PUBLIC, Account: usdcIssuer, Source: "classic",
+		FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0001",
+	})
+	require.NoError(t, err)
+	var env xdr.TransactionEnvelope
+	require.NoError(t, xdr.SafeUnmarshalBase64(xdrB64, &env))
+	require.Len(t, env.Operations(), 1)
+	assert.Equal(t, xdr.OperationTypePathPaymentStrictSend, env.Operations()[0].Body.Type)
+}
+
 func TestClassicBuildTimeout(t *testing.T) {
 	t.Parallel()
 	sixty := int64(60)
