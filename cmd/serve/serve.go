@@ -91,8 +91,16 @@ func (s *ServeCmd) Command() *cobra.Command {
 					return fmt.Errorf("--%s=%d overflows when converted to a duration; must be <= %d", f.name, f.value, maxDurationSeconds)
 				}
 			}
-			if d := time.Duration(s.Cfg.SwapConfig.BuildTimeoutSeconds) * time.Second; d >= api.DefaultWriteTimeout {
-				return fmt.Errorf("--swap-build-timeout-seconds=%d must be below the server write timeout (%s)", s.Cfg.SwapConfig.BuildTimeoutSeconds, api.DefaultWriteTimeout)
+			for _, f := range []struct {
+				name  string
+				value int
+			}{
+				{"swap-source-timeout-seconds", s.Cfg.SwapConfig.SourceTimeoutSeconds},
+				{"swap-build-timeout-seconds", s.Cfg.SwapConfig.BuildTimeoutSeconds},
+			} {
+				if time.Duration(f.value)*time.Second >= api.DefaultWriteTimeout {
+					return fmt.Errorf("--%s=%d must be below the server write timeout (%s)", f.name, f.value, api.DefaultWriteTimeout)
+				}
 			}
 			// The volume threshold and conversion divisor are magnitudes
 			// where 0 is meaningful ("guard disabled" / "conversion not

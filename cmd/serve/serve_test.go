@@ -600,3 +600,15 @@ func TestServeCmd_RejectsNonPositiveSwapMaxResourceFee(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--swap-max-resource-fee-stroops=0 must be positive")
 }
+
+func TestServeCmd_SwapSourceTimeoutStaysBelowWriteTimeout(t *testing.T) {
+	t.Parallel()
+	limit := int(api.DefaultWriteTimeout / time.Second)
+	_, err := execServe(t, "--db-enabled=false", "--swap-source-timeout-seconds", strconv.Itoa(limit))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--swap-source-timeout-seconds="+strconv.Itoa(limit)+" must be below the server write timeout")
+
+	s, err := execServe(t, "--db-enabled=false", "--swap-source-timeout-seconds", strconv.Itoa(limit-1))
+	require.NoError(t, err)
+	assert.Equal(t, limit-1, s.Cfg.SwapConfig.SourceTimeoutSeconds)
+}
