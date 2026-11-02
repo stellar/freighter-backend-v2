@@ -156,6 +156,9 @@ func (s *LifiSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (*ty
 		if !ok {
 			return nil, fmt.Errorf("lifi: bad fee amount %q", fc.Amount)
 		}
+		if amt.Sign() < 0 || fc.Token.Address != fromContract {
+			return nil, fmt.Errorf("lifi: fee %q is negative or not in the from token", fc.Name)
+		}
 		name := fc.Name
 		if n, ok := lifiFeeNames[name]; ok {
 			name = n

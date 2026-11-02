@@ -54,6 +54,9 @@ type LifiQuote struct {
 		FeeCosts    []struct {
 			Name   string `json:"name"`
 			Amount string `json:"amount"`
+			Token  struct {
+				Address string `json:"address"`
+			} `json:"token"`
 		} `json:"feeCosts"`
 	} `json:"estimate"`
 	TransactionRequest *struct {

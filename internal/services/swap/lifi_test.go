@@ -210,6 +210,32 @@ func TestLifiQuoteMissingTransaction(t *testing.T) {
 	}
 }
 
+func TestLifiQuoteMalformedFee(t *testing.T) {
+	fixture := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
+	var q LifiQuote
+	require.NoError(t, json.Unmarshal(fixture, &q))
+	for name, mutate := range map[string]func(fee map[string]any){
+		"negative amount": func(fee map[string]any) { fee["amount"] = "-250000" },
+		"other token":     func(fee map[string]any) { fee["token"] = map[string]any{"address": otherContract} },
+		"no token":        func(fee map[string]any) { delete(fee, "token") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var raw map[string]any
+			require.NoError(t, json.Unmarshal(fixture, &raw))
+			fee := raw["estimate"].(map[string]any)["feeCosts"].([]any)[1].(map[string]any)
+			mutate(fee)
+			body, err := json.Marshal(raw)
+			require.NoError(t, err)
+
+			rt, err := lifiServer(t, 200, body).Quote(context.Background(), lifiReq(fmtRaw(t, q.Action.FromAmount, 7)))
+			require.Error(t, err)
+			assert.Nil(t, rt)
+			assert.Equal(t, "error", Reason(err))
+			assert.Contains(t, err.Error(), "fee")
+		})
+	}
+}
+
 func TestLifiSupportsPublicOnly(t *testing.T) {
 	src := NewLifiSource(LifiConfig{}, nil)
 	assert.Equal(t, "lifi", src.Name())
