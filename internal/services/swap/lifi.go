@@ -184,8 +184,10 @@ func (s *LifiSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (*ty
 	}, nil
 }
 
-// maxTokenDecimals bounds what ParseUnits and FormatUnits will size strings by.
-const maxTokenDecimals = 18
+// maxTokenDecimals caps a token's decimals() before ParseUnits and FormatUnits
+// size strings by it; any contract can return up to MaxUint32. Token amounts are
+// i128 (max ~1.7e38), so past 38 decimals no balance can hold one whole token.
+const maxTokenDecimals = 38
 
 // pairDecimals reads both tokens together so a cold pair costs one round trip.
 func (s *LifiSource) pairDecimals(ctx context.Context, account string, from, to Asset) (int, int, error) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math/big"
 	"net/http"
+	"strings"
 
 	"github.com/stellar/go-stellar-sdk/strkey"
 
@@ -18,13 +19,8 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
-const (
-	// swapMaxDecimals bounds the amount of a non-classic asset; the source
-	// rechecks against the token's real decimals.
-	swapMaxDecimals = 18
-	// maxInt64Stroops caps classic amounts: a classic balance cannot exceed it.
-	maxInt64Stroops = "9223372036854775807"
-)
+// maxInt64Stroops caps classic amounts: a classic balance cannot exceed it.
+const maxInt64Stroops = "9223372036854775807"
 
 type SwapHandler struct {
 	svc types.SwapService
@@ -53,11 +49,14 @@ func decodeSwapBody(r *http.Request, dst any) *httperror.HttpError {
 	return nil
 }
 
-func unitsFor(a swap.Asset) int {
+// unitsFor is the precision an amount is checked at here. A token's decimals
+// are only known to the source, so its amount is checked at its own precision.
+func unitsFor(a swap.Asset, amount string) int {
 	if a.IsClassic() {
 		return swap.ClassicDecimals
 	}
-	return swapMaxDecimals
+	_, frac, _ := strings.Cut(amount, ".")
+	return len(frac)
 }
 
 // validateSwapCommon checks the fields shared by both routes. Fixed messages
@@ -90,7 +89,7 @@ func validateSwapCommon(network, account, from, to, amount string) *httperror.Ht
 	if fromID == toID {
 		return swapBadRequest("fromAsset and toAsset must differ")
 	}
-	units, err := swap.ParseUnits(amount, unitsFor(fromAsset))
+	units, err := swap.ParseUnits(amount, unitsFor(fromAsset, amount))
 	if err != nil {
 		return swapBadRequest("invalid amount")
 	}
@@ -140,7 +139,7 @@ func (h *SwapHandler) Build(w http.ResponseWriter, r *http.Request) error {
 	}
 	// validateSwapCommon already parsed both assets.
 	toAsset, _ := swap.ParseAsset(req.ToAsset)
-	if _, err := swap.ParseUnits(req.MinOut, unitsFor(toAsset)); err != nil {
+	if _, err := swap.ParseUnits(req.MinOut, unitsFor(toAsset, req.MinOut)); err != nil {
 		return swapBadRequest("invalid minOut")
 	}
 	fee, err := swap.ParseUnits(req.Fee, swap.ClassicDecimals)

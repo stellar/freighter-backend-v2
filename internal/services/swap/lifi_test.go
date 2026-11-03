@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -509,8 +511,8 @@ func TestLifiBadTokenDecimals(t *testing.T) {
 	str := xdr.ScString("7")
 	i32 := xdr.Int32(7)
 	for name, val := range map[string]*xdr.ScVal{
-		"u32 40":  ptr(u32Val(40)),
-		"u32 19":  ptr(u32Val(19)),
+		"u32 39":  ptr(u32Val(39)),
+		"u32 max": ptr(u32Val(math.MaxUint32)),
 		"i32":     {Type: xdr.ScValTypeScvI32, I32: &i32},
 		"string":  {Type: xdr.ScValTypeScvString, Str: &str},
 		"void":    {Type: xdr.ScValTypeScvVoid},
@@ -550,6 +552,18 @@ func TestLifiBadTokenDecimals(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// 38 is the most decimals a token can have and still hold one whole unit in
+// an i128, so it is accepted.
+func TestLifiQuoteAcceptsMaxTokenDecimals(t *testing.T) {
+	rpc := &fakeDecimalsRPC{fn: func(string) (*xdr.ScVal, error) { return ptr(u32Val(38)), nil }}
+	src := lifiServerRPC(t, 200, lifiFixture(t, "lifi_quote_xlm_usdc_trust.json"), rpc)
+	req := lifiReq("10")
+	req.ToAsset = otherContract
+	q, err := src.Quote(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, "0."+strings.Repeat("0", 30)+"18433149", q.ToAmount)
+}
 
 // Build decides minOut with the chain's decimals: a value LI.FI would accept
 // (7) is refused when the chain says 8, and a build is accepted at the chain's

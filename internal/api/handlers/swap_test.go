@@ -148,8 +148,9 @@ func TestSwapQuotes_AmountBoundaries(t *testing.T) {
 	f := &fakeSwapService{}
 	_, err := doQuotes(NewSwapHandler(f), "PUBLIC", swapQuoteBody("send", "XLM", swapUSDC, "922337203685.4775807"))
 	require.NoError(t, err)
-	// A non-classic input asset may carry up to 18 decimals; the source rechecks.
-	_, err = doQuotes(NewSwapHandler(f), "PUBLIC", swapQuoteBody("send", swapNativeID, swapUSDC, "1.123456789012345678"))
+	// A non-classic asset's decimals are only known to the source, so the
+	// handler leaves the precision to it.
+	_, err = doQuotes(NewSwapHandler(f), "PUBLIC", swapQuoteBody("send", swapNativeID, swapUSDC, "1.1234567890123456789012345678901234567"))
 	require.NoError(t, err)
 }
 
