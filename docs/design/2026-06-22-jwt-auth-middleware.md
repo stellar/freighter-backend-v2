@@ -239,9 +239,9 @@ cannot help here since an attacker mints a fresh `sub` per request. A per-route 
 this path is the real mitigation and is infra work; `freighter_user_link_users_created_total` and
 `freighter_user_link_sources_total` (see Operational notes) are how an attack is seen meanwhile.
 
-Status codes: `400` for a malformed body (empty, trailing data after the JSON object, more than
-`MaxLinkSources` sources, a repeated id, a non-canonical id, an unknown kind, or a body missing `sub`); `403` for a consent that does not verify;
-`401` only as a backstop, since the route is always `auth.Required`; `503` with the database
+Status codes: `400` for a malformed body (empty, more than `MaxLinkSources` sources, a repeated id, a non-canonical id, an unknown kind, or a body missing `sub`); `403` for a consent that does not verify;
+`401` only as a backstop, since the route is always `auth.Required`; `413` for an oversized body,
+rendered by the auth middleware, which reads the whole body to hash it before the handler runs; `503` with the database
 disabled or the request canceled; `504` when the handler's request deadline
 (`handlers.LinkRequestTimeout`, 8s, the one budget covering pool acquisition and the whole
 transaction, since `WriteTimeout` does not cancel a handler and the store's timeouts are per

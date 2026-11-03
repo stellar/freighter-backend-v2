@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -98,10 +97,9 @@ type UserLinkedSource struct {
 // Link handles POST /api/v1/user/link.
 //
 // Status codes:
-//   - 400: malformed JSON, trailing data after the JSON object, no sources,
-//     more than users.MaxLinkSources, a repeated id, an id that is not a
-//     canonical hex public key, an unknown kind, or a body that does not
-//     include the JWT `sub`.
+//   - 400: malformed JSON, no sources, more than users.MaxLinkSources, a
+//     repeated id, an id that is not a canonical hex public key, an unknown
+//     kind, or a body that does not include the JWT `sub`.
 //   - 401: no authenticated source on the request (should be unreachable
 //     behind auth.Required).
 //   - 403: a consent that does not verify: forged, signed by another key, or
@@ -131,20 +129,12 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 		return httperror.ServiceUnavailable("Database is disabled", nil)
 	}
 
+	// No 413 branch here: auth.Required reads the whole body to hash it before
+	// this handler runs, so an oversized body is already a 413 from the auth
+	// middleware, and r.Body is an in-memory copy by now.
 	var req UserLinkRequest
-	dec := json.NewDecoder(r.Body)
-	if err := dec.Decode(&req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return httperror.BadRequest("invalid JSON", err)
-	}
-	// Decode reads one JSON value and ignores the rest of the body. The body is
-	// the whole request, so anything after the object (garbage or a second
-	// value) is malformed; only whitespace, which leaves the decoder at EOF, is
-	// allowed.
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		if err == nil {
-			err = errors.New("a second JSON value follows the request object")
-		}
-		return httperror.BadRequest("invalid JSON: trailing data after the request object", err)
 	}
 
 	sources, err := validateLinkSources(req.Sources, sub, iat)
