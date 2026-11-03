@@ -45,6 +45,16 @@ func SlippageFraction(percent string) (string, error) {
 	return out, nil
 }
 
+// Mainnet LI.FI values. The transaction checks pin to these, so a change
+// goes through code review rather than an environment variable.
+const (
+	LifiBaseURL        = "https://li.quest"
+	LifiSwapContract   = "CDCNXZHYWRDHNAQEY5EX3WCF7BCWVJBS64ZBVUGRTQBFTHUKG6NAXFTR"
+	LifiFeeRecipient   = "GAZYY5SJZNAVWZWVKJ2E74W2WKZP5BACLVV6FVHC5NZWXPKTQEDOYUR4"
+	LifiPartnerID      = "104aaf592"
+	SoroswapAggregator = "CARVQXFP4JF5ELLXUMQ6DALR346YVGBMQOHB4ENA7SSVXAYABXLBDDC4"
+)
+
 // DefaultTimeoutSeconds and MaxTimeoutSeconds bound a built swap's validity.
 // The default matches both clients' default transaction timeout.
 const (

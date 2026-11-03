@@ -29,8 +29,10 @@ import (
 )
 
 const (
-	DefaultReadTimeout    = 10 * time.Second
-	DefaultWriteTimeout   = 10 * time.Second
+	DefaultReadTimeout  = 10 * time.Second
+	DefaultWriteTimeout = 10 * time.Second
+	// swapBuildTimeout leaves the handler time to write its error before the write timeout.
+	swapBuildTimeout      = DefaultWriteTimeout - 2*time.Second
 	DefaultIdleTimeout    = 120 * time.Second
 	ServerShutdownTimeout = 10 * time.Second
 	// DatabaseConnectTimeout bounds the boot-time connect + ping so a reachable
@@ -160,29 +162,27 @@ func (s *ApiServer) initServices() error {
 	s.tokenStatsService = historyAndStats
 
 	var sources []swap.Source
-	if s.cfg.SwapConfig.ClassicEnabled {
-		sources = append(sources, swap.NewClassicSource(swap.ClassicConfig{HorizonURLs: map[string]string{
-			types.PUBLIC:    s.cfg.HorizonConfig.HorizonPubnetURL,
-			types.TESTNET:   s.cfg.HorizonConfig.HorizonTestnetURL,
-			types.FUTURENET: s.cfg.HorizonConfig.HorizonFuturenetURL,
-		}}, s.rpcService))
-	}
+	sources = append(sources, swap.NewClassicSource(swap.ClassicConfig{HorizonURLs: map[string]string{
+		types.PUBLIC:    s.cfg.HorizonConfig.HorizonPubnetURL,
+		types.TESTNET:   s.cfg.HorizonConfig.HorizonTestnetURL,
+		types.FUTURENET: s.cfg.HorizonConfig.HorizonFuturenetURL,
+	}}, s.rpcService))
 	if s.cfg.SwapConfig.LifiEnabled {
 		if s.cfg.SwapConfig.LifiAPIKey == "" {
 			return fmt.Errorf("SWAP_LIFI_API_KEY is required when SWAP_LIFI_ENABLED is true")
 		}
 		sources = append(sources, swap.NewLifiSource(swap.LifiConfig{
-			Client:       swap.NewLifiClient(s.cfg.SwapConfig.LifiBaseURL, s.cfg.SwapConfig.LifiAPIKey, nil),
-			SwapContract: s.cfg.SwapConfig.LifiSwapContract,
-			FeeRecipient: s.cfg.SwapConfig.LifiFeeRecipient,
-			PartnerID:    s.cfg.SwapConfig.LifiPartnerID,
-			Aggregator:   s.cfg.SwapConfig.AggregatorContract,
+			Client:       swap.NewLifiClient(swap.LifiBaseURL, s.cfg.SwapConfig.LifiAPIKey, nil),
+			SwapContract: swap.LifiSwapContract,
+			FeeRecipient: swap.LifiFeeRecipient,
+			PartnerID:    swap.LifiPartnerID,
+			Aggregator:   swap.SoroswapAggregator,
 			RPC:          s.rpcService,
 		}, s.appMetrics.Swap))
 	}
 	s.swapService = swap.NewRouter(sources,
 		time.Duration(s.cfg.SwapConfig.SourceTimeoutSeconds)*time.Second,
-		time.Duration(s.cfg.SwapConfig.BuildTimeoutSeconds)*time.Second, s.appMetrics.Swap)
+		swapBuildTimeout, s.appMetrics.Swap)
 
 	return nil
 }
