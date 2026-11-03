@@ -11,14 +11,21 @@ import (
 )
 
 // Identity is the authenticated principal extracted from a verified request JWT.
+// Every field is taken from a signature-verified token.
+//
+// SourceID is a SOURCE id, not a user id: the signature proves the caller holds
+// the private key for `sub`, and nothing more. Which user (if any) owns that
+// source is a database question the verifier never asks; see
+// users.ResolveUser, which handlers call lazily.
 type Identity struct {
-	UserID string // hex-encoded auth public key (the JWT `sub`); also the user ID
-	Issuer string // client type (the JWT `iss`), e.g. "freighter-extension"; trusted (from a signature-verified token)
+	SourceID string    // hex-encoded auth public key (the JWT `sub`): the source the token was signed with
+	Issuer   string    // client type (the JWT `iss`), e.g. "freighter-extension"
+	IssuedAt time.Time // the JWT `iat`; handlers that sign consents over the issue time read it from here, never from the body
 }
 
 // HTTPRequestVerifier verifies the JWT carried by an HTTP request and returns
-// the authenticated Identity: the user ID (hex-encoded auth public key, the
-// JWT `sub`) and the client-type issuer (the JWT `iss`).
+// the authenticated Identity: the source id (hex-encoded auth public key, the
+// JWT `sub`), the client-type issuer (the JWT `iss`), and the issue time (`iat`).
 type HTTPRequestVerifier interface {
 	VerifyHTTPRequest(r *http.Request) (Identity, error)
 }
@@ -75,7 +82,8 @@ func (v *Verifier) VerifyHTTPRequest(r *http.Request) (Identity, error) {
 	if err != nil {
 		return Identity{}, err
 	}
-	return Identity{UserID: claims.Subject, Issuer: claims.Issuer}, nil
+	// claims.IssuedAt is non-nil here: Validate rejects a token without iat.
+	return Identity{SourceID: claims.Subject, Issuer: claims.Issuer, IssuedAt: claims.IssuedAt.Time}, nil
 }
 
 // readAndResetBody reads the full body (already bounded upstream by

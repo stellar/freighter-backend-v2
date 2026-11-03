@@ -75,7 +75,7 @@ func TestAuth_PermissiveServesEveryObservedProdClockLag(t *testing.T) {
 			var hasUser bool
 			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				reached = true
-				gotUserID, hasUser = auth.UserIDFromContext(r.Context())
+				gotUserID, hasUser = auth.SourceIDFromContext(r.Context())
 				w.WriteHeader(http.StatusOK)
 			})
 			handler := Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, m)(next)
@@ -92,7 +92,7 @@ func TestAuth_PermissiveServesEveryObservedProdClockLag(t *testing.T) {
 			// Served anonymously: authentication still failed, so no identity is
 			// asserted downstream. Callers that need identity must not silently
 			// treat these as authenticated.
-			assert.False(t, hasUser, "no userID may be attached — authentication failed")
+			assert.False(t, hasUser, "no source id may be attached — authentication failed")
 			assert.Empty(t, gotUserID)
 
 			// Counted as permitted skew, so the rate stays visible and the
@@ -153,7 +153,7 @@ func TestAuth_PermittedRequestReachesHandlerWithIntactBody(t *testing.T) {
 			var hasUser bool
 			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				got, readErr = io.ReadAll(r.Body)
-				_, hasUser = auth.UserIDFromContext(r.Context())
+				_, hasUser = auth.SourceIDFromContext(r.Context())
 				w.WriteHeader(http.StatusOK)
 			})
 			handler := Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, m)(next)
@@ -166,7 +166,7 @@ func TestAuth_PermittedRequestReachesHandlerWithIntactBody(t *testing.T) {
 			require.Equal(t, http.StatusOK, rr.Code)
 			require.NoError(t, readErr)
 			assert.Equal(t, body, got, "a permitted request must reach its handler with an intact body")
-			assert.False(t, hasUser, "no userID may be attached — authentication failed")
+			assert.False(t, hasUser, "no source id may be attached — authentication failed")
 			assert.Equal(t, float64(1),
 				testutil.ToFloat64(m.RequestsTotal.WithLabelValues(
 					metrics.ResultInvalidPermitted, tc.wantReason, "freighter-extension")))
@@ -407,7 +407,7 @@ func TestAuth_PermissiveServesArbitrarilyLargeClockOffsetEitherDirection(t *test
 		reached, hasUser := false, false
 		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			reached = true
-			_, hasUser = auth.UserIDFromContext(r.Context())
+			_, hasUser = auth.SourceIDFromContext(r.Context())
 			w.WriteHeader(http.StatusOK)
 		})
 		handler := Auth(auth.NewVerifier(auth.ClockSkewLeeway), auth.Permissive, m)(next)

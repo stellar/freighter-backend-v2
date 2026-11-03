@@ -31,8 +31,9 @@ const (
 )
 
 // Claims is the JWT payload Freighter clients sign. Subject (the `sub` registered
-// claim) is the hex-encoded Ed25519 auth public key, which doubles as the user ID
-// and the signature verification key.
+// claim) is the hex-encoded Ed25519 auth public key: the SOURCE id the token was
+// signed with, which doubles as the signature verification key. It is not a user
+// id; a user owns one or more sources, and the mapping lives in the database.
 type Claims struct {
 	BodyHash      string `json:"bodyHash"`
 	MethodAndPath string `json:"methodAndPath"`

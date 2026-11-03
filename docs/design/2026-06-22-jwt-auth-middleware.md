@@ -1,24 +1,35 @@
 # JWT Authentication — Design
 
-- **Tickets:** [#88](https://github.com/stellar/freighter-backend-v2/issues/88) (verifier + middleware), [#114](https://github.com/stellar/freighter-backend-v2/issues/114) (applied to all user-facing routes)
+- **Tickets:** [#88](https://github.com/stellar/freighter-backend-v2/issues/88) (verifier + middleware), [#114](https://github.com/stellar/freighter-backend-v2/issues/114) (applied to all user-facing routes), [#164](https://github.com/stellar/freighter-backend-v2/issues/164) (`sub` is a source id; lazy user resolution)
 - **Reference:** [Freighter Unified User Model Storage](https://github.com/stellar/wallet-eng-monorepo/blob/main/design-docs/contact-lists/Freighter%20Unified%20User%20Model%20Storage.md) — user ID derivation, auth flow, JWT claims
-- **Last updated:** 2026-07-10
+- **Last updated:** 2026-10-09
 - **Status:** Current
 
 ## Summary
 
 `freighter-backend-v2` authenticates requests with a stateless Ed25519/JWT primitive using a
-**self-asserted identity** model: the JWT's `sub` claim *is* the caller's **unified user ID** — a
-hex-encoded Ed25519 public key derived from the user's seed, which doubles as the
-signature-verification key. The server verifies each request's signature against `sub`. There is no
-registration, no session state, no DB lookup, and **no server-side key or secret to provision**.
+**self-asserted identity** model: the JWT's `sub` claim *is* the caller's **source id** — a
+hex-encoded Ed25519 public key derived from a seed phrase or an account secret key, which doubles as
+the signature-verification key. The server verifies each request's signature against `sub`. There is
+no registration, no session state, **no DB lookup in the middleware**, and **no server-side key or
+secret to provision**.
+
+A source id is **not** a user id. Under the Unified User Model v2 a *user* is a cluster of sources
+(every phrase and account key they have proven possession of, via `POST /api/v1/user/link`), and
+`users.canonical_source_id` — the source that created the cluster — is the user id as exposed to
+clients. Mapping a source to its user is one primary-key lookup, `users.ResolveUser`, that **only
+the handlers that need a user make, lazily**. The middleware attaches the source id and the verified
+`iat` to the request context and nothing else, so `/protocols`, `/token-prices` and every other
+route that does not need a user never touch the database. See [Source → user
+resolution](#source--user-resolution).
 
 Every user-facing `/api/v1` route runs the auth middleware. Infra health probes do not.
 
 ## Identity model
 
-- The unified user ID is a **hex-encoded raw Ed25519 public key** (32 bytes), derived from the
-  user's seed via HMAC. It is deliberately *not* a valid Stellar `G...` strkey address.
+- The source id (`sub`) is a **hex-encoded raw Ed25519 public key** (32 bytes), derived from the
+  user's seed phrase or account secret key via HMAC. It is deliberately *not* a valid Stellar
+  `G...` strkey address.
 - The verification key is **self-asserted**: it *is* the `sub` claim. There is no configured or
   allowlisted server key to compare against — validity means "this token is cryptographically
   signed by the private key matching the public key it claims as its identity."
@@ -31,6 +42,34 @@ It raises the bar for casual/anonymous abuse but does not bound how many identit
 present; endpoints that need abuse protection (e.g. anything hitting a metered upstream) still
 require their own per-route limits or quotas on top of auth.
 
+## Source → user resolution
+
+The middleware is pure signature verification and must stay that way: it has no database
+dependency, and its cost is one Ed25519 verify regardless of how many user-scoped routes exist. What
+it proves is "the caller holds the private key for `sub`", so what it attaches to the context is
+exactly that — `auth.ContextWithSourceID` — plus the token's verified `iat`
+(`auth.ContextWithIssuedAt`), which the link handler signs consents over and must never read from
+the body.
+
+Resolving the source to a user is `users.ResolveUser(ctx, sourceID) (userID uuid.UUID,
+canonicalSourceID string, err error)` in `internal/users`, the package that owns the `users` and
+`user_sources` tables. It is one primary-key lookup on `user_sources` joined to `users`. A source
+with no row returns the `users.ErrSourceNotFound` sentinel, which handlers map to `404`.
+
+**Access rule for every user-scoped handler** (recorded in the `internal/users` package doc; `#90`
+contacts is the first consumer):
+
+1. read the source id from the context with `auth.SourceIDFromContext`;
+2. call `users.ResolveUser`;
+3. scope every query by the returned `user_id`. Never key storage by the source id, and never accept
+   a user or source id from the request.
+
+**No cache.** The middleware already does no database work, so what a cache would remove is one
+primary-key lookup. Redis is a round trip to another service, so it would save Postgres CPU, not
+latency. The mapping is immutable today (nothing moves, retires or deletes a source or user; detach
+is deferred), so a cache would need no invalidation — but if one is ever added, it is because
+something made the mapping mutable, and that change must define the invalidation.
+
 ## Modes and rollout
 
 Shipped Freighter clients today send **no** JWT; newer client versions send a JWT on every request.
@@ -39,8 +78,8 @@ To avoid breaking old clients, auth has two modes, selected by one global config
 
 | Mode | No `Authorization` header | Valid | Invalid: wrong clock | Invalid: any other reason |
 | --- | --- | --- | --- | --- |
-| **permissive** (default) | pass (anonymous, no `userID`) | pass (+`userID`) | pass (anonymous, no `userID`) | **401** |
-| **strict** (`auth.Required`) | **401** | pass (+`userID`) | **401** | **401** |
+| **permissive** (default) | pass (anonymous, no `sourceID`) | pass (+`sourceID`) | pass (anonymous, no `sourceID`) | **401** |
+| **strict** (`auth.Required`) | **401** | pass (+`sourceID`) | **401** | **401** |
 
 "Wrong clock" is exactly two reasons, the two directions a clock can be wrong:
 
@@ -55,7 +94,7 @@ than a wrong clock, and is still rejected. Serving those would make the permitte
 meaningless in the exact counter that gates the strict flip.
 
 Because `clock_ahead` precedes signature verification, a **forged** token dated into the future is
-served too. That is safe rather than merely tolerated: permitting attaches no `userID`, so the
+served too. That is safe rather than merely tolerated: permitting attaches no `sourceID`, so the
 request is byte-for-byte equivalent to one carrying no `Authorization` header — which these routes
 already serve. An attacker gains nothing they could not have by sending no token at all. The cost is
 measurement, not access: read `invalid_permitted{reason="clock_ahead"}` as an upper bound on
@@ -147,13 +186,14 @@ shared `authed` the table applies to every `gated` route.
 internal/auth/                     pure verifier primitive — no HTTP/config/metrics deps
   claims.go      Claims struct + Validate(methodAndPath, body, maxLifetime)
   parser.go      ParseJWT: read sub → hex-decode → ed25519 key → verify sig (EdDSA only) + leeway
-  verifier.go    HTTPRequestVerifier interface + VerifyHTTPRequest(req) (userID, error)
+  verifier.go    HTTPRequestVerifier interface + VerifyHTTPRequest(req) (Identity{SourceID, Issuer, IssuedAt}, error)
   mode.go        Mode enum (Permissive|Required) + ParseMode("permissive"|"strict")
   errors.go      ErrNoToken (sentinel), ErrUnauthorized, VerificationError + Reason
   helpers.go     HashBody (SHA-256 hex)
-  context.go     ContextWithUserID / UserIDFromContext
-internal/api/middleware/auth.go    Auth(verifier, mode, metrics) Middleware; 401 via httperror; injects userID
-internal/api/handlers/whoami.go    echoes the authenticated userID (auth smoke-test surface)
+  context.go     ContextWithSourceID / SourceIDFromContext; ContextWithIssuedAt / IssuedAtFromContext
+internal/users/users.go            ResolveUser(ctx, sourceID) → (userID, canonicalSourceID); ErrSourceNotFound; the user-scoped access rule
+internal/api/middleware/auth.go    Auth(verifier, mode, metrics) Middleware; 401 via httperror; injects sourceID + iat; no DB
+internal/api/handlers/whoami.go    echoes the authenticated sourceID (auth smoke-test surface; does not resolve the user)
 internal/config/config.go          AuthMode field (permissive|strict), validated at load
 internal/metrics/metrics.go        auth counter (adoption/rejection signal)
 internal/api/serve.go              routes() table + per-route Auth wrapping in initHandlers; health routes gated=false (bare)
@@ -161,7 +201,9 @@ internal/api/serve.go              routes() table + per-route Auth wrapping in i
 
 **Boundaries:** `internal/auth` owns the *mechanism* (is this token cryptographically valid for its
 claimed identity?). The middleware owns the *policy* (mode, per-outcome behavior, 401 rendering,
-metrics). The verifier is HTTP-aware only insofar as it reads an `*http.Request`.
+metrics). The verifier is HTTP-aware only insofar as it reads an `*http.Request`. `internal/users`
+owns the *mapping* from a proven source to a user; neither `internal/auth` nor the middleware
+imports it.
 
 ## Verifier internals
 
@@ -169,7 +211,7 @@ metrics). The verifier is HTTP-aware only insofar as it reads an `*http.Request`
 type Claims struct {
     BodyHash      string `json:"bodyHash"`
     MethodAndPath string `json:"methodAndPath"`
-    jwtgo.RegisteredClaims // Subject (hex user ID = Ed25519 pubkey), Issuer, IssuedAt, ExpiresAt
+    jwtgo.RegisteredClaims // Subject (hex source id = Ed25519 pubkey), Issuer, IssuedAt, ExpiresAt
 }
 ```
 
@@ -193,14 +235,15 @@ limit of its own — request bodies are bounded upstream by the `BodySizeLimit` 
 4. `jwtgo.ParseWithClaims(..., keyfunc→pubKey, WithValidMethods([]string{"EdDSA"}), WithLeeway(leeway))`.
    `WithValidMethods` blocks `alg=none`/HS256 confusion attacks.
 
-`VerifyHTTPRequest(req) (userID string, err error)`:
+`VerifyHTTPRequest(req) (Identity, error)`:
 - Missing/non-Bearer `Authorization` header → `ErrNoToken` (distinct sentinel, **not** wrapping
   `ErrUnauthorized`) so the middleware can tell "no token" (anonymous-eligible) from "bad token".
   A `Bearer` scheme with an empty credential is a bad token, not "no token".
 - Read the full body, then reset `req.Body` so handlers can read it. `Bearer` scheme is
   case-insensitive (RFC 6750).
 - `methodAndPath = fmt.Sprintf("%s %s", req.Method, req.URL.RequestURI())`.
-- On success returns `userID = claims.Subject`. Invalid-token errors wrap `ErrUnauthorized`.
+- On success returns `Identity{SourceID: claims.Subject, Issuer: claims.Issuer, IssuedAt: claims.IssuedAt}`.
+  Invalid-token errors wrap `ErrUnauthorized`.
 
 ## Middleware, modes, error handling
 
@@ -213,11 +256,12 @@ value used to wrap routes.
 func Auth(verifier auth.HTTPRequestVerifier, mode auth.Mode, m *metrics.Auth) Middleware {
     return func(next http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            userID, err := verifier.VerifyHTTPRequest(r)
+            identity, err := verifier.VerifyHTTPRequest(r)
             switch {
             case err == nil:
                 metrics.RecordAuth(m, "authenticated", "ok")
-                r = r.WithContext(auth.ContextWithUserID(r.Context(), userID))
+                ctx := auth.ContextWithSourceID(r.Context(), identity.SourceID)
+                r = r.WithContext(auth.ContextWithIssuedAt(ctx, identity.IssuedAt))
             case errors.Is(err, auth.ErrNoToken):
                 if mode == auth.Required { /* record rejected */ httperror.Unauthorized(...).Render(w); return }
                 metrics.RecordAuth(m, "anonymous", "no_token") // permissive: pass through
@@ -262,17 +306,20 @@ logging middleware.
   wrong key, `alg=none`/HS256 rejected, expired, leeway boundary); `VerifyHTTPRequest` (missing
   header → `ErrNoToken`, bad Bearer prefix, body-hash binding, query-string binding, body reset).
 - **middleware tests:** the full truth table — for each mode × {no header, valid, expired,
-  future-dated, tampered, wrong-key}, assert status (200/401) and presence/absence of `userID` in
-  context. The `permissive/wrong-key` and `required/expired` rows are the load-bearing ones: they
+  future-dated, tampered, wrong-key}, assert status (200/401) and presence/absence of `sourceID` (and
+  `iat`) in context. The `permissive/wrong-key` and `required/expired` rows are the load-bearing ones: they
   prove the timing fall-through is narrow (a bad signature still 401s) and that strict is unchanged.
 - **route wiring tests** (`internal/api`): user-facing routes reject anonymous in strict, reject
-  invalid tokens in permissive, and expose `userID` on a valid token; health probes stay anonymous
+  invalid tokens in permissive, and expose `sourceID` on a valid token; health probes stay anonymous
   in every mode; an authenticated request keeps its real route label in `freighter_http_requests_total`.
 
 ## Operational notes
 
 - Config var: `AUTH_MODE` / `--auth-mode` (default `permissive`).
 - Route: `GET /api/v1/auth/whoami` (auth smoke-test surface).
+- **`users` pkg tests:** `ResolveUser` returns the user for a known source (from either its
+  canonical or a linked source) and `ErrSourceNotFound` for an unknown one, against a fake row
+  (unit) and a migrated Postgres (`make integration-test`).
 - Metric: `freighter_auth_requests_total`.
 - Under `strict`, all user-facing `/api/v1` routes return 401 without a valid JWT; health probes
   remain anonymous. Reflect endpoint/metric/behavior changes in `wallet-eng-runbooks` via the

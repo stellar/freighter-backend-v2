@@ -345,8 +345,10 @@ func TestVerifyHTTPRequest_Valid(t *testing.T) {
 
 	identity, err := v.VerifyHTTPRequest(r)
 	require.NoError(t, err)
-	assert.Equal(t, sub, identity.UserID)
+	assert.Equal(t, sub, identity.SourceID)
 	assert.Equal(t, "freighter-extension", identity.Issuer)
+	// iat is exposed from the verified claims (second precision: NumericDate).
+	assert.WithinDuration(t, time.Now(), identity.IssuedAt, 2*time.Second)
 
 	// Body must remain readable by downstream handlers.
 	got, err := readAll(r)
@@ -410,7 +412,7 @@ func TestVerifyHTTPRequest_CaseInsensitiveBearer(t *testing.T) {
 
 	identity, err := v.VerifyHTTPRequest(r)
 	require.NoError(t, err)
-	assert.Equal(t, sub, identity.UserID)
+	assert.Equal(t, sub, identity.SourceID)
 }
 
 func TestVerifyHTTPRequest_LargeBodyNotTruncated(t *testing.T) {
@@ -423,7 +425,7 @@ func TestVerifyHTTPRequest_LargeBodyNotTruncated(t *testing.T) {
 	v := NewVerifier(ClockSkewLeeway)
 	identity, err := v.VerifyHTTPRequest(newRequest(t, http.MethodPost, "/api/v1/thing", body, token))
 	require.NoError(t, err)
-	assert.Equal(t, sub, identity.UserID)
+	assert.Equal(t, sub, identity.SourceID)
 }
 
 func TestReason(t *testing.T) {
@@ -475,12 +477,23 @@ func TestReason(t *testing.T) {
 }
 
 func TestContextRoundTrip(t *testing.T) {
-	ctx := ContextWithUserID(t.Context(), "deadbeef")
-	id, ok := UserIDFromContext(ctx)
+	ctx := ContextWithSourceID(t.Context(), "deadbeef")
+	id, ok := SourceIDFromContext(ctx)
 	assert.True(t, ok)
 	assert.Equal(t, "deadbeef", id)
 
-	_, ok = UserIDFromContext(t.Context())
+	_, ok = SourceIDFromContext(t.Context())
+	assert.False(t, ok)
+}
+
+func TestContextRoundTrip_IssuedAt(t *testing.T) {
+	iat := time.Unix(1_700_000_000, 0)
+	ctx := ContextWithIssuedAt(t.Context(), iat)
+	got, ok := IssuedAtFromContext(ctx)
+	assert.True(t, ok)
+	assert.True(t, iat.Equal(got))
+
+	_, ok = IssuedAtFromContext(t.Context())
 	assert.False(t, ok)
 }
 
@@ -516,7 +529,7 @@ func TestVerifyHTTPRequest_UsesConfiguredLeeway(t *testing.T) {
 	// Verifier built with a leeway wide enough to cover it -> accepted.
 	id, err := NewVerifier(beyond + time.Minute).VerifyHTTPRequest(newReq())
 	require.NoError(t, err)
-	assert.Equal(t, sub, id.UserID)
+	assert.Equal(t, sub, id.SourceID)
 }
 
 // A wider leeway accepts tokens the default leeway rejects on timing — both a
