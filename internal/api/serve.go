@@ -172,13 +172,12 @@ func (s *ApiServer) initServices() error {
 			return fmt.Errorf("SWAP_LIFI_API_KEY is required when SWAP_LIFI_ENABLED is true")
 		}
 		sources = append(sources, swap.NewLifiSource(swap.LifiConfig{
-			Client:         swap.NewLifiClient(s.cfg.SwapConfig.LifiBaseURL, s.cfg.SwapConfig.LifiAPIKey, nil),
-			SwapContract:   s.cfg.SwapConfig.LifiSwapContract,
-			FeeRecipient:   s.cfg.SwapConfig.LifiFeeRecipient,
-			PartnerID:      s.cfg.SwapConfig.LifiPartnerID,
-			Aggregator:     s.cfg.SwapConfig.AggregatorContract,
-			MaxResourceFee: s.cfg.SwapConfig.MaxResourceFeeStroops,
-			RPC:            s.rpcService,
+			Client:       swap.NewLifiClient(s.cfg.SwapConfig.LifiBaseURL, s.cfg.SwapConfig.LifiAPIKey, nil),
+			SwapContract: s.cfg.SwapConfig.LifiSwapContract,
+			FeeRecipient: s.cfg.SwapConfig.LifiFeeRecipient,
+			PartnerID:    s.cfg.SwapConfig.LifiPartnerID,
+			Aggregator:   s.cfg.SwapConfig.AggregatorContract,
+			RPC:          s.rpcService,
 		}, s.appMetrics.Swap))
 	}
 	s.swapService = swap.NewRouter(sources,

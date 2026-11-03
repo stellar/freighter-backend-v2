@@ -556,7 +556,6 @@ func TestServeCmd_SwapDefaults(t *testing.T) {
 	assert.Equal(t, "GAZYY5SJZNAVWZWVKJ2E74W2WKZP5BACLVV6FVHC5NZWXPKTQEDOYUR4", cfg.SwapConfig.LifiFeeRecipient)
 	assert.Equal(t, "104aaf592", cfg.SwapConfig.LifiPartnerID)
 	assert.Equal(t, "CARVQXFP4JF5ELLXUMQ6DALR346YVGBMQOHB4ENA7SSVXAYABXLBDDC4", cfg.SwapConfig.AggregatorContract)
-	assert.Equal(t, int64(3000000), cfg.SwapConfig.MaxResourceFeeStroops)
 	assert.Equal(t, "https://horizon-futurenet.stellar.org", cfg.HorizonConfig.HorizonFuturenetURL)
 }
 
@@ -592,13 +591,6 @@ func TestServeCmd_SwapBuildTimeoutStaysBelowWriteTimeout(t *testing.T) {
 	s, err := execServe(t, "--db-enabled=false", "--swap-build-timeout-seconds", strconv.Itoa(limit-1))
 	require.NoError(t, err)
 	assert.Equal(t, limit-1, s.Cfg.SwapConfig.BuildTimeoutSeconds)
-}
-
-func TestServeCmd_RejectsNonPositiveSwapMaxResourceFee(t *testing.T) {
-	t.Parallel()
-	_, err := execServe(t, "--swap-max-resource-fee-stroops", "0")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "--swap-max-resource-fee-stroops=0 must be positive")
 }
 
 func TestServeCmd_SwapSourceTimeoutStaysBelowWriteTimeout(t *testing.T) {

@@ -56,18 +56,17 @@ func trustExpect(t *testing.T, env xdr.TransactionEnvelope) lifiExpect {
 	tb := env.V1.Tx.Cond.TimeBounds
 	require.NotNil(t, tb)
 	return lifiExpect{
-		Account:        lifiTestAccount,
-		FromContract:   contractIDOf(t, "XLM"),
-		ToContract:     contractIDOf(t, "USDC:"+usdcIssuer),
-		SwapContract:   lifiSwapContract,
-		Aggregator:     lifiAggregator,
-		FeeRecipient:   lifiFeeRecipient,
-		PartnerID:      lifiPartnerID,
-		ToClassic:      true,
-		Amount:         big.NewInt(100000000),
-		MinOut:         new(big.Int).Set(call.MinAmountOut),
-		MaxResourceFee: 3000000,
-		MaxValidUntil:  int64(tb.MaxTime),
+		Account:       lifiTestAccount,
+		FromContract:  contractIDOf(t, "XLM"),
+		ToContract:    contractIDOf(t, "USDC:"+usdcIssuer),
+		SwapContract:  lifiSwapContract,
+		Aggregator:    lifiAggregator,
+		FeeRecipient:  lifiFeeRecipient,
+		PartnerID:     lifiPartnerID,
+		ToClassic:     true,
+		Amount:        big.NewInt(100000000),
+		MinOut:        new(big.Int).Set(call.MinAmountOut),
+		MaxValidUntil: int64(tb.MaxTime),
 	}
 }
 
@@ -382,9 +381,6 @@ func TestLifiChecksTamperFails(t *testing.T) {
 			agg.SubInvocations[0].Function.ContractFn.Args[2] = i128Val(0)
 		}},
 		// 5. resource fee
-		{"resource fee above cap", "resource fee", func(_ *testing.T, e *xdr.TransactionEnvelope, w *lifiExpect) {
-			e.V1.Tx.Ext.SorobanData.ResourceFee = xdr.Int64(w.MaxResourceFee + 1)
-		}},
 		{"negative resource fee", "resource fee", func(_ *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
 			e.V1.Tx.Ext.SorobanData.ResourceFee = -1
 		}},

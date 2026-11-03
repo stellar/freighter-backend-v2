@@ -17,7 +17,6 @@ type lifiExpect struct {
 	// ToClassic allows ToContract.trust(Account) in the auth tree.
 	ToClassic      bool
 	Amount, MinOut *big.Int
-	MaxResourceFee int64
 	MaxValidUntil  int64
 }
 
@@ -46,7 +45,7 @@ func checkLifiTx(env xdr.TransactionEnvelope, want lifiExpect) error {
 	}
 	tx := env.V1.Tx
 	if tx.Ext.V != 1 || tx.Ext.SorobanData == nil ||
-		tx.Ext.SorobanData.ResourceFee < 0 || int64(tx.Ext.SorobanData.ResourceFee) > want.MaxResourceFee {
+		tx.Ext.SorobanData.ResourceFee < 0 {
 		return checkFailed("resource fee")
 	}
 	// Only plain time bounds: V2 preconditions can add signers or sequence rules.

@@ -64,14 +64,13 @@ func TimeoutSeconds(req types.SwapBuildRequest) int64 {
 var ErrLifiMissingTx = errors.New("lifi returned no usable transaction")
 
 type LifiConfig struct {
-	Client         *LifiClient
-	SwapContract   string
-	FeeRecipient   string
-	PartnerID      string
-	Aggregator     string
-	MaxResourceFee int64
-	RPC            types.RPCService
-	Now            func() time.Time
+	Client       *LifiClient
+	SwapContract string
+	FeeRecipient string
+	PartnerID    string
+	Aggregator   string
+	RPC          types.RPCService
+	Now          func() time.Time
 }
 
 type LifiSource struct {
@@ -349,23 +348,22 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 		return "", fmt.Errorf("lifi: %w", ErrLifiMissingTx)
 	}
 	if err := checkLifiTx(env, lifiExpect{
-		Account:        req.Account,
-		FromContract:   fromContract,
-		ToContract:     toContract,
-		SwapContract:   s.cfg.SwapContract,
-		Aggregator:     s.cfg.Aggregator,
-		FeeRecipient:   s.cfg.FeeRecipient,
-		PartnerID:      s.cfg.PartnerID,
-		ToClassic:      toClassic,
-		Amount:         raw,
-		MinOut:         minOut,
-		MaxResourceFee: s.cfg.MaxResourceFee,
-		MaxValidUntil:  s.cfg.Now().Unix() + lifiValidFor,
+		Account:       req.Account,
+		FromContract:  fromContract,
+		ToContract:    toContract,
+		SwapContract:  s.cfg.SwapContract,
+		Aggregator:    s.cfg.Aggregator,
+		FeeRecipient:  s.cfg.FeeRecipient,
+		PartnerID:     s.cfg.PartnerID,
+		ToClassic:     toClassic,
+		Amount:        raw,
+		MinOut:        minOut,
+		MaxValidUntil: s.cfg.Now().Unix() + lifiValidFor,
 	}); err != nil {
 		return "", err
 	}
 
-	// checkLifiTx guarantees V1 and SorobanData with 0 <= ResourceFee <= MaxResourceFee.
+	// checkLifiTx guarantees V1 and SorobanData with ResourceFee >= 0.
 	total := new(big.Int).Add(big.NewInt(int64(env.V1.Tx.Ext.SorobanData.ResourceFee)), inclusion)
 	if total.Cmp(big.NewInt(math.MaxUint32)) > 0 {
 		return "", fmt.Errorf("%w: fee %q", ErrBadRequest, req.Fee)

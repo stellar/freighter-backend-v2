@@ -310,14 +310,13 @@ func lifiBuildSourceRPC(t *testing.T, env xdr.TransactionEnvelope, status int, b
 	t.Cleanup(srv.Close)
 	maxTime := int64(env.V1.Tx.Cond.TimeBounds.MaxTime)
 	return NewLifiSource(LifiConfig{
-		Client:         NewLifiClient(srv.URL, "", srv.Client()),
-		SwapContract:   lifiSwapContract,
-		FeeRecipient:   lifiFeeRecipient,
-		PartnerID:      lifiPartnerID,
-		Aggregator:     lifiAggregator,
-		MaxResourceFee: 3000000,
-		RPC:            rpc,
-		Now:            func() time.Time { return time.Unix(maxTime-300, 0) },
+		Client:       NewLifiClient(srv.URL, "", srv.Client()),
+		SwapContract: lifiSwapContract,
+		FeeRecipient: lifiFeeRecipient,
+		PartnerID:    lifiPartnerID,
+		Aggregator:   lifiAggregator,
+		RPC:          rpc,
+		Now:          func() time.Time { return time.Unix(maxTime-300, 0) },
 	}, nil)
 }
 
@@ -387,7 +386,7 @@ func TestLifiBuildTamperedIsCheckFailed(t *testing.T) {
 	require.NoError(t, json.Unmarshal(lifiFixture(t, "lifi_quote_xlm_usdc_trust.json"), &q))
 	env := decodeEnv(t, trustFixtureXDR(t))
 	tampered := decodeEnv(t, trustFixtureXDR(t))
-	tampered.V1.Tx.Ext.SorobanData.ResourceFee = 3000001
+	tampered.V1.Tx.Ext.SorobanData.ResourceFee = -1
 	b64, err := xdr.MarshalBase64(tampered)
 	require.NoError(t, err)
 	q["transactionRequest"].(map[string]any)["data"] = b64
@@ -682,13 +681,12 @@ func slippageRecorder(t *testing.T, env xdr.TransactionEnvelope, body []byte) (*
 	t.Cleanup(srv.Close)
 	maxTime := int64(env.V1.Tx.Cond.TimeBounds.MaxTime)
 	return NewLifiSource(LifiConfig{
-		Client:         NewLifiClient(srv.URL, "", srv.Client()),
-		SwapContract:   lifiSwapContract,
-		FeeRecipient:   lifiFeeRecipient,
-		PartnerID:      lifiPartnerID,
-		Aggregator:     lifiAggregator,
-		MaxResourceFee: 3000000,
-		Now:            func() time.Time { return time.Unix(maxTime-300, 0) },
+		Client:       NewLifiClient(srv.URL, "", srv.Client()),
+		SwapContract: lifiSwapContract,
+		FeeRecipient: lifiFeeRecipient,
+		PartnerID:    lifiPartnerID,
+		Aggregator:   lifiAggregator,
+		Now:          func() time.Time { return time.Unix(maxTime-300, 0) },
 	}, nil), &got
 }
 

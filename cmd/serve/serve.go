@@ -54,9 +54,6 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.PricesConfig.MaxTokensPerRequest; n <= 0 {
 				return fmt.Errorf("--max-tokens-per-request=%d must be positive", n)
 			}
-			if n := s.Cfg.SwapConfig.MaxResourceFeeStroops; n <= 0 {
-				return fmt.Errorf("--swap-max-resource-fee-stroops=%d must be positive", n)
-			}
 			// Every integer-seconds flag that internal/api/serve.go multiplies
 			// by time.Second, bounded on both sides in one place. Past
 			// maxDurationSeconds the multiply wraps and the override is
@@ -199,7 +196,6 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiFeeRecipient, "swap-lifi-fee-recipient", "GAZYY5SJZNAVWZWVKJ2E74W2WKZP5BACLVV6FVHC5NZWXPKTQEDOYUR4", "LI.FI fee recipient account the backend accepts in quotes")
 	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiPartnerID, "swap-lifi-partner-id", "104aaf592", "LI.FI aggregator partner id the backend accepts in quotes")
 	cmd.Flags().StringVar(&s.Cfg.SwapConfig.AggregatorContract, "swap-aggregator-contract", "CARVQXFP4JF5ELLXUMQ6DALR346YVGBMQOHB4ENA7SSVXAYABXLBDDC4", "Soroswap aggregator contract ID")
-	cmd.Flags().Int64Var(&s.Cfg.SwapConfig.MaxResourceFeeStroops, "swap-max-resource-fee-stroops", 3000000, "Maximum Soroban resource fee in stroops accepted for a swap (3000000 = 0.3 XLM)")
 
 	// Redis Config
 	cmd.Flags().StringVar(&s.Cfg.RedisConfig.ConnectionName, "redis-connection-name", "freighter-redis", "The name of the Redis connection")

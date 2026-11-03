@@ -140,17 +140,16 @@ type HorizonConfig struct {
 }
 
 type SwapConfig struct {
-	ClassicEnabled        bool
-	LifiEnabled           bool
-	SourceTimeoutSeconds  int
-	BuildTimeoutSeconds   int
-	LifiAPIKey            string
-	LifiBaseURL           string
-	LifiSwapContract      string
-	LifiFeeRecipient      string
-	LifiPartnerID         string
-	AggregatorContract    string
-	MaxResourceFeeStroops int64
+	ClassicEnabled       bool
+	LifiEnabled          bool
+	SourceTimeoutSeconds int
+	BuildTimeoutSeconds  int
+	LifiAPIKey           string
+	LifiBaseURL          string
+	LifiSwapContract     string
+	LifiFeeRecipient     string
+	LifiPartnerID        string
+	AggregatorContract   string
 }
 
 type PricesConfig struct {
