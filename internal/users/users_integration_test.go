@@ -56,9 +56,9 @@ func TestResolveUser_Postgres(t *testing.T) {
 	defer pool.Close()
 
 	const (
-		canonical = "aa" // the phrase that created the user
-		linked    = "bb" // an account key linked to it later
-		unknown   = "cc" // a key nobody has linked
+		canonical = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" // the phrase that created the user
+		linked    = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" // an account key linked to it later
+		unknown   = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" // a key nobody has linked
 	)
 	var seededUserID uuid.UUID
 	err = pool.QueryRow(ctx,

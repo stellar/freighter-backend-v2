@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -23,6 +24,7 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/auth"
 	"github.com/stellar/freighter-backend-v2/internal/auth/authtest"
 	"github.com/stellar/freighter-backend-v2/internal/integrationtests/infrastructure"
+	"github.com/stellar/freighter-backend-v2/internal/users"
 )
 
 // UserLinkTestSuite exercises the full wiring of the link endpoint: the
@@ -104,6 +106,17 @@ func (s *UserLinkTestSuite) ownerOf(id string) (userID string, canonical string)
 		Scan(&userID, &canonical)
 	require.NoError(t, err, "source %s has no row", id)
 	return userID, canonical
+}
+
+// rowsFor counts the user_sources rows and the users rows rooted at any of ids.
+func (s *UserLinkTestSuite) rowsFor(ids ...string) (sourceRows, userRows int) {
+	t := s.T()
+	ctx := context.Background()
+	require.NoError(t, s.db.QueryRow(ctx,
+		`SELECT count(*) FROM user_sources WHERE source_id = ANY($1)`, ids).Scan(&sourceRows))
+	require.NoError(t, s.db.QueryRow(ctx,
+		`SELECT count(*) FROM users WHERE canonical_source_id = ANY($1)`, ids).Scan(&userRows))
+	return sourceRows, userRows
 }
 
 // The container runs the default permissive AUTH_MODE, under which every other
@@ -196,4 +209,46 @@ func (s *UserLinkTestSuite) TestConsentBoundToTokenIat() {
 	var n int
 	require.NoError(t, s.db.QueryRow(context.Background(), `SELECT count(*) FROM user_sources WHERE source_id = $1`, P.id).Scan(&n))
 	require.Zero(t, n, "a rejected request writes nothing")
+}
+
+// A request the handler rejects writes nothing: every structural rule and the
+// consent check run before the store is called, over the real request path.
+func (s *UserLinkTestSuite) TestRejectedLinkWritesNothing() {
+	t := s.T()
+	iat := time.Now().Truncate(time.Second)
+	P, K, other := newLinkKey(t), newLinkKey(t), newLinkKey(t)
+	pConsent := P.consent(auth.SourceKindPhrase, P.id, iat)
+	kConsent := K.consent(auth.SourceKindSecretKey, P.id, iat)
+
+	tooMany := []handlers.UserLinkSource{pConsent}
+	extra := []string{}
+	for len(tooMany) <= users.MaxLinkSources {
+		k := newLinkKey(t)
+		extra = append(extra, k.id)
+		tooMany = append(tooMany, k.consent(auth.SourceKindSecretKey, P.id, iat))
+	}
+
+	cases := []struct {
+		name       string
+		sources    []handlers.UserLinkSource
+		wantStatus int
+	}{
+		{"empty sources", nil, http.StatusBadRequest},
+		{"signer not in sources", []handlers.UserLinkSource{kConsent}, http.StatusBadRequest},
+		{"repeated id", []handlers.UserLinkSource{pConsent, kConsent, kConsent}, http.StatusBadRequest},
+		{"unknown kind", []handlers.UserLinkSource{pConsent, K.consent("hardware", P.id, iat)}, http.StatusBadRequest},
+		{"uppercase id", []handlers.UserLinkSource{pConsent, {ID: strings.ToUpper(K.id), Kind: kConsent.Kind, Sig: kConsent.Sig}}, http.StatusBadRequest},
+		{"more than MaxLinkSources sources", tooMany, http.StatusBadRequest},
+		{"consent signed for another signer", []handlers.UserLinkSource{pConsent, K.consent(auth.SourceKindSecretKey, other.id, iat)}, http.StatusForbidden},
+	}
+	ids := append([]string{P.id, K.id, strings.ToUpper(K.id), other.id}, extra...)
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			status, raw := s.postLinkAt(P, iat, tc.sources...)
+			s.Require().Equal(tc.wantStatus, status, "body: %s", raw)
+			sources, usersRows := s.rowsFor(ids...)
+			s.Require().Zero(sources, "no user_sources row written")
+			s.Require().Zero(usersRows, "no users row written")
+		})
+	}
 }

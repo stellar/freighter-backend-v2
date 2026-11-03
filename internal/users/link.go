@@ -10,8 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-
-	"github.com/stellar/freighter-backend-v2/internal/auth"
 )
 
 // MaxLinkSources bounds how many sources one link request may carry. A wallet
@@ -136,9 +134,11 @@ func NewLinker(db TxBeginner) *Linker {
 // Link resolves a link request whose consents the caller has ALREADY verified:
 // every entry of sources carries a consent signed by its own key and bound to
 // signerID, and signerID is itself one of sources. Link trusts its arguments on
-// that basis and does no signature work. It enforces only the structural rules
-// it needs for its own correctness (bounds, canonical ids, no repeated id,
-// signer present) so a misuse cannot reach the database.
+// that basis and does no checks of its own: the handler applies every
+// structural rule (bounds, canonical ids, no repeated id, signer present)
+// before any signature work. The schema's CHECK constraints on source ids and
+// kinds are the backstop, so a misuse fails its INSERT instead of writing a
+// permanent row that could never resolve.
 //
 // Resolution runs inside one transaction with lock and statement timeouts:
 //
@@ -174,10 +174,10 @@ func NewLinker(db TxBeginner) *Linker {
 // clusters never combine, no row is ever retired, no users row is ever deleted,
 // and canonical_source_id is never updated.
 //
-// Errors: the validation sentinels below for a malformed request;
-// ErrLockTimeout and ErrStatementTimeout when the transaction's own timeouts
-// fire (see classifyTimeout); the request context's error when it ends first;
-// anything else is a database failure.
+// Errors: ErrLockTimeout and ErrStatementTimeout when the transaction's own
+// timeouts fire (see classifyTimeout); the request context's error when it
+// ends first; anything else, including a CHECK violation from malformed
+// arguments, is a database failure.
 func (l *Linker) Link(ctx context.Context, signerID string, sources []Source) (*LinkResult, error) {
 	res, err := l.link(ctx, signerID, sources)
 	if err != nil {
@@ -187,10 +187,6 @@ func (l *Linker) Link(ctx context.Context, signerID string, sources []Source) (*
 }
 
 func (l *Linker) link(ctx context.Context, signerID string, sources []Source) (*LinkResult, error) {
-	if err := validateLinkRequest(signerID, sources); err != nil {
-		return nil, err
-	}
-
 	tx, err := l.db.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("beginning link transaction: %w", err)
@@ -286,51 +282,6 @@ func (l *Linker) link(ctx context.Context, signerID string, sources []Source) (*
 		Created:           created,
 		Written:           len(written),
 	}, nil
-}
-
-// Validation errors Link returns before touching the database. They are
-// sentinels so the handler can map them to 400 without string matching; the
-// handler performs the same checks first (on the raw request, before any
-// signature work), so hitting one here means a programming error, but the
-// store refuses to rely on that.
-var (
-	ErrTooManySources       = errors.New("too many sources")
-	ErrRepeatedSource       = errors.New("repeated source id")
-	ErrSignerNotInBody      = errors.New("signing source is not among the sources")
-	ErrUnknownSourceKind    = errors.New("unknown source kind")
-	ErrNonCanonicalSourceID = errors.New("source id is not a 64-character lowercase hex public key")
-)
-
-func validateLinkRequest(signerID string, sources []Source) error {
-	if len(sources) > MaxLinkSources {
-		return fmt.Errorf("%w: %d > %d", ErrTooManySources, len(sources), MaxLinkSources)
-	}
-	if !auth.IsCanonicalSourceID(signerID) {
-		return fmt.Errorf("%w: signer %q", ErrNonCanonicalSourceID, signerID)
-	}
-	seen := make(map[string]struct{}, len(sources))
-	signerPresent := false
-	for _, s := range sources {
-		// The JWT parser lowercases sub, and ResolveUser is keyed by that form, so
-		// a row written under any other spelling would never resolve again.
-		if !auth.IsCanonicalSourceID(s.ID) {
-			return fmt.Errorf("%w: %q", ErrNonCanonicalSourceID, s.ID)
-		}
-		if _, dup := seen[s.ID]; dup {
-			return fmt.Errorf("%w: %s", ErrRepeatedSource, s.ID)
-		}
-		seen[s.ID] = struct{}{}
-		if !auth.IsValidSourceKind(s.Kind) {
-			return fmt.Errorf("%w: %q", ErrUnknownSourceKind, s.Kind)
-		}
-		if s.ID == signerID {
-			signerPresent = true
-		}
-	}
-	if !signerPresent {
-		return ErrSignerNotInBody
-	}
-	return nil
 }
 
 func kindOf(sources []Source, id string) string {

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -528,40 +527,6 @@ func TestLink_Postgres(t *testing.T) {
 		res, err = linker.Link(ctx, S, []Source{phrase(S)})
 		require.NoError(t, err)
 		assert.Equal(t, orphan, res.UserID)
-	})
-
-	t.Run("rejected, writing nothing", func(t *testing.T) {
-		S, X := newID(t), newID(t)
-		cases := []struct {
-			name    string
-			signer  string
-			sources []Source
-			wantErr error
-		}{
-			{"repeated id", S, []Source{phrase(S), phrase(S)}, ErrRepeatedSource},
-			{"two consents for one id with different kinds", S, []Source{phrase(S), secretKey(S)}, ErrRepeatedSource},
-			{"signer not in sources", S, []Source{phrase(X)}, ErrSignerNotInBody},
-			{"unknown kind", S, []Source{{ID: S, Kind: "hardware"}}, ErrUnknownSourceKind},
-			{"non-canonical source id", S, []Source{phrase(S), secretKey(strings.ToUpper(X))}, ErrNonCanonicalSourceID},
-			{"non-canonical signer", strings.ToUpper(S), []Source{phrase(strings.ToUpper(S))}, ErrNonCanonicalSourceID},
-			{"empty body", S, nil, ErrSignerNotInBody},
-			{"more than MaxLinkSources sources", S, func() []Source {
-				out := []Source{phrase(S)}
-				for len(out) <= MaxLinkSources {
-					out = append(out, secretKey(newID(t)))
-				}
-				return out
-			}(), ErrTooManySources},
-		}
-		for _, tc := range cases {
-			t.Run(tc.name, func(t *testing.T) {
-				_, err := linker.Link(ctx, tc.signer, tc.sources)
-				require.ErrorIs(t, err, tc.wantErr)
-				assert.False(t, d.hasRow(S), "nothing written for the signer")
-				assert.False(t, d.hasRow(X))
-				assert.Zero(t, d.usersWithCanonical(S))
-			})
-		}
 	})
 
 	t.Run("full batch of MaxLinkSources sources links in one call", func(t *testing.T) {

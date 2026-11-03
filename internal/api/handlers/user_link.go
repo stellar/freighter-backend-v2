@@ -165,16 +165,6 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 	res, err := h.linker.Link(linkCtx, sub, sources)
 	if err != nil {
 		switch {
-		case errors.Is(err, users.ErrTooManySources),
-			errors.Is(err, users.ErrRepeatedSource),
-			errors.Is(err, users.ErrSignerNotInBody),
-			errors.Is(err, users.ErrUnknownSourceKind),
-			errors.Is(err, users.ErrNonCanonicalSourceID):
-			// validateLinkSources already enforces these; reaching here means the
-			// two drifted. Still a client-visible 400, but log it as the bug it is.
-			logger.ErrorWithContext(ctx, "link store rejected a request the handler accepted", "error", err)
-			metrics.RecordUserLink(h.metrics, metrics.LinkResultBadRequest)
-			return httperror.BadRequest("invalid link request", err)
 		case errors.Is(err, users.ErrLockTimeout):
 			// Another link signed as the same source held the signer lock past the
 			// store's lock timeout. Transient and expected under same-signer
