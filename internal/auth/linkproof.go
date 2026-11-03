@@ -16,10 +16,10 @@ import (
 // POST /api/v1/user/link, so a consent can never be confused with an auth JWT
 // or any other message signed by the same key.
 //
-// The format is a cross-platform contract. #166 publishes fixture vectors
-// (internal/auth/link_proof_vectors.json) that the extension and mobile clients
-// replay in their own test suites; until that lands, this file and its tests are
-// the only pin. Changing the message in any way invalidates every client, so a
+// The format is a cross-platform contract pinned by the fixture vectors in
+// link_proof_vectors.json (#166), which the extension and mobile clients replay
+// in their own test suites and link_proof_vectors_test.go proves against this
+// verifier. Changing the message in any way invalidates every client, so a
 // later format gets a NEW prefix and a new vector file rather than an edit to
 // this one. The retired three-field
 // `freighter-user-link-v1` message (no kind) must not be reintroduced.
