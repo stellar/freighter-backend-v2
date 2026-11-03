@@ -508,25 +508,18 @@ func TestLink_Postgres(t *testing.T) {
 		})
 	})
 
-	t.Run("signer whose users row survived but whose source row was lost is adopted, not bricked", func(t *testing.T) {
+	t.Run("a users row left without its source row by a manual edit fails the link and writes nothing", func(t *testing.T) {
 		S, K := newID(t), newID(t)
-		var orphan uuid.UUID
-		require.NoError(t, pool.QueryRow(ctx, `INSERT INTO users (canonical_source_id) VALUES ($1) RETURNING id`, S).Scan(&orphan))
+		_, err := pool.Exec(ctx, `INSERT INTO users (canonical_source_id) VALUES ($1)`, S)
+		require.NoError(t, err)
 
 		res, err := linker.Link(ctx, S, []Source{phrase(S), secretKey(K)})
-		require.NoError(t, err, "a users row with no source row must not make the signer unlinkable")
-		assert.Equal(t, orphan, res.UserID, "the existing users row is adopted so the exposed id stays stable")
-		assert.False(t, res.Created, "adoption inserted no users row")
-		assert.Equal(t, 2, res.Written)
-		assert.Equal(t, S, res.CanonicalSourceID)
-		assert.Equal(t, orphan, d.ownerOf(S), "the signer's source row is restored")
-		assert.Equal(t, orphan, d.ownerOf(K))
+		require.Error(t, err)
+		assert.Nil(t, res)
+		assert.Contains(t, err.Error(), "exists without its source row", "the error names the inconsistency to repair")
+		assert.False(t, d.hasRow(S))
+		assert.False(t, d.hasRow(K))
 		assert.Equal(t, 1, d.usersWithCanonical(S))
-
-		// And it is idempotent: linking again resolves normally.
-		res, err = linker.Link(ctx, S, []Source{phrase(S)})
-		require.NoError(t, err)
-		assert.Equal(t, orphan, res.UserID)
 	})
 
 	t.Run("full batch of MaxLinkSources sources links in one call", func(t *testing.T) {

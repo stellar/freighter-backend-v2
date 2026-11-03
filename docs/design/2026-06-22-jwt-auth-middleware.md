@@ -211,8 +211,7 @@ Resolution (`users.Linker.Link`) runs in one transaction with `SET LOCAL` lock a
 timeouts and takes **one** `pg_advisory_xact_lock`, on `hashtext(sub)`, so two callers signing as the
 same source serialize. It then resolves `sub` with `ResolveUser` on the transaction (an existing row
 is the caller's user; otherwise, under a savepoint, a new `users` row with `canonical_source_id =
-sub`, adopting an existing `users` row with that canonical id if its source row was ever lost) and
-writes every source that has no row with one sorted multi-row
+sub`) and writes every source that has no row with one sorted multi-row
 `INSERT ... ON CONFLICT (source_id) DO NOTHING RETURNING source_id`. An id that comes back unwritten
 has a committed row: under the caller it needs nothing, under anyone else it goes in `conflicts`
 and is left untouched. If the *signer's* own row comes back unwritten, another caller linked it as

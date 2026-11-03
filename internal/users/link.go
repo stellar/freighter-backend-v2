@@ -103,9 +103,9 @@ type LinkResult struct {
 	// rows are left where they are: a claimed source is never moved. Never nil.
 	Conflicts []string
 	// Created reports that this call inserted a users row: the signer rooted a
-	// new cluster. False when the signer already belonged to a user, when an
-	// orphaned users row was adopted, and when the signer lost the race for its
-	// own row and joined the cluster that claimed it.
+	// new cluster. False when the signer already belonged to a user, and when
+	// the signer lost the race for its own row and joined the cluster that
+	// claimed it.
 	Created bool
 	// Written is the number of user_sources rows this call inserted.
 	Written int
@@ -149,10 +149,8 @@ func NewLinker(db TxBeginner) *Linker {
 //     guarantee.
 //  2. Resolve the signer with ResolveUser on the transaction. If it has a row,
 //     the caller is that user. If not, the signer roots a new cluster: under a
-//     savepoint, insert a users row with canonical_source_id = signerID (or
-//     adopt one that already carries that canonical id but lost its source row,
-//     so a repaired or partially restored table cannot lock a wallet out) and
-//     go to step 3 with the signer among the rows to write. If step 3 reports
+//     savepoint, insert a users row with canonical_source_id = signerID and go
+//     to step 3 with the signer among the rows to write. If step 3 reports
 //     that the signer's row was NOT written, another caller linked the signer
 //     as one of its sources in the window since ResolveUser; roll back to the
 //     savepoint, which discards the never-committed users row, and re-resolve:
@@ -303,13 +301,13 @@ func sortSources(sources []Source) {
 	})
 }
 
-// createCluster handles a signer with no user_sources row: it creates (or
-// adopts) the users row and writes the signer's row together with others in
-// one sorted INSERT, all under a savepoint. If the signer's own row comes back
-// unwritten, another caller claimed the signer meanwhile; the savepoint is
-// rolled back so the provisional users row never commits, and the signer is
-// re-resolved as a member of that caller's cluster. created reports whether a
-// users row was actually inserted and kept.
+// createCluster handles a signer with no user_sources row: it creates the users
+// row and writes the signer's row together with others in one sorted INSERT,
+// all under a savepoint. If the signer's own row comes back unwritten, another
+// caller claimed the signer meanwhile; the savepoint is rolled back so the
+// provisional users row never commits, and the signer is re-resolved as a
+// member of that caller's cluster. created reports whether the users row was
+// kept.
 func createCluster(ctx context.Context, tx pgx.Tx, signerID, signerKind string, others []Source) (userID uuid.UUID, canonical string, written map[string]struct{}, created bool, err error) {
 	sp, err := tx.Begin(ctx) // a nested Begin is a SAVEPOINT in pgx
 	if err != nil {
@@ -317,7 +315,7 @@ func createCluster(ctx context.Context, tx pgx.Tx, signerID, signerKind string, 
 	}
 	defer sp.Rollback(ctx) //nolint:errcheck // rollback on the error path; no-op after commit
 
-	userID, created, err = createOrAdoptUser(ctx, sp, signerID)
+	userID, err = createUser(ctx, sp, signerID)
 	if err != nil {
 		return uuid.Nil, "", nil, false, err
 	}
@@ -333,7 +331,7 @@ func createCluster(ctx context.Context, tx pgx.Tx, signerID, signerKind string, 
 		if err = sp.Commit(ctx); err != nil {
 			return uuid.Nil, "", nil, false, fmt.Errorf("releasing savepoint: %w", err)
 		}
-		return userID, signerID, written, created, nil
+		return userID, signerID, written, true, nil
 	}
 
 	// Lost the race for the signer's own row. Discard everything done under the
@@ -352,27 +350,28 @@ func createCluster(ctx context.Context, tx pgx.Tx, signerID, signerKind string, 
 	return userID, canonical, written, false, nil
 }
 
-// createOrAdoptUser returns the users.id for a signer that has no user_sources
-// row. Normally that is a fresh INSERT. If a users row already carries this
-// canonical id, the signer's source row was lost (a manual repair, a partial
-// restore); adopting that row instead of tripping the UNIQUE constraint keeps
-// the wallet linkable and keeps the exposed user id stable, which is exactly
-// what canonical_source_id promises. created is true only for a fresh INSERT.
-func createOrAdoptUser(ctx context.Context, tx pgx.Tx, signerID string) (userID uuid.UUID, created bool, err error) {
-	err = tx.QueryRow(ctx, `SELECT id FROM users WHERE canonical_source_id = $1`, signerID).Scan(&userID)
-	switch {
-	case err == nil:
-		return userID, false, nil
-	case errors.Is(err, pgx.ErrNoRows):
-		// Fall through to insert.
-	default:
-		return uuid.Nil, false, fmt.Errorf("looking up user by canonical source %s: %w", signerID, err)
+// usersCanonicalSourceIDKey is the UNIQUE constraint on users.canonical_source_id.
+const usersCanonicalSourceIDKey = "users_canonical_source_id_key"
+
+// createUser inserts the users row for a signer that has no user_sources row
+// and returns its id. The advisory lock on the signer means no concurrent link
+// can insert the same canonical id, so a unique violation here means a users
+// row exists without its source row. No code path produces that (rows are
+// never deleted, and a lost race rolls the row back with the savepoint), so it
+// is a hand-made inconsistency: the error names the row to repair rather than
+// working around it.
+func createUser(ctx context.Context, tx pgx.Tx, signerID string) (uuid.UUID, error) {
+	var userID uuid.UUID
+	err := tx.QueryRow(ctx,
+		`INSERT INTO users (canonical_source_id) VALUES ($1) RETURNING id`, signerID).Scan(&userID)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.ConstraintName == usersCanonicalSourceIDKey {
+			return uuid.Nil, fmt.Errorf("users row for canonical source %s exists without its source row: %w", signerID, err)
+		}
+		return uuid.Nil, fmt.Errorf("creating user for source %s: %w", signerID, err)
 	}
-	if err = tx.QueryRow(ctx,
-		`INSERT INTO users (canonical_source_id) VALUES ($1) RETURNING id`, signerID).Scan(&userID); err != nil {
-		return uuid.Nil, false, fmt.Errorf("creating user for source %s: %w", signerID, err)
-	}
-	return userID, true, nil
+	return userID, nil
 }
 
 // insertSources writes rows under userID in one statement, skipping any id
