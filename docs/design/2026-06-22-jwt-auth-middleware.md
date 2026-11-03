@@ -228,9 +228,8 @@ defaults), which a handful of pods under concurrent full-size requests could exh
 transaction in the database down with them. Sorting the batch is what keeps two concurrent inserts
 with overlapping ids from deadlocking.
 
-A request carries at most `users.MaxLinkSources` = 32 sources. #165 specified 128; it was lowered
-because every row this endpoint writes is permanent and any self-minted key can write some, so the
-cap is what bounds how far one request amplifies into storage and ed25519 work. A real wallet is one
+A request carries at most `users.MaxLinkSources` = 32 sources. Every row this endpoint writes is
+permanent and any self-minted key can write some, so the cap is what bounds how far one request amplifies into storage and ed25519 work. A real wallet is one
 phrase plus a handful of keys; a client with more links in several calls under the same signer.
 The only rate limiter is per-IP at the ingress (#104, in `stellar/kube`), keyed on an
 X-Forwarded-For value that closure itself calls attacker-influenced, and per-`sub` limiting (#105)

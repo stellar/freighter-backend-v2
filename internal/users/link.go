@@ -17,9 +17,7 @@ import (
 // one call, and a client with more links them in several calls under the same
 // signer. The cap exists because every row this endpoint writes is permanent
 // and any self-minted key can write some: it bounds how far one request
-// amplifies into storage and into ed25519 verifies. #165 specified 128; it was
-// lowered for that reason, since nothing in a request justifies the larger
-// number.
+// amplifies into storage and into ed25519 verifies.
 const MaxLinkSources = 32
 
 // Per-statement timeouts, applied with SET LOCAL so they end with the
