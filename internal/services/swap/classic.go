@@ -188,7 +188,7 @@ func (c *ClassicSource) BuildTx(ctx context.Context, req types.SwapBuildRequest)
 		return "", fmt.Errorf("%w: account", ErrBadRequest)
 	}
 	var acctKey xdr.LedgerKey
-	if err := acctKey.SetAccount(acct); err != nil {
+	if err = acctKey.SetAccount(acct); err != nil {
 		return "", err
 	}
 	acctKeyB64, err := xdr.MarshalBase64(acctKey)
@@ -199,12 +199,13 @@ func (c *ClassicSource) BuildTx(ctx context.Context, req types.SwapBuildRequest)
 	var tlKeyB64 string
 	// An issuer holds no trustline to its own asset.
 	if !to.IsNative() && to.Issuer != req.Account {
-		toX, err := to.XDR()
+		var toX xdr.Asset
+		toX, err = to.XDR()
 		if err != nil {
 			return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
 		}
 		var tlKey xdr.LedgerKey
-		if err := tlKey.SetTrustline(acct, toX.ToTrustLineAsset()); err != nil {
+		if err = tlKey.SetTrustline(acct, toX.ToTrustLineAsset()); err != nil {
 			return "", err
 		}
 		tlKeyB64, err = xdr.MarshalBase64(tlKey)
@@ -222,7 +223,7 @@ func (c *ClassicSource) BuildTx(ctx context.Context, req types.SwapBuildRequest)
 		return "", ErrAccountNotFound
 	}
 	var data xdr.LedgerEntryData
-	if err := xdr.SafeUnmarshalBase64(acctData, &data); err != nil {
+	if err = xdr.SafeUnmarshalBase64(acctData, &data); err != nil {
 		return "", err
 	}
 	seq := int64(data.MustAccount().SeqNum)
@@ -239,11 +240,13 @@ func (c *ClassicSource) BuildTx(ctx context.Context, req types.SwapBuildRequest)
 	if len(req.Paths) == 1 {
 		hops := req.Paths[0].Hops
 		for i := 0; i+1 < len(hops); i++ {
-			mid, err := ParseAsset(hops[i].To)
+			var mid Asset
+			mid, err = ParseAsset(hops[i].To)
 			if err != nil || !mid.IsClassic() {
 				return "", fmt.Errorf("%w: path", ErrBadRequest)
 			}
-			midT, err := mid.TxnbuildAsset()
+			var midT txnbuild.Asset
+			midT, err = mid.TxnbuildAsset()
 			if err != nil {
 				return "", fmt.Errorf("%w: path", ErrBadRequest)
 			}
@@ -257,7 +260,8 @@ func (c *ClassicSource) BuildTx(ctx context.Context, req types.SwapBuildRequest)
 			if !ok {
 				return "", fmt.Errorf("%w: destination asset", ErrBadRequest)
 			}
-			line, err := credit.ToChangeTrustAsset()
+			var line txnbuild.ChangeTrustAsset
+			line, err = credit.ToChangeTrustAsset()
 			if err != nil {
 				return "", err
 			}

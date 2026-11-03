@@ -139,7 +139,7 @@ func (s *LifiSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (*ty
 		return nil, fmt.Errorf("lifi: %w", ErrLifiMissingTx)
 	}
 	var env xdr.TransactionEnvelope
-	if err := xdr.SafeUnmarshalBase64(q.TransactionRequest.Data, &env); err != nil {
+	if err = xdr.SafeUnmarshalBase64(q.TransactionRequest.Data, &env); err != nil {
 		return nil, fmt.Errorf("lifi: %w", ErrLifiMissingTx)
 	}
 	call, err := decodeLifiCall(env)

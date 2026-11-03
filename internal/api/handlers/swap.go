@@ -149,7 +149,7 @@ func (h *SwapHandler) Build(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	if req.Slippage != "" {
-		if _, err := swap.SlippageFraction(req.Slippage); err != nil {
+		if _, err = swap.SlippageFraction(req.Slippage); err != nil {
 			return swapBadRequest("invalid slippage")
 		}
 	}
