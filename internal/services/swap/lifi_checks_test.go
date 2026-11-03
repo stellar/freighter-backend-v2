@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	lifiSwapContract = "CDCNXZHYWRDHNAQEY5EX3WCF7BCWVJBS64ZBVUGRTQBFTHUKG6NAXFTR"
-	lifiAggregator   = "CARVQXFP4JF5ELLXUMQ6DALR346YVGBMQOHB4ENA7SSVXAYABXLBDDC4"
-	lifiFeeRecipient = "GAZYY5SJZNAVWZWVKJ2E74W2WKZP5BACLVV6FVHC5NZWXPKTQEDOYUR4"
-	lifiPartnerID    = "104aaf592"
+	// The production pins, so the recorded mainnet fixtures check them.
+	lifiSwapContract = LifiSwapContract
+	lifiAggregator   = SoroswapAggregator
+	lifiFeeRecipient = LifiFeeRecipient
+	lifiPartnerID    = LifiPartnerID
 	lifiTestAccount  = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7"
 	// EURC on mainnet: a contract the trust fixture does not touch.
 	otherContract = "CDTKPWPLOURQA2SGTKTUQOWRCBZEORB4BWBOMJ3D3ZTQQSGE5F6JBQLV"
