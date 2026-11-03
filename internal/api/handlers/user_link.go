@@ -111,9 +111,10 @@ type UserLinkedSource struct {
 //     behind auth.Required).
 //   - 403: a consent that does not verify: forged, signed by another key, or
 //     bound to a different signer, kind, or issue time than this request's.
-//   - 503: the database is disabled, the request was canceled, or (with a
-//     Retry-After header) the store timed out waiting for the signer lock
-//     behind another link signed as the same source.
+//   - 503: the database is disabled (checked before the body is read, so it
+//     takes precedence over any 400 or 403), the request was canceled, or
+//     (with a Retry-After header) the store timed out waiting for the signer
+//     lock behind another link signed as the same source.
 //   - 504: LinkRequestTimeout passed (pool acquisition plus the whole
 //     transaction), or one of the store's own statements timed out.
 func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
@@ -129,6 +130,14 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 		// wiring bug, not a client error.
 		metrics.RecordUserLink(h.metrics, metrics.LinkResultError)
 		return httperror.InternalServerError("An unexpected error occurred", errors.New("authenticated request has no verified iat"))
+	}
+
+	// Check the database before reading the body. Production runs with it
+	// disabled, and anyone can mint a JWT, so checking later would let any
+	// caller buy up to users.MaxLinkSources signature verifies for a 503.
+	if h.linker == nil {
+		metrics.RecordUserLink(h.metrics, metrics.LinkResultError)
+		return httperror.ServiceUnavailable("Database is disabled", nil)
 	}
 
 	var req UserLinkRequest
@@ -153,11 +162,6 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		metrics.RecordUserLink(h.metrics, linkResultForStatus(err))
 		return err
-	}
-
-	if h.linker == nil {
-		metrics.RecordUserLink(h.metrics, metrics.LinkResultError)
-		return httperror.ServiceUnavailable("Database is disabled", nil)
 	}
 
 	linkCtx, cancel := context.WithTimeout(ctx, LinkRequestTimeout)

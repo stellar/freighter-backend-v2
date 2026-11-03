@@ -277,12 +277,28 @@ func TestUserLink_RejectedWritesNothing(t *testing.T) {
 	}
 }
 
+// With the database disabled the handler answers 503 before it reads the body,
+// so a request that would otherwise fail validation still gets 503 and no
+// consent is verified. The invalid cases pin that ordering down.
 func TestUserLink_DatabaseDisabled(t *testing.T) {
 	iat := time.Unix(1700000000, 0)
 	P := newLinkKey(t)
-	_, err := doLink(t, nil, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}})
-	require.Error(t, err)
-	assert.Equal(t, http.StatusServiceUnavailable, statusOf(t, err))
+	cases := []struct {
+		name string
+		body any
+	}{
+		{"valid consent", UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}}},
+		{"consent bound to another iat (would be 403)", UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat.Add(time.Second))}}},
+		{"no sources (would be 400)", UserLinkRequest{}},
+		{"malformed JSON (would be 400)", "{not json"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := doLink(t, nil, P.id, iat, tc.body)
+			require.Error(t, err)
+			assert.Equal(t, http.StatusServiceUnavailable, statusOf(t, err))
+		})
+	}
 }
 
 func TestUserLink_StoreErrorIs500(t *testing.T) {
