@@ -236,7 +236,7 @@ phrase plus a handful of keys; a client with more links in several calls under t
 The only rate limiter is per-IP at the ingress (#104, in `stellar/kube`), keyed on an
 X-Forwarded-For value that closure itself calls attacker-influenced, and per-`sub` limiting (#105)
 cannot help here since an attacker mints a fresh `sub` per request. A per-route ingress limit on
-this path is the real mitigation and is infra work; `freighter_user_link_requests_total` and
+this path is the real mitigation and is infra work; `freighter_user_link_users_created_total` and
 `freighter_user_link_sources_total` (see Operational notes) are how an attack is seen meanwhile.
 
 Status codes: `400` for a malformed body (empty, trailing data after the JSON object, more than
@@ -394,12 +394,14 @@ logging middleware.
 - Config var: `AUTH_MODE` / `--auth-mode` (default `permissive`).
 - Route: `GET /api/v1/auth/whoami` (auth smoke-test surface).
 - Route: `POST /api/v1/user/link` (always `auth.Required`; the only identity write).
-- Metrics: `freighter_user_link_requests_total{result}` with `result` in `created` | `resolved` |
-  `bad_request` | `bad_consent` | `error`, and `freighter_user_link_sources_total{outcome}` with
-  `outcome` in `written` | `conflict`. Alert on the rate of `result="created"`: a real wallet creates
-  one user, once, so a sustained creation rate is a sybil storage-exhaustion attack, and
-  `outcome="written"` says how many permanent rows it is producing. Both label sets are closed and
-  never carry a source id. Reflect in `wallet-eng-runbooks` via the runbook reconcile step.
+- Metrics: `freighter_user_link_users_created_total` (no labels) and
+  `freighter_user_link_sources_total{outcome}` with `outcome` in `written` | `conflict`. Alert on the
+  rate of users created: a real wallet creates one user, once, so a sustained creation rate is a
+  sybil storage-exhaustion attack, and `outcome="written"` says how many permanent rows it is
+  producing. Request outcomes are not duplicated: read them from
+  `freighter_http_requests_total{handler="POST /api/v1/user/link", code}` (400 malformed, 403 bad
+  consent, 5xx errors; resolved links are the 200s minus users created). No label carries a source
+  id. Reflect in `wallet-eng-runbooks` via the runbook reconcile step.
 - **link tests:** consent verifier vectors in `internal/auth` (both kinds, signer-as-subject, kind /
   signer / iat altered after signing, wrong key, non-standard base64); the handler's rejection table
   against a fake store that must never be reached; the resolve-by-signer matrix, canonical-root,

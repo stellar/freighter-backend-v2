@@ -121,7 +121,6 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 	if !ok {
 		// The middleware sets iat exactly when it sets the source id, so this is a
 		// wiring bug, not a client error.
-		metrics.RecordUserLink(h.metrics, metrics.LinkResultError)
 		return httperror.InternalServerError("An unexpected error occurred", errors.New("authenticated request has no verified iat"))
 	}
 
@@ -129,14 +128,12 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 	// disabled, and anyone can mint a JWT, so checking later would let any
 	// caller buy up to users.MaxLinkSources signature verifies for a 503.
 	if h.linker == nil {
-		metrics.RecordUserLink(h.metrics, metrics.LinkResultError)
 		return httperror.ServiceUnavailable("Database is disabled", nil)
 	}
 
 	var req UserLinkRequest
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(&req); err != nil {
-		metrics.RecordUserLink(h.metrics, metrics.LinkResultBadRequest)
 		return httperror.BadRequest("invalid JSON", err)
 	}
 	// Decode reads one JSON value and ignores the rest of the body. The body is
@@ -147,13 +144,11 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 		if err == nil {
 			err = errors.New("a second JSON value follows the request object")
 		}
-		metrics.RecordUserLink(h.metrics, metrics.LinkResultBadRequest)
 		return httperror.BadRequest("invalid JSON: trailing data after the request object", err)
 	}
 
 	sources, err := validateLinkSources(req.Sources, sub, iat)
 	if err != nil {
-		metrics.RecordUserLink(h.metrics, linkResultForStatus(err))
 		return err
 	}
 
@@ -168,22 +163,17 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 			// the wallet-backend handlers: a timeout is a 504, not an operational
 			// 500. The wrapped Postgres error in the log line says which fired.
 			logger.WarnWithContext(ctx, "linking sources timed out", "error", err)
-			metrics.RecordUserLink(h.metrics, metrics.LinkResultError)
 			return httperror.GatewayTimeout("linking sources timed out", err)
 		case errors.Is(err, context.Canceled):
-			metrics.RecordUserLink(h.metrics, metrics.LinkResultError)
 			return httperror.ServiceUnavailable("request canceled", err)
 		default:
 			logger.ErrorWithContext(ctx, "linking sources failed", "error", err)
-			metrics.RecordUserLink(h.metrics, metrics.LinkResultError)
 			return httperror.InternalServerError("An unexpected error occurred", err)
 		}
 	}
 
 	if res.Created {
-		metrics.RecordUserLink(h.metrics, metrics.LinkResultCreated)
-	} else {
-		metrics.RecordUserLink(h.metrics, metrics.LinkResultResolved)
+		metrics.RecordUserLinkUserCreated(h.metrics)
 	}
 	metrics.RecordUserLinkSources(h.metrics, metrics.LinkSourceWritten, res.Written)
 	metrics.RecordUserLinkSources(h.metrics, metrics.LinkSourceConflict, len(res.Conflicts))
@@ -199,17 +189,6 @@ func (h *UserLinkHandler) Link(w http.ResponseWriter, r *http.Request) error {
 
 	w.Header().Set("Content-Type", "application/json")
 	return response.OK(w, HttpResponse{Data: out})
-}
-
-// linkResultForStatus maps a validation error to its metric label: 403 is a
-// consent that did not verify, everything else validateLinkSources returns is
-// a 400.
-func linkResultForStatus(err error) string {
-	var he *httperror.HttpError
-	if errors.As(err, &he) && he.StatusCode == http.StatusForbidden {
-		return metrics.LinkResultBadConsent
-	}
-	return metrics.LinkResultBadRequest
 }
 
 // validateLinkSources applies every structural check, then verifies every

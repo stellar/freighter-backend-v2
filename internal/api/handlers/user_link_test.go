@@ -315,7 +315,7 @@ func TestUserLink_Metrics(t *testing.T) {
 	iat := time.Unix(1700000000, 0)
 	P, K, F := newLinkKey(t), newLinkKey(t), newLinkKey(t)
 	m := metrics.NewUserLink(prometheus.NewRegistry())
-	count := func(result string) float64 { return testutil.ToFloat64(m.RequestsTotal.WithLabelValues(result)) }
+	created := func() float64 { return testutil.ToFloat64(m.UsersCreatedTotal) }
 	sources := func(outcome string) float64 { return testutil.ToFloat64(m.SourcesTotal.WithLabelValues(outcome)) }
 
 	// A fresh cluster: created, two rows written, one conflict.
@@ -332,34 +332,35 @@ func TestUserLink_Metrics(t *testing.T) {
 		F.consent(auth.SourceKindSecretKey, P.id, iat),
 	}})
 	require.NoError(t, err)
-	assert.Equal(t, float64(1), count(metrics.LinkResultCreated))
-	assert.Equal(t, float64(0), count(metrics.LinkResultResolved))
+	assert.Equal(t, float64(1), created())
 	assert.Equal(t, float64(2), sources(metrics.LinkSourceWritten))
 	assert.Equal(t, float64(1), sources(metrics.LinkSourceConflict))
 
-	// An existing user re-linking: resolved, nothing written.
+	// An existing user re-linking: no user created, nothing written.
 	linker = &fakeLinker{result: &users.LinkResult{CanonicalSourceID: P.id, Sources: []users.LinkedSource{{ID: P.id}}, Conflicts: []string{}}}
 	_, err = doLinkWithMetrics(t, linker, m, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}})
 	require.NoError(t, err)
-	assert.Equal(t, float64(1), count(metrics.LinkResultResolved))
+	assert.Equal(t, float64(1), created(), "unchanged")
 	assert.Equal(t, float64(2), sources(metrics.LinkSourceWritten), "unchanged")
 
-	// Rejections: a 400, a 403, and a store error.
-	_, err = doLinkWithMetrics(t, &fakeLinker{}, m, P.id, iat, UserLinkRequest{})
-	require.Error(t, err)
-	assert.Equal(t, float64(1), count(metrics.LinkResultBadRequest))
-
-	_, err = doLinkWithMetrics(t, &fakeLinker{}, m, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, K.id, iat)}})
-	require.Error(t, err)
-	assert.Equal(t, float64(1), count(metrics.LinkResultBadConsent))
-
-	_, err = doLinkWithMetrics(t, &fakeLinker{err: errors.New("boom")}, m, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}})
-	require.Error(t, err)
-	assert.Equal(t, float64(1), count(metrics.LinkResultError))
-
-	_, err = doLinkWithMetrics(t, nil, m, P.id, iat, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}})
-	require.Error(t, err)
-	assert.Equal(t, float64(2), count(metrics.LinkResultError), "database disabled is an error result too")
+	// Rejections (a 400, a 403, a store error, the database disabled) are
+	// counted by the HTTP metric and leave these series alone.
+	rejections := []struct {
+		linker *fakeLinker
+		body   UserLinkRequest
+	}{
+		{&fakeLinker{}, UserLinkRequest{}},
+		{&fakeLinker{}, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, K.id, iat)}}},
+		{&fakeLinker{err: errors.New("boom")}, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}}},
+		{nil, UserLinkRequest{Sources: []UserLinkSource{P.consent(auth.SourceKindPhrase, P.id, iat)}}},
+	}
+	for _, rj := range rejections {
+		_, err = doLinkWithMetrics(t, rj.linker, m, P.id, iat, rj.body)
+		require.Error(t, err)
+	}
+	assert.Equal(t, float64(1), created(), "unchanged by rejections")
+	assert.Equal(t, float64(2), sources(metrics.LinkSourceWritten), "unchanged by rejections")
+	assert.Equal(t, float64(1), sources(metrics.LinkSourceConflict), "unchanged by rejections")
 }
 
 func TestUserLink_DeadlineIs504AndCancelIs503(t *testing.T) {

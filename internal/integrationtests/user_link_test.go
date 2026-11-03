@@ -188,7 +188,7 @@ func (s *UserLinkTestSuite) TestLinkCreatesClusterThenAttachesAndReportsConflict
 	mbody, err := io.ReadAll(mresp.Body)
 	require.NoError(t, err)
 	for _, want := range []string{
-		`freighter_user_link_requests_total{result="created"}`,
+		`freighter_user_link_users_created_total`,
 		`freighter_user_link_sources_total{outcome="written"}`,
 		`freighter_user_link_sources_total{outcome="conflict"}`,
 	} {

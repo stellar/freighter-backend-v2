@@ -162,18 +162,10 @@ func RecordAuth(a *Auth, result, reason, client string) {
 	a.RequestsTotal.WithLabelValues(result, reason, client).Inc()
 }
 
-// UserLink label values. Both sets are closed: every value is assigned by the
-// handler or the store from its own outcome, never from a request field, so a
-// caller cannot grow cardinality.
+// UserLink source outcome label values. The set is closed: every value is
+// assigned by the handler from the store's outcome, never from a request field,
+// so a caller cannot grow cardinality.
 const (
-	// Request results.
-	LinkResultCreated    = "created"     // a new users row: the signer rooted a new cluster
-	LinkResultResolved   = "resolved"    // the signer already belonged to a user
-	LinkResultBadRequest = "bad_request" // 400: malformed body, cap exceeded, repeated or non-canonical id, unknown kind, sub absent
-	LinkResultBadConsent = "bad_consent" // 403: a consent did not verify
-	LinkResultError      = "error"       // 5xx or 503/504: database disabled, timeout, store failure
-
-	// Per-source outcomes.
 	LinkSourceWritten  = "written"  // a user_sources row this call inserted
 	LinkSourceConflict = "conflict" // a submitted id that belongs to another user, left untouched
 )
@@ -181,13 +173,14 @@ const (
 // UserLink holds metrics for POST /api/v1/user/link, the only write to the
 // identity tables. A valid JWT proves possession of some keypair and anyone can
 // mint one, so every request can create permanent rows that are never retired;
-// these series are how a storage-exhaustion attack is seen. The rate of
-// result="created" is the alert signal: a real wallet creates one user, once.
+// these series are how a storage-exhaustion attack is seen. Request outcomes
+// (400, 403, 5xx, 200) are not repeated here: they come from
+// freighter_http_requests_total{handler="POST /api/v1/user/link", code}.
 type UserLink struct {
-	// RequestsTotal counts link requests by result. Timeouts, including the
-	// store's lock and statement timeouts, count as "error".
-	//   result: "created" | "resolved" | "bad_request" | "bad_consent" | "error"
-	RequestsTotal *prometheus.CounterVec
+	// UsersCreatedTotal counts link requests that created a new users row (the
+	// signer rooted a new cluster). Its rate is the alert signal: a real wallet
+	// creates one user, once. Resolved requests are the 200s minus this.
+	UsersCreatedTotal prometheus.Counter
 	// SourcesTotal counts submitted sources by what happened to them. Only the
 	// two outcomes that carry a signal are counted: rows written (the
 	// amplification of one request into permanent storage) and conflicts (a
@@ -200,26 +193,26 @@ type UserLink struct {
 // NewUserLink creates and registers user-link metrics with the given registerer.
 func NewUserLink(reg prometheus.Registerer) *UserLink {
 	m := &UserLink{
-		RequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "freighter_user_link_requests_total",
-			Help: "Total number of POST /api/v1/user/link requests, by result (created, resolved, bad_request, bad_consent, error). A rising created rate is a sybil storage-exhaustion signal.",
-		}, []string{"result"}),
+		UsersCreatedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "freighter_user_link_users_created_total",
+			Help: "Total number of users created by POST /api/v1/user/link. A rising rate is a sybil storage-exhaustion signal. Request outcomes are in freighter_http_requests_total.",
+		}),
 		SourcesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_user_link_sources_total",
 			Help: "Total number of sources submitted to POST /api/v1/user/link, by outcome (written: a new user_sources row; conflict: owned by another user, left untouched).",
 		}, []string{"outcome"}),
 	}
-	reg.MustRegister(m.RequestsTotal, m.SourcesTotal)
+	reg.MustRegister(m.UsersCreatedTotal, m.SourcesTotal)
 	return m
 }
 
-// RecordUserLink records the result of one link request. Nil-safe so the
-// handler and its tests can run without a metrics registry.
-func RecordUserLink(m *UserLink, result string) {
+// RecordUserLinkUserCreated records one link request that created a user.
+// Nil-safe so the handler and its tests can run without a metrics registry.
+func RecordUserLinkUserCreated(m *UserLink) {
 	if m == nil {
 		return
 	}
-	m.RequestsTotal.WithLabelValues(result).Inc()
+	m.UsersCreatedTotal.Inc()
 }
 
 // RecordUserLinkSources adds n sources with the given outcome. Nil-safe; a
