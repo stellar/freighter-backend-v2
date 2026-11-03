@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"math/big"
 	"net/http"
 	"strings"
@@ -19,8 +20,8 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
-// maxInt64Stroops caps classic amounts: a classic balance cannot exceed it.
-const maxInt64Stroops = "9223372036854775807"
+// maxStroops caps classic amounts, which are XDR Int64 stroops. Read-only.
+var maxStroops = big.NewInt(math.MaxInt64)
 
 type SwapHandler struct {
 	svc types.SwapService
@@ -28,11 +29,6 @@ type SwapHandler struct {
 
 func NewSwapHandler(svc types.SwapService) *SwapHandler {
 	return &SwapHandler{svc: svc}
-}
-
-func maxInt64StroopsBig() *big.Int {
-	v, _ := new(big.Int).SetString(maxInt64Stroops, 10)
-	return v
 }
 
 func swapBadRequest(msg string) *httperror.HttpError {
@@ -94,7 +90,7 @@ func validateSwapCommon(network, account, from, to, amount string) *httperror.Ht
 		return swapBadRequest("invalid amount")
 	}
 	if fromAsset.IsClassic() {
-		if units.Cmp(maxInt64StroopsBig()) > 0 {
+		if units.Cmp(maxStroops) > 0 {
 			return swapBadRequest("invalid amount")
 		}
 	}
@@ -143,7 +139,7 @@ func (h *SwapHandler) Build(w http.ResponseWriter, r *http.Request) error {
 		return swapBadRequest("invalid minOut")
 	}
 	fee, err := swap.ParseUnits(req.Fee, swap.ClassicDecimals)
-	if err != nil || fee.Cmp(maxInt64StroopsBig()) > 0 {
+	if err != nil || fee.Cmp(maxStroops) > 0 {
 		return swapBadRequest("invalid fee")
 	}
 
