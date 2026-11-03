@@ -63,7 +63,8 @@ type simulated struct {
 }
 
 func (f *fakeDecimalsRPC) SimulateInvocation(_ context.Context, id xdr.ScAddress, acct *txnbuild.SimpleAccount, fn xdr.ScSymbol,
-	_ []xdr.ScVal, _ txnbuild.TimeBounds, network string) (types.SimulateTransactionResponse, error) {
+	_ []xdr.ScVal, _ txnbuild.TimeBounds, network string,
+) (types.SimulateTransactionResponse, error) {
 	contract := addrString(id)
 	f.mu.Lock()
 	if f.calls == nil {
@@ -105,7 +106,8 @@ func instanceLedger(t *testing.T, contract string, typ xdr.ContractExecutableTyp
 	require.NoError(t, err)
 	key := xdr.ScVal{Type: xdr.ScValTypeScvLedgerKeyContractInstance}
 	lk := xdr.LedgerKey{Type: xdr.LedgerEntryTypeContractData, ContractData: &xdr.LedgerKeyContractData{
-		Contract: *addr, Key: key, Durability: xdr.ContractDataDurabilityPersistent}}
+		Contract: *addr, Key: key, Durability: xdr.ContractDataDurabilityPersistent,
+	}}
 	kb, err := xdr.MarshalBase64(lk)
 	require.NoError(t, err)
 	exec := xdr.ContractExecutable{Type: typ}
@@ -114,7 +116,8 @@ func instanceLedger(t *testing.T, contract string, typ xdr.ContractExecutableTyp
 	}
 	eb, err := xdr.MarshalBase64(xdr.LedgerEntryData{Type: xdr.LedgerEntryTypeContractData, ContractData: &xdr.ContractDataEntry{
 		Contract: *addr, Key: key, Durability: xdr.ContractDataDurabilityPersistent,
-		Val: xdr.ScVal{Type: xdr.ScValTypeScvContractInstance, Instance: &xdr.ScContractInstance{Executable: exec}}}})
+		Val: xdr.ScVal{Type: xdr.ScValTypeScvContractInstance, Instance: &xdr.ScContractInstance{Executable: exec}},
+	}})
 	require.NoError(t, err)
 	return func(keys []string) (map[string]string, error) {
 		out := map[string]string{}
@@ -151,8 +154,10 @@ func decimalsOf(n uint32) func(string) (*xdr.ScVal, error) {
 }
 
 func lifiReq(amount string) types.SwapQuoteRequest {
-	return types.SwapQuoteRequest{Network: types.PUBLIC, Account: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7",
-		Mode: types.SwapModeSend, FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: amount}
+	return types.SwapQuoteRequest{
+		Network: types.PUBLIC, Account: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7",
+		Mode: types.SwapModeSend, FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: amount,
+	}
 }
 
 func fmtRaw(t *testing.T, s string, decimals int) string {
@@ -320,9 +325,11 @@ func lifiBuildReq(t *testing.T, env xdr.TransactionEnvelope) types.SwapBuildRequ
 	t.Helper()
 	call, err := decodeLifiCall(env)
 	require.NoError(t, err)
-	return types.SwapBuildRequest{Network: types.PUBLIC, Account: lifiTestAccount, Source: "lifi",
+	return types.SwapBuildRequest{
+		Network: types.PUBLIC, Account: lifiTestAccount, Source: "lifi",
 		FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "10",
-		MinOut: FormatUnits(call.MinAmountOut, 7), Fee: "0.0001"}
+		MinOut: FormatUnits(call.MinAmountOut, 7), Fee: "0.0001",
+	}
 }
 
 func TestLifiBuildTrustFixture(t *testing.T) {

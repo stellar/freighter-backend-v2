@@ -261,8 +261,10 @@ func TestLifiChecksTamperFails(t *testing.T) {
 			require.NoError(t, err)
 			hostFn(e).Auth[0].Credentials = xdr.SorobanCredentials{
 				Type: xdr.SorobanCredentialsTypeSorobanCredentialsAddress,
-				Address: &xdr.SorobanAddressCredentials{Address: *a, Nonce: 1, SignatureExpirationLedger: 1,
-					Signature: xdr.ScVal{Type: xdr.ScValTypeScvVoid}},
+				Address: &xdr.SorobanAddressCredentials{
+					Address: *a, Nonce: 1, SignatureExpirationLedger: 1,
+					Signature: xdr.ScVal{Type: xdr.ScValTypeScvVoid},
+				},
 			}
 		}},
 		{"extra root transfer", "auth child", func(t *testing.T, e *xdr.TransactionEnvelope, w *lifiExpect) {
@@ -326,16 +328,19 @@ func TestLifiChecksTamperFails(t *testing.T) {
 		}},
 		{"trust with child", "auth child", func(t *testing.T, e *xdr.TransactionEnvelope, w *lifiExpect) {
 			childByFn(t, e, "trust").SubInvocations = []xdr.SorobanAuthorizedInvocation{
-				contractCall(t, w.FromContract, "transfer", anyAddrVal(t, lifiTestAccount), anyAddrVal(t, other), i128Val(1))}
+				contractCall(t, w.FromContract, "transfer", anyAddrVal(t, lifiTestAccount), anyAddrVal(t, other), i128Val(1)),
+			}
 		}},
 		{"fee transfer with child", "auth child", func(t *testing.T, e *xdr.TransactionEnvelope, w *lifiExpect) {
 			childByFn(t, e, "transfer").SubInvocations = []xdr.SorobanAuthorizedInvocation{
-				contractCall(t, w.FromContract, "transfer", anyAddrVal(t, lifiTestAccount), anyAddrVal(t, other), i128Val(1))}
+				contractCall(t, w.FromContract, "transfer", anyAddrVal(t, lifiTestAccount), anyAddrVal(t, other), i128Val(1)),
+			}
 		}},
 		{"aggregator grandchild", "auth aggregator", func(t *testing.T, e *xdr.TransactionEnvelope, w *lifiExpect) {
 			agg := childByFn(t, e, "swap_exact_in")
 			agg.SubInvocations[0].SubInvocations = []xdr.SorobanAuthorizedInvocation{
-				contractCall(t, w.FromContract, "transfer", anyAddrVal(t, lifiTestAccount), anyAddrVal(t, other), i128Val(1))}
+				contractCall(t, w.FromContract, "transfer", anyAddrVal(t, lifiTestAccount), anyAddrVal(t, other), i128Val(1)),
+			}
 		}},
 		{"aggregator args[0] changed", "auth aggregator", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
 			childByFn(t, e, "swap_exact_in").Function.ContractFn.Args[0] = anyAddrVal(t, other)

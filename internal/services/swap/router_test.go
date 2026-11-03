@@ -49,6 +49,7 @@ func (f *fakeSource) BuildTx(ctx context.Context, _ types.SwapBuildRequest) (str
 	}
 	return f.buildXDR, f.buildErr
 }
+
 func (f *fakeSource) Quote(ctx context.Context, _ types.SwapQuoteRequest) (*types.SwapRoute, error) {
 	f.calls++
 	if f.panics {
@@ -69,12 +70,16 @@ func (f *fakeSource) Quote(ctx context.Context, _ types.SwapQuoteRequest) (*type
 }
 
 func route(src, from, to string) *types.SwapRoute {
-	return &types.SwapRoute{Source: src, FromAmount: from, ToAmount: to,
-		Paths: []types.SwapPath{{Share: "1", Hops: []types.SwapHop{{Venue: "stellar-dex", From: "XLM", To: "USDC:" + usdcIssuer}}}}}
+	return &types.SwapRoute{
+		Source: src, FromAmount: from, ToAmount: to,
+		Paths: []types.SwapPath{{Share: "1", Hops: []types.SwapHop{{Venue: "stellar-dex", From: "XLM", To: "USDC:" + usdcIssuer}}}},
+	}
 }
 
-var sendReq = types.SwapQuoteRequest{Network: types.PUBLIC, Account: "GA…", Mode: types.SwapModeSend,
-	FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100"}
+var sendReq = types.SwapQuoteRequest{
+	Network: types.PUBLIC, Account: "GA…", Mode: types.SwapModeSend,
+	FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100",
+}
 
 func TestRouterRanksSendByMostOut(t *testing.T) {
 	t.Parallel()
@@ -246,8 +251,10 @@ func TestRouterBuildDispatchesAndDetectsTrustline(t *testing.T) {
 	t.Parallel()
 	x, acct := classicTx(t, true)
 	r := NewRouter([]Source{&fakeSource{name: "classic", buildXDR: x}}, time.Second, time.Second, nil)
-	res, err := r.Build(context.Background(), types.SwapBuildRequest{Network: types.PUBLIC, Account: acct,
-		Source: "classic", FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer})
+	res, err := r.Build(context.Background(), types.SwapBuildRequest{
+		Network: types.PUBLIC, Account: acct,
+		Source: "classic", FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer,
+	})
 	require.NoError(t, err)
 	assert.Equal(t, x, res.XDR)
 	assert.True(t, res.AddsTrustline)

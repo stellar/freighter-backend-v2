@@ -62,8 +62,10 @@ func TestClassicQuoteReceive(t *testing.T) {
 	t.Parallel()
 	srv := horizonFixture(t, map[string]string{"/paths/strict-receive": "horizon_strict_receive_usdc_xlm.json"})
 	src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: srv.URL}}, nil)
-	req := types.SwapQuoteRequest{Network: types.PUBLIC, Mode: types.SwapModeReceive,
-		FromAsset: "USDC:" + usdcIssuer, ToAsset: "XLM", Amount: "0.5"}
+	req := types.SwapQuoteRequest{
+		Network: types.PUBLIC, Mode: types.SwapModeReceive,
+		FromAsset: "USDC:" + usdcIssuer, ToAsset: "XLM", Amount: "0.5",
+	}
 	rt, err := src.Quote(context.Background(), req)
 	require.NoError(t, err)
 	assert.Equal(t, "0.5", rt.ToAmount)
@@ -115,8 +117,10 @@ func newFakeLedger(t *testing.T, account string, seq int64, hasTrustline bool) *
 	require.NoError(t, ak.SetAccount(id))
 	akB64, err := xdr.MarshalBase64(ak)
 	require.NoError(t, err)
-	acctData := xdr.LedgerEntryData{Type: xdr.LedgerEntryTypeAccount,
-		Account: &xdr.AccountEntry{AccountId: id, SeqNum: xdr.SequenceNumber(seq)}}
+	acctData := xdr.LedgerEntryData{
+		Type:    xdr.LedgerEntryTypeAccount,
+		Account: &xdr.AccountEntry{AccountId: id, SeqNum: xdr.SequenceNumber(seq)},
+	}
 	f.entries[akB64], err = xdr.MarshalBase64(acctData)
 	require.NoError(t, err)
 
@@ -126,8 +130,10 @@ func newFakeLedger(t *testing.T, account string, seq int64, hasTrustline bool) *
 		require.NoError(t, tk.SetTrustline(id, usdc.ToTrustLineAsset()))
 		tkB64, err := xdr.MarshalBase64(tk)
 		require.NoError(t, err)
-		tlData := xdr.LedgerEntryData{Type: xdr.LedgerEntryTypeTrustline,
-			TrustLine: &xdr.TrustLineEntry{AccountId: id, Asset: usdc.ToTrustLineAsset(), Balance: 0, Limit: 1 << 62}}
+		tlData := xdr.LedgerEntryData{
+			Type:      xdr.LedgerEntryTypeTrustline,
+			TrustLine: &xdr.TrustLineEntry{AccountId: id, Asset: usdc.ToTrustLineAsset(), Balance: 0, Limit: 1 << 62},
+		}
 		f.entries[tkB64], err = xdr.MarshalBase64(tlData)
 		require.NoError(t, err)
 	}
@@ -155,7 +161,8 @@ func TestClassicBuild(t *testing.T) {
 			FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0002",
 			Paths: []types.SwapPath{{Share: "1", Hops: []types.SwapHop{
 				{Venue: "stellar-dex", From: "XLM", To: "AQUA:" + aquaIssuer},
-				{Venue: "stellar-dex", From: "AQUA:" + aquaIssuer, To: "USDC:" + usdcIssuer}}}},
+				{Venue: "stellar-dex", From: "AQUA:" + aquaIssuer, To: "USDC:" + usdcIssuer},
+			}}},
 		})
 		require.NoError(t, err)
 		adds, err := AddsTrustline(xdrB64, acct, "")
@@ -222,7 +229,8 @@ func TestClassicBuildTimeout(t *testing.T) {
 			FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0001",
 			Timeout: tc.timeout,
 			Paths: []types.SwapPath{{Share: "1", Hops: []types.SwapHop{
-				{Venue: "stellar-dex", From: "XLM", To: "USDC:" + usdcIssuer}}}},
+				{Venue: "stellar-dex", From: "XLM", To: "USDC:" + usdcIssuer},
+			}}},
 		})
 		require.NoError(t, err)
 		var env xdr.TransactionEnvelope
@@ -237,9 +245,11 @@ func TestClassicBuildAccountNotFound(t *testing.T) {
 	t.Parallel()
 	rpc := newFakeLedger(t, "", 0, false)
 	src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: "unused"}}, rpc)
-	_, err := src.BuildTx(context.Background(), types.SwapBuildRequest{Network: types.PUBLIC,
+	_, err := src.BuildTx(context.Background(), types.SwapBuildRequest{
+		Network: types.PUBLIC,
 		Account: keypair.MustRandom().Address(), FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer,
-		Amount: "1", MinOut: "0.1", Fee: "0.00001"})
+		Amount: "1", MinOut: "0.1", Fee: "0.00001",
+	})
 	assert.ErrorIs(t, err, ErrAccountNotFound)
 }
 

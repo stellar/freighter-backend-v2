@@ -18,8 +18,10 @@ func classicTx(t *testing.T, withTrust bool) (string, string) {
 		line, _ := usdc.ToChangeTrustAsset()
 		ops = append(ops, &txnbuild.ChangeTrust{Line: line, Limit: txnbuild.MaxTrustlineLimit})
 	}
-	ops = append(ops, &txnbuild.PathPaymentStrictSend{SendAsset: txnbuild.NativeAsset{}, SendAmount: "1",
-		Destination: kp.Address(), DestAsset: usdc, DestMin: "0.1"})
+	ops = append(ops, &txnbuild.PathPaymentStrictSend{
+		SendAsset: txnbuild.NativeAsset{}, SendAmount: "1",
+		Destination: kp.Address(), DestAsset: usdc, DestMin: "0.1",
+	})
 	tx, err := txnbuild.NewTransaction(txnbuild.TransactionParams{
 		SourceAccount: &txnbuild.SimpleAccount{AccountID: kp.Address(), Sequence: 1},
 		Operations:    ops, BaseFee: 100, Preconditions: txnbuild.Preconditions{TimeBounds: txnbuild.NewTimeout(300)},
