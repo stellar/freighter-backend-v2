@@ -555,7 +555,6 @@ func TestServeCmd_SwapDefaults(t *testing.T) {
 func TestServeCmd_SwapEnvOverrides(t *testing.T) {
 	// No t.Parallel(): t.Setenv is incompatible with parallel tests.
 	t.Setenv("DATABASE_URL", "")
-	t.Setenv("AUTH_MODE", "strict")
 	t.Setenv("SWAP_LIFI_ENABLED", "true")
 	t.Setenv("SWAP_LIFI_API_KEY", "k")
 	t.Setenv("SWAP_SOURCE_TIMEOUT_SECONDS", "2")
@@ -572,20 +571,9 @@ func TestServeCmd_LifiRequiresAPIKey(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--swap-lifi-api-key (env SWAP_LIFI_API_KEY) is required when --swap-lifi-enabled is true")
 
-	s, err := execServe(t, "--db-enabled=false", "--auth-mode", "strict", "--swap-lifi-enabled", "--swap-lifi-api-key", "k")
+	s, err := execServe(t, "--db-enabled=false", "--swap-lifi-enabled", "--swap-lifi-api-key", "k")
 	require.NoError(t, err)
 	assert.True(t, s.Cfg.SwapConfig.LifiEnabled)
-}
-
-func TestServeCmd_LifiRequiresStrictAuth(t *testing.T) {
-	t.Parallel()
-	_, err := execServe(t, "--db-enabled=false", "--auth-mode", "permissive", "--swap-lifi-enabled", "--swap-lifi-api-key", "k")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "--swap-lifi-enabled requires --auth-mode=strict")
-
-	// Classic swap alone runs under either mode.
-	_, err = execServe(t, "--db-enabled=false", "--auth-mode", "permissive")
-	require.NoError(t, err)
 }
 
 func TestServeCmd_SwapSourceTimeoutStaysBelowWriteTimeout(t *testing.T) {

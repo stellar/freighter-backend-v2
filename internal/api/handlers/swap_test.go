@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
+	"github.com/stellar/freighter-backend-v2/internal/auth"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/services/swap"
 	"github.com/stellar/freighter-backend-v2/internal/types"
@@ -63,16 +64,39 @@ func swapBuildBody(from, to, amount string) string {
 	return fmt.Sprintf(`{"account":%q,"source":"classic","fromAsset":%q,"toAsset":%q,"amount":%q,"minOut":"9.5","fee":"0.00001"}`, swapAccount, from, to, amount)
 }
 
+// signedIn is what the auth middleware leaves on a request with a valid token.
+func signedIn(r *http.Request) *http.Request {
+	return r.WithContext(auth.ContextWithUserID(r.Context(), "user"))
+}
+
 func doQuotes(h *SwapHandler, network, body string) (*httptest.ResponseRecorder, error) {
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/swap/quotes?network="+network, strings.NewReader(body))
 	rr := httptest.NewRecorder()
-	return rr, h.Quotes(rr, req)
+	return rr, h.Quotes(rr, signedIn(req))
 }
 
 func doBuild(h *SwapHandler, network, body string) (*httptest.ResponseRecorder, error) {
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/swap/tx?network="+network, strings.NewReader(body))
 	rr := httptest.NewRecorder()
-	return rr, h.Build(rr, req)
+	return rr, h.Build(rr, signedIn(req))
+}
+
+// Swap needs a signed-in user even under permissive auth: anonymous requests,
+// and clock-skewed tokens served anonymously, carry no user ID.
+func TestSwap_RequiresUser(t *testing.T) {
+	t.Parallel()
+	f := &fakeSwapService{}
+	h := NewSwapHandler(f)
+	for path, call := range map[string]func(http.ResponseWriter, *http.Request) error{
+		"/api/v1/swap/quotes": h.Quotes,
+		"/api/v1/swap/tx":     h.Build,
+	} {
+		req, _ := http.NewRequest(http.MethodPost, path+"?network=PUBLIC", strings.NewReader(swapQuoteBody("send", "XLM", swapUSDC, "10")))
+		err := call(httptest.NewRecorder(), req)
+		require.Error(t, err, path)
+		assert.Equal(t, http.StatusUnauthorized, statusOf(t, err), path)
+	}
+	assert.Zero(t, f.calls)
 }
 
 func statusOf(t *testing.T, err error) int {
@@ -183,7 +207,7 @@ func TestSwapQuotes_BodyTooLarge(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/swap/quotes?network=PUBLIC", strings.NewReader(swapQuoteBody("send", "XLM", swapUSDC, "10")))
 	rr := httptest.NewRecorder()
 	req.Body = http.MaxBytesReader(rr, req.Body, 5)
-	err := NewSwapHandler(&fakeSwapService{}).Quotes(rr, req)
+	err := NewSwapHandler(&fakeSwapService{}).Quotes(rr, signedIn(req))
 	require.Error(t, err)
 	assert.Equal(t, http.StatusRequestEntityTooLarge, statusOf(t, err))
 }

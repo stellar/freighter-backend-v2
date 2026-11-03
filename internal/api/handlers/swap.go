@@ -14,6 +14,7 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
+	"github.com/stellar/freighter-backend-v2/internal/auth"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/services/swap"
@@ -29,6 +30,15 @@ type SwapHandler struct {
 
 func NewSwapHandler(svc types.SwapService) *SwapHandler {
 	return &SwapHandler{svc: svc}
+}
+
+// requireUser rejects requests without a valid token, even under permissive
+// auth, because each quote spends LI.FI quota. Delete once auth is strict.
+func requireUser(r *http.Request) *httperror.HttpError {
+	if _, ok := auth.UserIDFromContext(r.Context()); !ok {
+		return httperror.Unauthorized("unauthorized", nil)
+	}
+	return nil
 }
 
 func swapBadRequest(msg string) *httperror.HttpError {
@@ -99,6 +109,9 @@ func validateSwapCommon(network, account, from, to, amount string) *httperror.Ht
 
 // Quotes handles POST /api/v1/swap/quotes.
 func (h *SwapHandler) Quotes(w http.ResponseWriter, r *http.Request) error {
+	if herr := requireUser(r); herr != nil {
+		return herr
+	}
 	var req types.SwapQuoteRequest
 	if herr := decodeSwapBody(r, &req); herr != nil {
 		return herr
@@ -122,6 +135,9 @@ func (h *SwapHandler) Quotes(w http.ResponseWriter, r *http.Request) error {
 
 // Build handles POST /api/v1/swap/tx.
 func (h *SwapHandler) Build(w http.ResponseWriter, r *http.Request) error {
+	if herr := requireUser(r); herr != nil {
+		return herr
+	}
 	var req types.SwapBuildRequest
 	if herr := decodeSwapBody(r, &req); herr != nil {
 		return herr

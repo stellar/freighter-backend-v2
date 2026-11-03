@@ -94,10 +94,6 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if s.Cfg.SwapConfig.LifiEnabled && s.Cfg.SwapConfig.LifiAPIKey == "" {
 				return errors.New("--swap-lifi-api-key (env SWAP_LIFI_API_KEY) is required when --swap-lifi-enabled is true")
 			}
-			// Each LI.FI quote spends our key's quota, so only signed-in users may run one.
-			if s.Cfg.SwapConfig.LifiEnabled && s.Cfg.AppConfig.AuthMode != "strict" {
-				return errors.New("--swap-lifi-enabled requires --auth-mode=strict")
-			}
 			// The volume threshold and conversion divisor are magnitudes
 			// where 0 is meaningful ("guard disabled" / "conversion not
 			// enabled") but negatives are operator error.
