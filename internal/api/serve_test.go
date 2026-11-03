@@ -478,16 +478,32 @@ func TestApiServer_initHandlers_AllUserFacingRoutesGatedInStrict(t *testing.T) {
 }
 
 // The swap routes spend a rate-limited LI.FI key, so they reject anonymous
-// requests even while --auth-mode is permissive.
+// requests even while --auth-mode is permissive. A correctly signed token from
+// a device with a wrong clock still gets through, as on every other route.
 func TestApiServer_initHandlers_SwapRoutesRequireTokenInPermissive(t *testing.T) {
 	s := newTestAPIServer(t, testCfg("permissive"))
 	mux, err := s.initHandlers()
 	require.NoError(t, err)
+	pub, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	sub := hex.EncodeToString(pub)
 
 	for _, path := range []string{"/api/v1/swap/quotes", "/api/v1/swap/tx"} {
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}")))
-		assert.Equal(t, http.StatusUnauthorized, rec.Code, path)
+		send := func(authz string) int {
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
+			if authz != "" {
+				req.Header.Set("Authorization", authz)
+			}
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			return rec.Code
+		}
+		assert.Equal(t, http.StatusUnauthorized, send(""), path+" no token")
+		assert.Equal(t, http.StatusUnauthorized, send("Basic dXNlcjpwdw=="), path+" non-bearer scheme")
+		assert.Equal(t, http.StatusUnauthorized, send("Bearer not-a-jwt"), path+" invalid bearer token")
+		skewed := authtest.MintToken(t, priv, sub, "POST "+path, auth.MaxTokenLifetime, time.Now().Add(-time.Hour), []byte("{}"))
+		// 400: past auth, rejected for the empty body.
+		assert.Equal(t, http.StatusBadRequest, send("Bearer "+skewed), path+" clock-skewed token")
 	}
 
 	rec := httptest.NewRecorder()

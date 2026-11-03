@@ -14,7 +14,6 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
-	"github.com/stellar/freighter-backend-v2/internal/auth"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/services/swap"
@@ -32,10 +31,13 @@ func NewSwapHandler(svc types.SwapService) *SwapHandler {
 	return &SwapHandler{svc: svc}
 }
 
-// requireUser rejects requests without a valid token, even under permissive
-// auth, because each quote spends LI.FI quota. Delete once auth is strict.
-func requireUser(r *http.Request) *httperror.HttpError {
-	if _, ok := auth.UserIDFromContext(r.Context()); !ok {
+// requireToken rejects requests without a Bearer token, even under permissive
+// auth, because each quote spends LI.FI quota. The auth middleware has already
+// 401ed every Bearer token except a valid one or a correctly signed one from a
+// device with a wrong clock. Delete once auth is strict.
+func requireToken(r *http.Request) *httperror.HttpError {
+	scheme, _, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+	if !strings.EqualFold(scheme, "Bearer") {
 		return httperror.Unauthorized("unauthorized", nil)
 	}
 	return nil
@@ -109,7 +111,7 @@ func validateSwapCommon(network, account, from, to, amount string) *httperror.Ht
 
 // Quotes handles POST /api/v1/swap/quotes.
 func (h *SwapHandler) Quotes(w http.ResponseWriter, r *http.Request) error {
-	if herr := requireUser(r); herr != nil {
+	if herr := requireToken(r); herr != nil {
 		return herr
 	}
 	var req types.SwapQuoteRequest
@@ -135,7 +137,7 @@ func (h *SwapHandler) Quotes(w http.ResponseWriter, r *http.Request) error {
 
 // Build handles POST /api/v1/swap/tx.
 func (h *SwapHandler) Build(w http.ResponseWriter, r *http.Request) error {
-	if herr := requireUser(r); herr != nil {
+	if herr := requireToken(r); herr != nil {
 		return herr
 	}
 	var req types.SwapBuildRequest

@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
-	"github.com/stellar/freighter-backend-v2/internal/auth"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/services/swap"
 	"github.com/stellar/freighter-backend-v2/internal/types"
@@ -64,9 +63,10 @@ func swapBuildBody(from, to, amount string) string {
 	return fmt.Sprintf(`{"account":%q,"source":"classic","fromAsset":%q,"toAsset":%q,"amount":%q,"minOut":"9.5","fee":"0.00001"}`, swapAccount, from, to, amount)
 }
 
-// signedIn is what the auth middleware leaves on a request with a valid token.
+// signedIn adds a Bearer token; the auth middleware has already verified it.
 func signedIn(r *http.Request) *http.Request {
-	return r.WithContext(auth.ContextWithUserID(r.Context(), "user"))
+	r.Header.Set("Authorization", "Bearer token")
+	return r
 }
 
 func doQuotes(h *SwapHandler, network, body string) (*httptest.ResponseRecorder, error) {
@@ -81,9 +81,8 @@ func doBuild(h *SwapHandler, network, body string) (*httptest.ResponseRecorder, 
 	return rr, h.Build(rr, signedIn(req))
 }
 
-// Swap needs a signed-in user even under permissive auth: anonymous requests,
-// and clock-skewed tokens served anonymously, carry no user ID.
-func TestSwap_RequiresUser(t *testing.T) {
+// Swap needs a Bearer token even under permissive auth.
+func TestSwap_RequiresToken(t *testing.T) {
 	t.Parallel()
 	f := &fakeSwapService{}
 	h := NewSwapHandler(f)
