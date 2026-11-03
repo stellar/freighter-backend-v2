@@ -25,8 +25,8 @@ func TestClassifyTimeout(t *testing.T) {
 		in   error
 		want error // sentinel expected in the chain; nil means unchanged
 	}{
-		{"lock timeout", fmt.Errorf("locking signer x: %w", lock), ErrLockTimeout},
-		{"statement timeout", fmt.Errorf("inserting sources: %w", stmt), ErrStatementTimeout},
+		{"lock timeout", fmt.Errorf("locking signer x: %w", lock), ErrTimeout},
+		{"statement timeout", fmt.Errorf("inserting sources: %w", stmt), ErrTimeout},
 		{"other pg error", fmt.Errorf("creating user: %w", unique), nil},
 		{"non-pg error", plain, nil},
 		{"context deadline", fmt.Errorf("x: %w", context.DeadlineExceeded), nil},
@@ -36,8 +36,7 @@ func TestClassifyTimeout(t *testing.T) {
 			require.Error(t, got)
 			if tc.want == nil {
 				assert.Same(t, tc.in, got, "returned unchanged")
-				assert.NotErrorIs(t, got, ErrLockTimeout)
-				assert.NotErrorIs(t, got, ErrStatementTimeout)
+				assert.NotErrorIs(t, got, ErrTimeout)
 				return
 			}
 			assert.ErrorIs(t, got, tc.want)

@@ -242,14 +242,15 @@ this path is the real mitigation and is infra work; `freighter_user_link_request
 Status codes: `400` for a malformed body (empty, trailing data after the JSON object, more than
 `MaxLinkSources` sources, a repeated id, a non-canonical id, an unknown kind, or a body missing `sub`); `403` for a consent that does not verify;
 `401` only as a backstop, since the route is always `auth.Required`; `503` with the database
-disabled, and `503` with a `Retry-After: 1` header when the store's `lock_timeout` (3s) fires because
-another link signed as the same source held the signer lock, which is contention, not a fault, and
-is counted as `result="contended"` rather than `"error"`; `504` when the handler's request deadline
+disabled or the request canceled; `504` when the handler's request deadline
 (`handlers.LinkRequestTimeout`, 8s, the one budget covering pool acquisition and the whole
 transaction, since `WriteTimeout` does not cancel a handler and the store's timeouts are per
-statement) or the store's `statement_timeout` (5s) fires. Both store timeouts reach the handler as a Postgres error
-(SQLSTATE `55P03` / `57014`), not a context error, so `Linker.Link` maps them to `ErrLockTimeout` /
-`ErrStatementTimeout` for the handler to classify. A conflict is a `200` with the id listed, not an
+statement), the store's `lock_timeout` (3s), or its `statement_timeout` (5s) fires. A lock wait
+can be the signer advisory lock or the `INSERT` waiting on a conflicting row another transaction
+is still inserting, so a lock timeout is not reported as same-signer contention. Both store
+timeouts reach the handler as a Postgres error (SQLSTATE `55P03` / `57014`), not a context error,
+so `Linker.Link` maps them to one `ErrTimeout`; every timeout is a `504` counted as
+`result="error"`. A conflict is a `200` with the id listed, not an
 error.
 
 ## Architecture

@@ -33,9 +33,9 @@ const MaxLinkSources = 32
 // cancels both the wait for a connection and the transaction; the HTTP
 // server's WriteTimeout does not cancel a handler. When either timeout here
 // fires, Postgres cancels the statement and the error reaches Link as a
-// *pgconn.PgError, not as a context error; Link maps the two codes to
-// ErrLockTimeout and ErrStatementTimeout so the handler can answer with a
-// retryable status instead of a 500. Values are milliseconds; SET cannot take
+// *pgconn.PgError, not as a context error; Link maps both codes to ErrTimeout
+// so the handler can answer with a 504 instead of a 500. Values are
+// milliseconds; SET cannot take
 // bind parameters, so they are formatted into the statement from these
 // constants and never from input.
 const (
@@ -43,15 +43,14 @@ const (
 	linkStatementTimeoutMs = 5000
 )
 
-// Timeouts the transaction's own SET LOCAL settings raise. Both are transient:
-// ErrLockTimeout means another link signed as the same source held the signer
-// lock for longer than lockTimeout, and the caller should retry shortly;
-// ErrStatementTimeout means one statement ran past statementTimeout, which is
-// a slow or contended database rather than a bug in the request.
-var (
-	ErrLockTimeout      = errors.New("timed out waiting for the signer lock")
-	ErrStatementTimeout = errors.New("statement timed out")
-)
+// ErrTimeout means one of the transaction's own SET LOCAL timeouts fired: a
+// lock wait ran past lockTimeout or a statement ran past statementTimeout. A
+// lock wait is not only the signer lock: the INSERT also waits on a
+// conflicting row that another transaction, possibly for a different signer,
+// is still inserting. Either way it is a slow or contended database rather
+// than a bug in the request. The *pgconn.PgError stays in the chain, so the
+// log line still shows which SQLSTATE fired.
+var ErrTimeout = errors.New("link statement timed out")
 
 // SQLSTATE codes Postgres uses for the two timeouts above.
 const (
@@ -60,7 +59,7 @@ const (
 )
 
 // classifyTimeout wraps a store error that was caused by one of the
-// transaction's SET LOCAL timeouts in its sentinel, and returns every other
+// transaction's SET LOCAL timeouts in ErrTimeout, and returns every other
 // error unchanged. The original error stays in the chain for the log line.
 func classifyTimeout(err error) error {
 	var pgErr *pgconn.PgError
@@ -68,10 +67,8 @@ func classifyTimeout(err error) error {
 		return err
 	}
 	switch pgErr.Code {
-	case pgLockNotAvailable:
-		return fmt.Errorf("%w: %w", ErrLockTimeout, err)
-	case pgQueryCanceled:
-		return fmt.Errorf("%w: %w", ErrStatementTimeout, err)
+	case pgLockNotAvailable, pgQueryCanceled:
+		return fmt.Errorf("%w: %w", ErrTimeout, err)
 	default:
 		return err
 	}
@@ -174,8 +171,8 @@ func NewLinker(db TxBeginner) *Linker {
 // clusters never combine, no row is ever retired, no users row is ever deleted,
 // and canonical_source_id is never updated.
 //
-// Errors: ErrLockTimeout and ErrStatementTimeout when the transaction's own
-// timeouts fire (see classifyTimeout); the request context's error when it
+// Errors: ErrTimeout when the transaction's own lock or statement timeout
+// fires (see classifyTimeout); the request context's error when it
 // ends first; anything else, including a CHECK violation from malformed
 // arguments, is a database failure.
 func (l *Linker) Link(ctx context.Context, signerID string, sources []Source) (*LinkResult, error) {

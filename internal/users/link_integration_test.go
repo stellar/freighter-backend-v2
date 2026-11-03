@@ -352,7 +352,7 @@ func TestLink_Postgres(t *testing.T) {
 		})
 	})
 
-	t.Run("signer lock held past lock_timeout: ErrLockTimeout, nothing written, and the link succeeds once released", func(t *testing.T) {
+	t.Run("signer lock held past lock_timeout: ErrTimeout, nothing written, and the link succeeds once released", func(t *testing.T) {
 		S := newID(t)
 
 		// Hold S's signer lock from a raw transaction, exactly as a slow
@@ -368,7 +368,7 @@ func TestLink_Postgres(t *testing.T) {
 		elapsed := time.Since(start)
 		require.Error(t, err)
 		assert.Nil(t, res)
-		assert.ErrorIs(t, err, ErrLockTimeout)
+		assert.ErrorIs(t, err, ErrTimeout)
 		assert.NotErrorIs(t, err, context.DeadlineExceeded, "the store's own timeout, not the context's")
 		assert.GreaterOrEqual(t, elapsed, time.Duration(linkLockTimeoutMs)*time.Millisecond, "waited the full lock_timeout")
 		assert.Less(t, elapsed, time.Duration(linkStatementTimeoutMs)*time.Millisecond, "gave up before statement_timeout")
