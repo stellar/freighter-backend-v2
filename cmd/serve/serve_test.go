@@ -565,6 +565,17 @@ func TestServeCmd_SwapEnvOverrides(t *testing.T) {
 	assert.Equal(t, 2, cfg.SwapConfig.SourceTimeoutSeconds)
 }
 
+func TestServeCmd_LifiRequiresAPIKey(t *testing.T) {
+	t.Parallel()
+	_, err := execServe(t, "--db-enabled=false", "--swap-lifi-enabled")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--swap-lifi-api-key (env SWAP_LIFI_API_KEY) is required when --swap-lifi-enabled is true")
+
+	s, err := execServe(t, "--db-enabled=false", "--swap-lifi-enabled", "--swap-lifi-api-key", "k")
+	require.NoError(t, err)
+	assert.True(t, s.Cfg.SwapConfig.LifiEnabled)
+}
+
 func TestServeCmd_SwapSourceTimeoutStaysBelowWriteTimeout(t *testing.T) {
 	t.Parallel()
 	limit := int(api.DefaultWriteTimeout / time.Second)

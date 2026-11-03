@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -89,6 +90,9 @@ func (s *ServeCmd) Command() *cobra.Command {
 			}
 			if n := s.Cfg.SwapConfig.SourceTimeoutSeconds; time.Duration(n)*time.Second >= api.DefaultWriteTimeout {
 				return fmt.Errorf("--swap-source-timeout-seconds=%d must be below the server write timeout (%s)", n, api.DefaultWriteTimeout)
+			}
+			if s.Cfg.SwapConfig.LifiEnabled && s.Cfg.SwapConfig.LifiAPIKey == "" {
+				return errors.New("--swap-lifi-api-key (env SWAP_LIFI_API_KEY) is required when --swap-lifi-enabled is true")
 			}
 			// The volume threshold and conversion divisor are magnitudes
 			// where 0 is meaningful ("guard disabled" / "conversion not
