@@ -160,7 +160,11 @@ func (r *rpcService) SimulateInvocation(
 		metrics.Record(r.svcMetrics, serviceName, "SimulateInvocation", network, time.Since(start).Seconds(), err)
 	}()
 
-	contractHash := contractId.ContractId
+	// Only the contract arm carries a ContractId; every other arm (G, M, W, ...) leaves it nil.
+	contractHash, ok := contractId.GetContractId()
+	if !ok {
+		return nil, fmt.Errorf("invalid contract ID: address type %s is not a contract", contractId.Type)
+	}
 	contractIdStr, err := strkey.Encode(strkey.VersionByteContract, contractHash[:])
 	if err != nil || !utils.IsValidContractID(contractIdStr) {
 		return nil, fmt.Errorf("invalid contract ID: %w", err)
