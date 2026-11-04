@@ -3,7 +3,6 @@ package swap
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/stellar/go-stellar-sdk/network"
 	"github.com/stellar/go-stellar-sdk/strkey"
@@ -31,16 +30,16 @@ func ParseAsset(s string) (Asset, error) {
 	case strkey.IsValidContractAddress(s):
 		return Asset{ID: s, Contract: s}, nil
 	}
-	code, issuer, ok := strings.Cut(s, ":")
-	if !ok || len(code) == 0 || len(code) > 12 || !strkey.IsValidEd25519PublicKey(issuer) {
+	// SEP-11 "CODE:ISSUER". Its "native" spelling is not part of this API.
+	ta, err := txnbuild.ParseAssetString(s)
+	if err != nil {
 		return Asset{}, fmt.Errorf("%w: %q", errBadAsset, s)
 	}
-	for _, r := range code {
-		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
-			return Asset{}, fmt.Errorf("%w: %q", errBadAsset, s)
-		}
+	ca, ok := ta.(txnbuild.CreditAsset)
+	if !ok {
+		return Asset{}, fmt.Errorf("%w: %q", errBadAsset, s)
 	}
-	return Asset{ID: s, Code: code, Issuer: issuer}, nil
+	return Asset{ID: s, Code: ca.Code, Issuer: ca.Issuer}, nil
 }
 
 func (a Asset) IsNative() bool  { return a.ID == "XLM" }

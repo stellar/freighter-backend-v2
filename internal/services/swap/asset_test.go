@@ -26,7 +26,12 @@ func TestParseAsset(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, a.IsClassic())
 
-	for _, bad := range []string{"", "native", "USDC", "USDC:GBAD", "TOOLONGCODE123:" + usdcIssuer, "CBAD"} {
+	for _, bad := range []string{
+		"", "native", "NATIVE", "xlm", "USDC", "USDC:GBAD", "TOOLONGCODE123:" + usdcIssuer, "CBAD",
+		"US-DC:" + usdcIssuer, "ÜSDC:" + usdcIssuer, // code must be ASCII alphanumeric
+		"USDC:" + usdcIssuer + ",EURC:" + usdcIssuer,                                 // one asset only
+		"USDC:MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAAAACJUQ", // muxed issuer
+	} {
 		_, err := ParseAsset(bad)
 		assert.Error(t, err, bad)
 	}
