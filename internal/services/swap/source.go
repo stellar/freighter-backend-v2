@@ -7,11 +7,34 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
-// Source is one liquidity venue that can quote a swap and build its transaction.
+// Source is one liquidity venue that can quote a swap and build its
+// transaction. checkSourceContract (source_contract_test.go) tests the rules
+// below; README.md lists what else a new source needs.
 type Source interface {
+	// Name is the route's "source" field, the /swap/tx "source" a client sends
+	// back, and the metrics label, so it must never change.
 	Name() string
+	// Supports reports whether the source serves a network. The router does
+	// not call Quote or BuildTx for one it does not.
 	Supports(network string) bool
+	// Quote returns a route with Source == Name(). Amounts are decimal
+	// strings in each asset's own decimals; the fixed side (FromAmount for
+	// send, ToAmount for receive) equals req.Amount. Paths run from
+	// req.FromAsset to req.ToAsset with connected hops and shares summing to
+	// 1; Fees is [] when there are none. It returns once ctx is done: the
+	// router gives each source its own timeout.
+	//
+	// Errors: ErrNoRoute, ErrInsufficientBalance, ErrRateLimited,
+	// ErrBadRequest, or ErrUnsupportedMode for a mode the source does not
+	// offer (not counted as a failure). A ctx deadline reports as "timeout",
+	// anything else as "error".
 	Quote(ctx context.Context, req types.SwapQuoteRequest) (*types.SwapRoute, error)
+	// BuildTx returns an unsigned base64 TransactionEnvelope for req.Account
+	// that expires timeoutSeconds(req) from now. The user must never receive
+	// less than req.MinOut: enforce it in the transaction (classic DestMin) or
+	// re-quote and return ErrQuoteMoved. A transaction built by a third party
+	// must be checked to do exactly what was quoted (lifi_checks.go), or
+	// ErrCheckFailed. The router works out AddsTrustline from the XDR.
 	BuildTx(ctx context.Context, req types.SwapBuildRequest) (string, error)
 }
 
