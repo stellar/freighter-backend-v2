@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -144,5 +146,39 @@ func TestLifiSourceContract(t *testing.T) {
 		quotes: []types.SwapQuoteRequest{send, receive},
 		build:  lifiBuildReq(t, env),
 		now:    func() time.Time { return time.Unix(int64(env.V1.Tx.Cond.TimeBounds.MaxTime)-300, 0) },
+	})
+}
+
+// Classic quotes from sdex-orderbook follow the same contract as from Horizon.
+func TestClassicOrderbookSourceContract(t *testing.T) {
+	t.Parallel()
+	ob := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Mode, Amount string }
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		from, to := req.Amount, "17.5450814"
+		if req.Mode == types.SwapModeReceive {
+			from, to = "2.8500000", req.Amount
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"fromAmount": from, "toAmount": to, "path": []string{"EURC:" + eurcIssuer}, "ledger": 1,
+		})
+	}))
+	t.Cleanup(ob.Close)
+	acct := keypair.MustRandom().Address()
+	src := newOrderbookSource("http://unused.invalid", ob.URL, nil)
+	src.rpc = newFakeLedger(t, acct, 41, true)
+
+	checkSourceContract(t, sourceContract{
+		src: src,
+		quotes: []types.SwapQuoteRequest{
+			sendReq,
+			{Network: types.PUBLIC, Mode: types.SwapModeReceive, FromAsset: "USDC:" + usdcIssuer, ToAsset: "XLM", Amount: "0.5"},
+		},
+		build: types.SwapBuildRequest{
+			Network: types.PUBLIC, Account: acct, Source: classicName,
+			FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0002", Timeout: 180,
+			Paths: []types.SwapPath{{Share: "1", Hops: []types.SwapHop{{Venue: "stellar-dex", From: "XLM", To: "USDC:" + usdcIssuer}}}},
+		},
+		now: time.Now,
 	})
 }
