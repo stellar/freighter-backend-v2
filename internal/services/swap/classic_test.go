@@ -3,18 +3,25 @@ package swap
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stellar/go-stellar-sdk/keypair"
 	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
@@ -297,5 +304,252 @@ func TestClassicBuildFeeFloor(t *testing.T) {
 		var env xdr.TransactionEnvelope
 		require.NoError(t, xdr.SafeUnmarshalBase64(xdrB64, &env))
 		assert.Equal(t, int64(100*len(env.Operations())), int64(env.Fee()))
+	}
+}
+
+// orderbookFixture serves POST /v1/quote with the given status and body.
+func orderbookFixture(t *testing.T, status int, body string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/quote" {
+			w.WriteHeader(http.StatusTeapot)
+			return
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// countingHorizon answers strict-send from the fixture and counts calls.
+func countingHorizon(t *testing.T) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var calls atomic.Int32
+	fixture := horizonFixture(t, map[string]string{"/paths/strict-send": "horizon_strict_send_xlm_usdc.json"})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Redirect(w, r, fixture.URL+r.URL.RequestURI(), http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &calls
+}
+
+func newOrderbookSource(horizonURL, orderbookURL string, m *metrics.Swap) *ClassicSource {
+	return NewClassicSource(ClassicConfig{
+		HorizonURLs:   map[string]string{types.PUBLIC: horizonURL},
+		OrderbookURLs: map[string]string{types.PUBLIC: orderbookURL},
+		Metrics:       m,
+	}, nil)
+}
+
+const eurcIssuer = "GDHU6WRG4IEQXM5NZ4BMPKOXHW76MZM4Y2IEMFDVXBSDP6SJY4ITNPP2"
+
+func TestClassicQuoteFromOrderbook(t *testing.T) {
+	t.Parallel()
+	hz, hzCalls := countingHorizon(t)
+	ob := orderbookFixture(t, http.StatusOK, `{"mode":"send","fromAsset":"XLM","toAsset":"USDC:`+usdcIssuer+`",
+		"fromAmount":"100.0000000","toAmount":"17.5450814","path":["EURC:`+eurcIssuer+`"],"ledger":59123456}`)
+	src := newOrderbookSource(hz.URL, ob.URL, nil)
+
+	rt, err := src.Quote(context.Background(), sendReq)
+	require.NoError(t, err)
+	assert.Equal(t, int32(0), hzCalls.Load())
+	assert.Equal(t, "classic", rt.Source)
+	assert.Equal(t, "100", rt.FromAmount)
+	assert.Equal(t, "17.5450814", rt.ToAmount)
+	require.Len(t, rt.Paths, 1)
+	assert.Equal(t, []types.SwapHop{
+		{Venue: "stellar-dex", From: "XLM", To: "EURC:" + eurcIssuer},
+		{Venue: "stellar-dex", From: "EURC:" + eurcIssuer, To: "USDC:" + usdcIssuer},
+	}, rt.Paths[0].Hops)
+}
+
+func TestClassicQuoteFromOrderbookReceive(t *testing.T) {
+	t.Parallel()
+	var got map[string]string
+	ob := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		_, _ = w.Write([]byte(`{"fromAmount":"2.8500000","toAmount":"0.5000000","path":[],"ledger":1}`))
+	}))
+	t.Cleanup(ob.Close)
+	src := newOrderbookSource("http://unused.invalid", ob.URL, nil)
+	req := types.SwapQuoteRequest{
+		Network: types.PUBLIC, Mode: types.SwapModeReceive,
+		FromAsset: "USDC:" + usdcIssuer, ToAsset: "XLM", Amount: "0.5",
+	}
+
+	rt, err := src.Quote(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"mode": "receive", "fromAsset": "USDC:" + usdcIssuer, "toAsset": "XLM", "amount": "0.5"}, got)
+	assert.Equal(t, "2.8500000", rt.FromAmount)
+	assert.Equal(t, "0.5", rt.ToAmount)
+	assert.Equal(t, []types.SwapHop{{Venue: "stellar-dex", From: "USDC:" + usdcIssuer, To: "XLM"}}, rt.Paths[0].Hops)
+}
+
+// A no_route answer is final: Horizon runs the same search.
+func TestClassicQuoteOrderbookNoRoute(t *testing.T) {
+	t.Parallel()
+	hz, hzCalls := countingHorizon(t)
+	ob := orderbookFixture(t, http.StatusNotFound, `{"code":"no_route","message":"no path"}`)
+	m := metrics.NewSwap(prometheus.NewRegistry())
+	src := newOrderbookSource(hz.URL, ob.URL, m)
+
+	_, err := src.Quote(context.Background(), sendReq)
+	assert.ErrorIs(t, err, ErrNoRoute)
+	assert.Equal(t, int32(0), hzCalls.Load())
+	assert.Equal(t, 0, testutil.CollectAndCount(m.OrderbookFallbacks))
+}
+
+func TestClassicQuoteFallsBackToHorizon(t *testing.T) {
+	t.Parallel()
+	hang := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body) // the server sees the client hang up only after the body is read
+		<-r.Context().Done()
+	}))
+	t.Cleanup(hang.Close)
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+
+	cases := []struct {
+		name, url, reason string
+	}{
+		{"not ready", orderbookFixture(t, http.StatusServiceUnavailable, `{"code":"not_ready","message":"loading"}`).URL, "not_ready"},
+		{"search timeout", orderbookFixture(t, http.StatusGatewayTimeout, `{"code":"timeout","message":"slow"}`).URL, "timeout"},
+		{"hung", hang.URL, "timeout"},
+		{"unreachable", closed.URL, "error"},
+		{"bad request", orderbookFixture(t, http.StatusBadRequest, `{"code":"invalid_request","message":"x"}`).URL, "error"},
+		{"bad path asset", orderbookFixture(t, http.StatusOK, `{"fromAmount":"100","toAmount":"1","path":["native"]}`).URL, "error"},
+		{"bad json", orderbookFixture(t, http.StatusOK, `{`).URL, "error"},
+		{"404 not no_route", orderbookFixture(t, http.StatusNotFound, `{"code":"not_found","message":"x"}`).URL, "error"},
+		{"404 plain text", orderbookFixture(t, http.StatusNotFound, `404 page not found`).URL, "error"},
+		{"missing amount", orderbookFixture(t, http.StatusOK, `{"fromAmount":"100","path":[]}`).URL, "error"},
+		{"zero amount", orderbookFixture(t, http.StatusOK, `{"fromAmount":"100","toAmount":"0.0000000","path":[]}`).URL, "error"},
+		{"fraction amount", orderbookFixture(t, http.StatusOK, `{"fromAmount":"100","toAmount":"1/3","path":[]}`).URL, "error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			hz, hzCalls := countingHorizon(t)
+			m := metrics.NewSwap(prometheus.NewRegistry())
+			src := newOrderbookSource(hz.URL, tc.url, m)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			rt, err := src.Quote(ctx, sendReq)
+			require.NoError(t, err)
+			assert.Equal(t, int32(1), hzCalls.Load())
+			assert.NotEmpty(t, rt.ToAmount)
+			assert.Equal(t, 1.0, testutil.ToFloat64(m.OrderbookFallbacks.WithLabelValues(tc.reason)))
+		})
+	}
+}
+
+// A network with no orderbook URL goes straight to Horizon.
+func TestClassicQuoteOrderbookOtherNetwork(t *testing.T) {
+	t.Parallel()
+	hz, hzCalls := countingHorizon(t)
+	src := NewClassicSource(ClassicConfig{
+		HorizonURLs:   map[string]string{types.TESTNET: hz.URL},
+		OrderbookURLs: map[string]string{types.PUBLIC: "http://unused.invalid"},
+	}, nil)
+	req := sendReq
+	req.Network = types.TESTNET
+
+	_, err := src.Quote(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), hzCalls.Load())
+}
+
+// hangingOrderbook accepts the quote and never answers; arrived is closed
+// once the request is in.
+func hangingOrderbook(t *testing.T) (*httptest.Server, chan struct{}) {
+	t.Helper()
+	arrived := make(chan struct{})
+	var once sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body) // the server sees the client hang up only after the body is read
+		once.Do(func() { close(arrived) })
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+	return srv, arrived
+}
+
+// Without a caller deadline, a hung sdex-orderbook still gives up quickly.
+func TestClassicQuoteOrderbookHungNoDeadline(t *testing.T) {
+	t.Parallel()
+	hz, hzCalls := countingHorizon(t)
+	ob, _ := hangingOrderbook(t)
+	m := metrics.NewSwap(prometheus.NewRegistry())
+	src := newOrderbookSource(hz.URL, ob.URL, m)
+
+	start := time.Now()
+	_, err := src.Quote(context.Background(), sendReq)
+	require.NoError(t, err)
+	assert.Less(t, time.Since(start), 5*time.Second) // not the 15s client timeout
+	assert.Equal(t, int32(1), hzCalls.Load())
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.OrderbookFallbacks.WithLabelValues("timeout")))
+}
+
+// A caller that goes away is not a fallback: Horizon is not asked.
+func TestClassicQuoteOrderbookCallerGone(t *testing.T) {
+	t.Parallel()
+	hz, hzCalls := countingHorizon(t)
+	ob, arrived := hangingOrderbook(t)
+	m := metrics.NewSwap(prometheus.NewRegistry())
+	src := newOrderbookSource(hz.URL, ob.URL, m)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { <-arrived; cancel() }()
+
+	_, err := src.Quote(ctx, sendReq)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int32(0), hzCalls.Load())
+	assert.Equal(t, 0, testutil.CollectAndCount(m.OrderbookFallbacks))
+}
+
+// With a 1s per-source budget, a hung sdex-orderbook still leaves Horizon time.
+func TestClassicQuoteOrderbookHungShortBudget(t *testing.T) {
+	t.Parallel()
+	hz, hzCalls := countingHorizon(t)
+	ob, _ := hangingOrderbook(t)
+	m := metrics.NewSwap(prometheus.NewRegistry())
+	src := newOrderbookSource(hz.URL, ob.URL, m)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	_, err := src.Quote(ctx, sendReq)
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), hzCalls.Load())
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.OrderbookFallbacks.WithLabelValues("timeout")))
+}
+
+// A caller that leaves while the body is still arriving is not a fallback.
+func TestClassicQuoteOrderbookCallerGoneMidBody(t *testing.T) {
+	t.Parallel()
+	for _, status := range []int{http.StatusOK, http.StatusNotFound} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			t.Parallel()
+			hz, hzCalls := countingHorizon(t)
+			headers := make(chan struct{})
+			ob := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"code":`))
+				w.(http.Flusher).Flush()
+				close(headers)
+				<-r.Context().Done()
+			}))
+			t.Cleanup(ob.Close)
+			m := metrics.NewSwap(prometheus.NewRegistry())
+			src := newOrderbookSource(hz.URL, ob.URL, m)
+			ctx, cancel := context.WithCancel(context.Background())
+			go func() { <-headers; time.Sleep(200 * time.Millisecond); cancel() }() // after Do returns, during the body read
+
+			_, err := src.Quote(ctx, sendReq)
+			assert.ErrorIs(t, err, context.Canceled)
+			assert.Equal(t, int32(0), hzCalls.Load())
+			assert.Equal(t, 0, testutil.CollectAndCount(m.OrderbookFallbacks))
+		})
 	}
 }

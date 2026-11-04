@@ -162,11 +162,15 @@ func (s *ApiServer) initServices() error {
 	s.tokenStatsService = historyAndStats
 
 	var sources []swap.Source
-	sources = append(sources, swap.NewClassicSource(swap.ClassicConfig{HorizonURLs: map[string]string{
-		types.PUBLIC:    s.cfg.HorizonConfig.HorizonPubnetURL,
-		types.TESTNET:   s.cfg.HorizonConfig.HorizonTestnetURL,
-		types.FUTURENET: s.cfg.HorizonConfig.HorizonFuturenetURL,
-	}}, s.rpcService))
+	sources = append(sources, swap.NewClassicSource(swap.ClassicConfig{
+		HorizonURLs: map[string]string{
+			types.PUBLIC:    s.cfg.HorizonConfig.HorizonPubnetURL,
+			types.TESTNET:   s.cfg.HorizonConfig.HorizonTestnetURL,
+			types.FUTURENET: s.cfg.HorizonConfig.HorizonFuturenetURL,
+		},
+		OrderbookURLs: map[string]string{types.PUBLIC: s.cfg.SwapConfig.SdexOrderbookPubnetURL},
+		Metrics:       s.appMetrics.Swap,
+	}, s.rpcService))
 	if s.cfg.SwapConfig.LifiEnabled {
 		sources = append(sources, swap.NewLifiSource(swap.LifiConfig{
 			Client:       swap.NewLifiClient(swap.LifiBaseURL, s.cfg.SwapConfig.LifiAPIKey, nil),

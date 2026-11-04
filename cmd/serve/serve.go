@@ -184,6 +184,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().BoolVar(&s.Cfg.SwapConfig.LifiEnabled, "swap-lifi-enabled", false, "Enable the LI.FI swap source")
 	cmd.Flags().IntVar(&s.Cfg.SwapConfig.SourceTimeoutSeconds, "swap-source-timeout-seconds", 4, "Per-source timeout in seconds for swap quote requests")
 	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiAPIKey, "swap-lifi-api-key", "", "LI.FI API key")
+	cmd.Flags().StringVar(&s.Cfg.SwapConfig.SdexOrderbookPubnetURL, "swap-sdex-orderbook-pubnet-url", "", "sdex-orderbook base URL for pubnet classic swap quotes; Horizon answers when unset or when sdex-orderbook cannot")
 
 	// Redis Config
 	cmd.Flags().StringVar(&s.Cfg.RedisConfig.ConnectionName, "redis-connection-name", "freighter-redis", "The name of the Redis connection")

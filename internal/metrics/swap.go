@@ -15,6 +15,8 @@ type Swap struct {
 	UnknownHops    *prometheus.CounterVec
 	Winners        *prometheus.CounterVec
 	MarginBps      *prometheus.HistogramVec
+
+	OrderbookFallbacks *prometheus.CounterVec
 }
 
 // NewSwap creates and registers swap metrics with the given registerer.
@@ -37,8 +39,12 @@ func NewSwap(reg prometheus.Registerer) *Swap {
 			Help:    "How far the winning quote beat the runner-up, in basis points.",
 			Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000},
 		}, []string{"winner"}),
+		OrderbookFallbacks: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_swap_orderbook_fallback_total",
+			Help: "Classic quotes answered by Horizon because sdex-orderbook could not, by reason (not_ready|timeout|error).",
+		}, []string{"reason"}),
 	}
-	reg.MustRegister(s.SourceRequests, s.UnknownHops, s.Winners, s.MarginBps)
+	reg.MustRegister(s.SourceRequests, s.UnknownHops, s.Winners, s.MarginBps, s.OrderbookFallbacks)
 	return s
 }
 
@@ -70,4 +76,13 @@ func RecordSwapWinner(m *Swap, winner, pair string, marginBps float64) {
 	}
 	m.Winners.WithLabelValues(winner, pair).Inc()
 	m.MarginBps.WithLabelValues(winner).Observe(marginBps)
+}
+
+// RecordSwapOrderbookFallback records a classic quote that fell back to
+// Horizon. Nil-safe.
+func RecordSwapOrderbookFallback(m *Swap, reason string) {
+	if m == nil {
+		return
+	}
+	m.OrderbookFallbacks.WithLabelValues(reason).Inc()
 }
