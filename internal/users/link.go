@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -292,7 +293,6 @@ func kindOf(sources []Source, id string) string {
 
 func sortSources(sources []Source) {
 	slices.SortFunc(sources, func(a, b Source) int { return strings.Compare(a.ID, b.ID) })
-}
 }
 
 // createCluster handles a signer with no user_sources row: it creates the users
