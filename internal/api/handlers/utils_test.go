@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/alitto/pond/v2"
+	"github.com/stellar/go-stellar-sdk/strkey"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stellar/wallet-backend/pkg/wbclient"
@@ -80,6 +81,37 @@ func TestFetchCollectible_Success(t *testing.T) {
 	assert.Equal(t, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", collectible.Owner)
 	assert.Equal(t, server.URL, collectible.TokenUri)
 	assert.Equal(t, tokenId, collectible.TokenId)
+}
+
+// TestFetchCollectible_MuxedContractOwner checks that an owner_of result holding a
+// Protocol 30 muxed contract address (ScAddress arm 5) is rendered as its W strkey,
+// and never as the SDK's "unfamiliar address type" error text.
+func TestFetchCollectible_MuxedContractOwner(t *testing.T) {
+	// SEP-23 test vector: contract CA7QYNF7...UWDA with mux id 0.
+	const wantOwner = "WA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAAAAAWWC"
+	rawContract, err := strkey.Decode(strkey.VersionByteContract, "CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA")
+	require.NoError(t, err)
+	var contractID xdr.ContractId
+	copy(contractID[:], rawContract)
+
+	mockRPC := &utils.MockRPCService{
+		SimulateResultOverride: &xdr.ScVal{
+			Type: xdr.ScValTypeScvAddress,
+			Address: &xdr.ScAddress{
+				Type:          xdr.ScAddressTypeScAddressTypeMuxedContract,
+				MuxedContract: &xdr.MuxedContract{Id: 0, ContractId: contractID},
+			},
+		},
+	}
+	account := &txnbuild.SimpleAccount{AccountID: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"}
+
+	pool := pond.NewPool(2)
+	collectible, err := fetchCollectible(mockRPC, context.Background(), account, "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA", "1", "PUBLIC", pool)
+
+	require.NoError(t, err)
+	require.NotNil(t, collectible)
+	assert.Equal(t, wantOwner, collectible.Owner)
+	assert.NotContains(t, collectible.Owner, "unfamiliar address type")
 }
 
 func TestFetchCollectible_InvalidTokenID(t *testing.T) {
