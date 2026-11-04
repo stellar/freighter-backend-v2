@@ -8,6 +8,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// sep23MuxedContract is the SEP-23 CAP-0084 muxed contract (W...) test vector:
+// contract CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA with mux id 0.
+// This API identifies accounts and tokens only by C or G, so every validator must reject it.
+const sep23MuxedContract = "WA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAAAAAWWC"
+
 func TestIsValidContractID(t *testing.T) {
 	// Generate a valid contract ID string using strkey
 	validRaw := make([]byte, 32)
@@ -37,6 +42,11 @@ func TestIsValidContractID(t *testing.T) {
 
 	t.Run("malformed string", func(t *testing.T) {
 		assert.False(t, IsValidContractID("this-is-not-a-contract-id"))
+	})
+
+	t.Run("muxed contract (W...) is rejected", func(t *testing.T) {
+		assert.True(t, strkey.IsValidMuxedContractAddress(sep23MuxedContract), "test vector must be a valid W strkey")
+		assert.False(t, IsValidContractID(sep23MuxedContract))
 	})
 }
 
@@ -98,6 +108,10 @@ func TestIsValidAccount(t *testing.T) {
 
 	t.Run("malformed string returns false", func(t *testing.T) {
 		assert.False(t, IsValidAccount("not-a-valid-id"))
+	})
+
+	t.Run("muxed contract (W...) returns false", func(t *testing.T) {
+		assert.False(t, IsValidAccount(sep23MuxedContract))
 	})
 
 	t.Run("wrong length returns false", func(t *testing.T) {
@@ -224,6 +238,12 @@ func TestScAddressFromString(t *testing.T) {
 
 	t.Run("unsupported prefix", func(t *testing.T) {
 		scAddr, err := ScAddressFromString("X12345")
+		assert.Error(t, err)
+		assert.Nil(t, scAddr)
+	})
+
+	t.Run("muxed contract (W...) is rejected", func(t *testing.T) {
+		scAddr, err := ScAddressFromString(sep23MuxedContract)
 		assert.Error(t, err)
 		assert.Nil(t, scAddr)
 	})
