@@ -264,7 +264,7 @@ internal/auth/                     pure verifier primitive — no HTTP/config/me
   linkproof.go   LinkConsentMessage / VerifyLinkConsent (the v2 consent contract); source kinds; IsCanonicalSourceID
   context.go     ContextWithSourceID / SourceIDFromContext; ContextWithIssuedAt / IssuedAtFromContext
 internal/users/users.go            ResolveUser(ctx, sourceID) → (userID, canonicalSourceID); ErrSourceNotFound; the user-scoped access rule
-internal/users/link.go             Linker.Link: the only write to users/user_sources, one transaction under ordered advisory locks
+internal/users/link.go             Linker.Link: the only write to users/user_sources, one transaction under one advisory lock on the signer
 internal/api/middleware/auth.go    Auth(verifier, mode, metrics) Middleware; 401 via httperror; injects sourceID + iat; no DB
 internal/api/handlers/whoami.go    echoes the authenticated sourceID (auth smoke-test surface; does not resolve the user)
 internal/api/handlers/user_link.go POST /api/v1/user/link: validates the body, verifies every consent, then calls Linker.Link
