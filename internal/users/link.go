@@ -21,21 +21,25 @@ import (
 const MaxLinkSources = 32
 
 // Per-statement timeouts, applied with SET LOCAL so they end with the
-// transaction. The advisory lock below blocks indefinitely by default, and a
-// blocked link transaction pins a pool connection that every DB-backed route
-// shares. lockTimeout bounds each lock wait and statementTimeout bounds each
-// statement; that is all they bound. They start only once a pool connection
-// has been acquired, and a transaction of several statements can outlive
-// either, so they do not cap the transaction as a whole. That cap is the
-// caller's context deadline (handlers.LinkRequestTimeout), which is what
-// cancels both the wait for a connection and the transaction; the HTTP
-// server's WriteTimeout does not cancel a handler. When either timeout here
-// fires, Postgres cancels the statement and the error reaches Link as a
+// transaction. They bound the work on the Postgres side, which the caller's
+// context deadline (handlers.LinkRequestTimeout) cannot reach. When that
+// deadline passes, pgx's default context watcher puts a deadline on the socket
+// and does not send a cancel request, so the client gives up and the pool
+// discards the connection while the server is never told. A backend blocked on
+// the advisory lock below does not read its socket, so without lock_timeout it
+// would keep waiting indefinitely and hold a max_connections slot after the
+// request it served is gone.
+//
+// lockTimeout bounds each lock wait and statementTimeout bounds each statement;
+// that is all they bound. A transaction of several statements can outlive
+// either, so the cap on the request as a whole is still LinkRequestTimeout,
+// which covers the wait for a pool connection too. The HTTP server's
+// WriteTimeout does not cancel a handler. When either timeout here fires,
+// Postgres cancels the statement and the error reaches Link as a
 // *pgconn.PgError, not as a context error; Link maps both codes to ErrTimeout
 // so the handler can answer with a 504 instead of a 500. Values are
-// milliseconds; SET cannot take
-// bind parameters, so they are formatted into the statement from these
-// constants and never from input.
+// milliseconds. SET cannot take bind parameters, so they are formatted into the
+// statement from these constants and never from input.
 const (
 	linkLockTimeoutMs      = 3000
 	linkStatementTimeoutMs = 5000
