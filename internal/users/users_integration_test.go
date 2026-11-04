@@ -139,7 +139,6 @@ func TestListSources_Postgres(t *testing.T) {
 
 	empty, err := store.ListSources(ctx, uuid.New())
 	require.NoError(t, err)
-	require.NotNil(t, empty)
 	assert.Empty(t, empty)
 
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})

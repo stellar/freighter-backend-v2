@@ -117,9 +117,9 @@ WHERE user_id = $1
 ORDER BY created_at, source_id`
 
 // ListSources returns every source under userID, ordered by (created_at,
-// source_id). It is never nil: a user id with no rows returns an empty slice,
-// though for a userID that came from ResolveUser that cannot happen, since the
-// resolved source's own row is under it and rows are never deleted.
+// source_id). A user id with no rows returns no sources, though for a userID
+// that came from ResolveUser that cannot happen, since the resolved source's
+// own row is under it and rows are never deleted.
 func (s *Store) ListSources(ctx context.Context, userID uuid.UUID) ([]LinkedSource, error) {
 	rows, err := s.db.Query(ctx, listSourcesSQL, userID)
 	if err != nil {
@@ -132,9 +132,6 @@ func (s *Store) ListSources(ctx context.Context, userID uuid.UUID) ([]LinkedSour
 	})
 	if err != nil {
 		return nil, fmt.Errorf("collecting sources for user: %w", err)
-	}
-	if sources == nil {
-		sources = []LinkedSource{}
 	}
 	return sources, nil
 }

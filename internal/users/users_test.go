@@ -147,15 +147,6 @@ func TestListSources_ReturnsRowsInOrder(t *testing.T) {
 	assert.Equal(t, []any{userID}, q.gotArgs)
 }
 
-func TestListSources_EmptyIsNotNil(t *testing.T) {
-	q := &fakeQuerier{rows: &fakeRows{}}
-
-	got, err := NewStore(q).ListSources(t.Context(), uuid.New())
-	require.NoError(t, err)
-	require.NotNil(t, got, "an empty cluster must marshal as [] rather than null")
-	assert.Empty(t, got)
-}
-
 func TestListSources_QueryErrorIsWrapped(t *testing.T) {
 	dbErr := errors.New("connection reset")
 	q := &fakeQuerier{queryErr: dbErr}

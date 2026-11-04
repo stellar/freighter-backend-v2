@@ -456,7 +456,7 @@ logging middleware.
   mode.
 - **`users` pkg tests:** `ResolveUser` returns the user for a known source (from either its
   canonical or a linked source) and `ErrSourceNotFound` for an unknown one; `ListSources` returns
-  the rows in `(created_at, source_id)` order, empty-not-nil for an unknown user, and sees its own
+  the rows in `(created_at, source_id)` order, empty for an unknown user, and sees its own
   uncommitted rows on a transaction backend; against fakes (unit) and a migrated Postgres
   (`make integration-test`).
 - Metric: `freighter_auth_requests_total`.
