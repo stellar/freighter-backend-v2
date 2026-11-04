@@ -504,6 +504,8 @@ func TestApiServer_initHandlers_SwapRoutesRequireTokenInPermissive(t *testing.T)
 		skewed := authtest.MintToken(t, priv, sub, "POST "+path, auth.MaxTokenLifetime, time.Now().Add(-time.Hour), []byte("{}"))
 		// 400: past auth, rejected for the empty body.
 		assert.Equal(t, http.StatusBadRequest, send("Bearer "+skewed), path+" clock-skewed token")
+		stale := authtest.MintToken(t, priv, sub, "GET /api/v1/protocols", auth.MaxTokenLifetime, time.Now().Add(-time.Hour), nil)
+		assert.Equal(t, http.StatusUnauthorized, send("Bearer "+stale), path+" clock-skewed token signed for another request")
 	}
 
 	rec := httptest.NewRecorder()
