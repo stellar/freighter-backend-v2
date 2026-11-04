@@ -283,6 +283,9 @@ func (c *ClassicSource) getJSON(ctx context.Context, network, path string, q url
 	defer resp.Body.Close() //nolint:errcheck
 	body := io.LimitReader(resp.Body, maxUpstreamBody)
 	defer io.Copy(io.Discard, body) //nolint:errcheck
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return fmt.Errorf("horizon %s: %w", path, ErrRateLimited)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return &metrics.UpstreamError{Kind: "http_error", Code: resp.StatusCode, Err: fmt.Errorf("horizon %s: %d", path, resp.StatusCode)}
 	}
