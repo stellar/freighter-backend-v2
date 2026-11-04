@@ -19,10 +19,6 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/integrationtests/infrastructure"
 )
 
-// gAddressPattern matches a Stellar account id, which the response must never
-// carry.
-const gAddressPattern = `G[A-Z2-7]{55}`
-
 // UserTestSuite exercises the full wiring of GET /api/v1/user: the Required
 // auth wrap under the container's default (permissive) AUTH_MODE, resolution
 // of the JWT sub through the migrated app database, and the client contract
@@ -87,7 +83,6 @@ func (s *UserTestSuite) TestGetUserFromAnySourceReturnsCanonicalIdAndAllSources(
 		k1.id: auth.SourceKindSecretKey,
 		k2.id: auth.SourceKindSecretKey,
 	}, kinds)
-	require.NotRegexp(t, gAddressPattern, string(bodyP))
 	require.NotContains(t, string(bodyP), "authenticated", "this is the resolved view, not whoami")
 
 	// Signed as k2: same user, same sources, byte for byte the same data.

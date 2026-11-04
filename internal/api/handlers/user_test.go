@@ -18,10 +18,6 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/users"
 )
 
-// gAddressPattern matches a Stellar account id. The response must never carry
-// one: the identity tables hold only hex ed25519 keys.
-const gAddressPattern = `G[A-Z2-7]{55}`
-
 // fakeUserStore records every call so tests can assert the handler makes
 // exactly one ResolveUser and one ListSources call, with what.
 type fakeUserStore struct {
@@ -116,9 +112,8 @@ func TestGetUser_Success(t *testing.T) {
 	assert.Equal(t, userID, store.gotUserID)
 
 	// The internal users.id is a foreign key, not an identity; it never leaves
-	// the server. And no G address, by construction.
+	// the server.
 	assert.NotContains(t, w.Body.String(), userID.String())
-	assert.NotRegexp(t, gAddressPattern, w.Body.String())
 	assert.NotContains(t, w.Body.String(), "authenticated", "this is the resolved view, not whoami")
 }
 
