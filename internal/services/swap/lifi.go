@@ -21,8 +21,9 @@ import (
 
 const lifiName = "lifi"
 
-// lifiDefaultSlippage is the LI.FI fraction used when the caller gave none.
-const lifiDefaultSlippage = "0.005"
+// lifiQuoteSlippage is sent with every quote. A quote shows estimate.toAmount,
+// which slippage doesn't change; builds send the user's own slippage.
+const lifiQuoteSlippage = "0.005"
 
 // SlippageFraction converts a slippage percent in [0, 10], written as digits
 // with an optional ".digits" part, to the decimal fraction LI.FI expects
@@ -132,7 +133,7 @@ func (s *LifiSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (*ty
 		return nil, fmt.Errorf("%w: amount %q", ErrBadRequest, req.Amount)
 	}
 
-	q, err := s.cfg.Client.Quote(ctx, fromContract, toContract, raw.String(), req.Account, lifiDefaultSlippage)
+	q, err := s.cfg.Client.Quote(ctx, fromContract, toContract, raw.String(), req.Account, lifiQuoteSlippage)
 	if err != nil {
 		return nil, err
 	}
@@ -332,11 +333,9 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 		inclusion.SetInt64(txnbuild.MinBaseFee)
 	}
 
-	slippage := lifiDefaultSlippage
-	if req.Slippage != "" {
-		if slippage, err = SlippageFraction(req.Slippage); err != nil {
-			return "", fmt.Errorf("%w: slippage %q", ErrBadRequest, req.Slippage)
-		}
+	slippage, err := SlippageFraction(req.Slippage)
+	if err != nil {
+		return "", fmt.Errorf("%w: slippage %q", ErrBadRequest, req.Slippage)
 	}
 	q, err := s.cfg.Client.Quote(ctx, fromContract, toContract, raw.String(), req.Account, slippage)
 	if errors.Is(err, ErrNoRoute) || errors.Is(err, ErrInsufficientBalance) {

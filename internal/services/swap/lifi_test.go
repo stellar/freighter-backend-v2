@@ -329,7 +329,7 @@ func lifiBuildReq(t *testing.T, env xdr.TransactionEnvelope) types.SwapBuildRequ
 	return types.SwapBuildRequest{
 		Network: types.PUBLIC, Account: lifiTestAccount, Source: "lifi",
 		FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "10",
-		MinOut: FormatUnits(call.MinAmountOut, 7), Fee: "0.0001",
+		MinOut: FormatUnits(call.MinAmountOut, 7), Fee: "0.0001", Slippage: "0.5",
 	}
 }
 
@@ -715,10 +715,12 @@ func TestLifiSlippageSentToClient(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"0.02"}, *got)
 
+	// No default: a build without slippage never reaches LI.FI.
 	src, got = slippageRecorder(t, env, body)
-	_, err = src.BuildTx(context.Background(), lifiBuildReq(t, env))
-	require.NoError(t, err)
-	assert.Equal(t, []string{"0.005"}, *got)
+	req.Slippage = ""
+	_, err = src.BuildTx(context.Background(), req)
+	require.ErrorIs(t, err, ErrBadRequest)
+	assert.Empty(t, *got)
 
 	var q LifiQuote
 	require.NoError(t, json.Unmarshal(body, &q))

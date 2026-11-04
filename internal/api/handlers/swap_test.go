@@ -60,7 +60,7 @@ func swapQuoteBody(mode, from, to, amount string) string {
 }
 
 func swapBuildBody(from, to, amount string) string {
-	return fmt.Sprintf(`{"account":%q,"source":"classic","fromAsset":%q,"toAsset":%q,"amount":%q,"minOut":"9.5","fee":"0.00001"}`, swapAccount, from, to, amount)
+	return fmt.Sprintf(`{"account":%q,"source":"classic","fromAsset":%q,"toAsset":%q,"amount":%q,"minOut":"9.5","fee":"0.00001","slippage":"1"}`, swapAccount, from, to, amount)
 }
 
 // signedIn adds a Bearer token; the auth middleware has already verified it.
@@ -256,9 +256,9 @@ func TestSwapBuild_Slippage(t *testing.T) {
 	t.Parallel()
 	good := swapBuildBody("XLM", swapUSDC, "10")
 	withSlippage := func(v string) string {
-		return strings.Replace(good, `"fee"`, `"slippage":`+v+`,"fee"`, 1)
+		return strings.Replace(good, `"slippage":"1"`, `"slippage":`+v, 1)
 	}
-	for _, v := range []string{`"11"`, `"-1"`, `"abc"`, `"1e1"`, `"1/2"`, `"10.01"`, `"1,5"`, `".5"`, `"1."`} {
+	for _, v := range []string{`""`, `null`, `"11"`, `"-1"`, `"abc"`, `"1e1"`, `"1/2"`, `"10.01"`, `"1,5"`, `".5"`, `"1."`} {
 		t.Run("rejects "+v, func(t *testing.T) {
 			t.Parallel()
 			f := &fakeSwapService{}
@@ -278,13 +278,14 @@ func TestSwapBuild_Slippage(t *testing.T) {
 			assert.Equal(t, v, f.lastB.Slippage)
 		})
 	}
-	t.Run("absent stays empty", func(t *testing.T) {
+	t.Run("rejects absent", func(t *testing.T) {
 		t.Parallel()
 		f := &fakeSwapService{}
-		_, err := doBuild(NewSwapHandler(f), "TESTNET", good)
-		require.NoError(t, err)
-		assert.Empty(t, f.lastB.Slippage)
-		assert.Equal(t, 1, f.calls)
+		_, err := doBuild(NewSwapHandler(f), "TESTNET", strings.Replace(good, `,"slippage":"1"`, "", 1))
+		require.Error(t, err)
+		assert.Equal(t, http.StatusBadRequest, statusOf(t, err))
+		assert.Contains(t, err.Error(), "invalid slippage")
+		assert.Zero(t, f.calls)
 	})
 }
 

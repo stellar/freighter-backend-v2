@@ -161,10 +161,8 @@ func (h *SwapHandler) Build(w http.ResponseWriter, r *http.Request) error {
 		return swapBadRequest("invalid fee")
 	}
 
-	if req.Slippage != "" {
-		if _, err = swap.SlippageFraction(req.Slippage); err != nil {
-			return swapBadRequest("invalid slippage")
-		}
+	if _, err = swap.SlippageFraction(req.Slippage); err != nil {
+		return swapBadRequest("invalid slippage")
 	}
 	if req.Timeout != nil && (*req.Timeout < 1 || *req.Timeout > swap.MaxTimeoutSeconds) {
 		return swapBadRequest("invalid timeout")
