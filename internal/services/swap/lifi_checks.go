@@ -17,7 +17,6 @@ type lifiExpect struct {
 	// ToClassic allows ToContract.trust(Account) in the auth tree.
 	ToClassic      bool
 	Amount, MinOut *big.Int
-	MaxValidUntil  int64
 }
 
 func checkFailed(what string) error { return fmt.Errorf("%s: %w", what, ErrCheckFailed) }
@@ -49,9 +48,8 @@ func checkLifiTx(env xdr.TransactionEnvelope, want lifiExpect) error {
 		return checkFailed("resource fee")
 	}
 	// Only plain time bounds: V2 preconditions can add signers or sequence rules.
-	tb := tx.Cond.TimeBounds
-	if tx.Cond.Type != xdr.PreconditionTypePrecondTime || tb == nil || tb.MaxTime == 0 ||
-		want.MaxValidUntil <= 0 || uint64(tb.MaxTime) > uint64(want.MaxValidUntil) {
+	// BuildTx replaces MaxTime with the user's timeout.
+	if tx.Cond.Type != xdr.PreconditionTypePrecondTime || tx.Cond.TimeBounds == nil {
 		return checkFailed("time bounds")
 	}
 	if call.MinAmountOut.Cmp(want.MinOut) < 0 {

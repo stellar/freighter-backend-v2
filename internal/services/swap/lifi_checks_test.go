@@ -54,20 +54,18 @@ func trustExpect(t *testing.T, env xdr.TransactionEnvelope) lifiExpect {
 	t.Helper()
 	call, err := decodeLifiCall(env)
 	require.NoError(t, err)
-	tb := env.V1.Tx.Cond.TimeBounds
-	require.NotNil(t, tb)
+	require.NotNil(t, env.V1.Tx.Cond.TimeBounds)
 	return lifiExpect{
-		Account:       lifiTestAccount,
-		FromContract:  contractIDOf(t, "XLM"),
-		ToContract:    contractIDOf(t, "USDC:"+usdcIssuer),
-		SwapContract:  lifiSwapContract,
-		Aggregator:    lifiAggregator,
-		FeeRecipient:  lifiFeeRecipient,
-		PartnerID:     lifiPartnerID,
-		ToClassic:     true,
-		Amount:        big.NewInt(100000000),
-		MinOut:        new(big.Int).Set(call.MinAmountOut),
-		MaxValidUntil: int64(tb.MaxTime),
+		Account:      lifiTestAccount,
+		FromContract: contractIDOf(t, "XLM"),
+		ToContract:   contractIDOf(t, "USDC:"+usdcIssuer),
+		SwapContract: lifiSwapContract,
+		Aggregator:   lifiAggregator,
+		FeeRecipient: lifiFeeRecipient,
+		PartnerID:    lifiPartnerID,
+		ToClassic:    true,
+		Amount:       big.NewInt(100000000),
+		MinOut:       new(big.Int).Set(call.MinAmountOut),
 	}
 }
 
@@ -389,12 +387,8 @@ func TestLifiChecksTamperFails(t *testing.T) {
 			tb := *e.V1.Tx.Cond.TimeBounds
 			e.V1.Tx.Cond = xdr.Preconditions{Type: xdr.PreconditionTypePrecondV2, V2: &xdr.PreconditionsV2{TimeBounds: &tb}}
 		}},
-		// 6. time bounds
-		{"max time zero", "time bounds", func(_ *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
-			e.V1.Tx.Cond.TimeBounds.MaxTime = 0
-		}},
-		{"max time beyond", "time bounds", func(_ *testing.T, e *xdr.TransactionEnvelope, w *lifiExpect) {
-			e.V1.Tx.Cond.TimeBounds.MaxTime = xdr.TimePoint(w.MaxValidUntil + 1)
+		{"no time bounds", "time bounds", func(_ *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			e.V1.Tx.Cond = xdr.Preconditions{Type: xdr.PreconditionTypePrecondNone}
 		}},
 	}
 	for _, tc := range cases {

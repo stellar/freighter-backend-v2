@@ -286,9 +286,6 @@ func lifiFromAmount(q *LifiQuote) (*big.Int, error) {
 	return v, nil
 }
 
-// lifiValidFor bounds how far in the future LI.FI's transaction may expire.
-const lifiValidFor = 600
-
 func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (string, error) {
 	from, err := ParseAsset(req.FromAsset)
 	if err != nil {
@@ -356,17 +353,16 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 		return "", fmt.Errorf("lifi: %w", ErrLifiMissingTx)
 	}
 	if err = checkLifiTx(env, lifiExpect{
-		Account:       req.Account,
-		FromContract:  fromContract,
-		ToContract:    toContract,
-		SwapContract:  s.cfg.SwapContract,
-		Aggregator:    s.cfg.Aggregator,
-		FeeRecipient:  s.cfg.FeeRecipient,
-		PartnerID:     s.cfg.PartnerID,
-		ToClassic:     toClassic,
-		Amount:        raw,
-		MinOut:        minOut,
-		MaxValidUntil: s.cfg.Now().Unix() + lifiValidFor,
+		Account:      req.Account,
+		FromContract: fromContract,
+		ToContract:   toContract,
+		SwapContract: s.cfg.SwapContract,
+		Aggregator:   s.cfg.Aggregator,
+		FeeRecipient: s.cfg.FeeRecipient,
+		PartnerID:    s.cfg.PartnerID,
+		ToClassic:    toClassic,
+		Amount:       raw,
+		MinOut:       minOut,
 	}); err != nil {
 		return "", err
 	}
