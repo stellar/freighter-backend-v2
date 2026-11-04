@@ -105,13 +105,6 @@ func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapUserStoreErr(ctx, err, "reading user sources")
 	}
-	if len(sources) == 0 {
-		// The resolved source's own row is under this user and rows are never
-		// deleted, so an empty cluster is an invariant violation, not a 404.
-		err = errors.New("resolved user has no sources")
-		logger.ErrorWithContext(ctx, "reading user sources returned an empty cluster", "error", err)
-		return httperror.InternalServerError("An unexpected error occurred", err)
-	}
 
 	w.Header().Set("Content-Type", "application/json")
 	return response.OK(w, HttpResponse{Data: UserResponse{

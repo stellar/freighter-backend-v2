@@ -100,9 +100,8 @@ func TestResolveUser_Postgres(t *testing.T) {
 }
 
 // ListSources against the real schema: exactly the rows under the user, in
-// (created_at, source_id) order with their kinds; nothing for an unknown user;
-// and a transaction backend sees its own uncommitted rows, which is how Link
-// returns the cluster it just wrote.
+// (created_at, source_id) order with their kinds; and nothing for an unknown
+// user. Link's integration tests cover ListSources on a transaction.
 func TestListSources_Postgres(t *testing.T) {
 	dsn := startMigratedPostgres(t)
 	ctx := context.Background()
@@ -140,17 +139,4 @@ func TestListSources_Postgres(t *testing.T) {
 	empty, err := store.ListSources(ctx, uuid.New())
 	require.NoError(t, err)
 	assert.Empty(t, empty)
-
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
-	require.NoError(t, err)
-	defer tx.Rollback(ctx) //nolint:errcheck // test cleanup
-	_, err = tx.Exec(ctx,
-		`INSERT INTO user_sources (source_id, user_id, kind) VALUES ('dd', $1, 'secret_key')`, u1)
-	require.NoError(t, err)
-	inTx, err := NewStore(tx).ListSources(ctx, u1)
-	require.NoError(t, err)
-	assert.Len(t, inTx, 3, "the transaction sees its own uncommitted row")
-	outside, err := store.ListSources(ctx, u1)
-	require.NoError(t, err)
-	assert.Len(t, outside, 2, "the pool does not")
 }

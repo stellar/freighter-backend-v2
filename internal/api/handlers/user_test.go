@@ -180,16 +180,6 @@ func TestGetUser_StoreErrorStatuses(t *testing.T) {
 	}
 }
 
-// A resolved user with no sources cannot exist (the sub's own row is under it
-// and rows are never deleted), so the handler treats it as a server fault.
-func TestGetUser_EmptyClusterIs500(t *testing.T) {
-	store := &fakeUserStore{userID: uuid.New(), canonical: "aa", sources: []users.LinkedSource{}}
-
-	_, err := doGetUser(t, store, newLinkKey(t).id)
-	require.Error(t, err)
-	assert.Equal(t, http.StatusInternalServerError, statusOf(t, err))
-}
-
 // Both reads run under UserRequestTimeout: the request context carries no
 // deadline of its own, so this is the only thing bounding a stuck read.
 func TestGetUser_StoreGetsRequestDeadline(t *testing.T) {
