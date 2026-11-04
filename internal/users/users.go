@@ -24,8 +24,8 @@
 //  3. Scope EVERY query by the returned user id (`WHERE user_id = $1`). Never key
 //     storage by the source id, and never accept a user id or source id from the
 //     request body, path, or query: the only trusted identity is the one the
-//     signature proved. ListSources is the first such read, and GET /api/v1/user
-//     (handlers.UserHandler) is its consumer.
+//     signature proved. ListSources is such a read; Link and GET /api/v1/user
+//     (handlers.UserHandler) both use it.
 //
 // There is no cache in front of ResolveUser, on purpose. The mapping is immutable
 // today (no code path moves a source between users, retires a source, or deletes

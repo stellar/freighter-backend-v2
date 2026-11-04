@@ -58,7 +58,8 @@ canonicalSourceID string, err error)` in `internal/users`, the package that owns
 with no row returns the `users.ErrSourceNotFound` sentinel, which handlers map to `404`.
 
 **Access rule for every user-scoped handler** (recorded in the `internal/users` package doc;
-`GET /api/v1/user` is the first consumer, through `users.ListSources`; `#90` contacts is next):
+`users.ListSources` is such a read, used by both the link transaction and `GET /api/v1/user`;
+`#90` contacts is next):
 
 1. read the source id from the context with `auth.SourceIDFromContext`;
 2. call `users.ResolveUser`;
