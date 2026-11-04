@@ -14,6 +14,7 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
+	"github.com/stellar/freighter-backend-v2/internal/auth"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/services/swap"
@@ -36,8 +37,7 @@ func NewSwapHandler(svc types.SwapService) *SwapHandler {
 // 401ed every Bearer token except a valid one or a correctly signed one from a
 // device with a wrong clock. Delete once auth is strict.
 func requireToken(r *http.Request) *httperror.HttpError {
-	scheme, _, _ := strings.Cut(r.Header.Get("Authorization"), " ")
-	if !strings.EqualFold(scheme, "Bearer") {
+	if !auth.HasBearerToken(r) {
 		return httperror.Unauthorized("unauthorized", nil)
 	}
 	return nil
