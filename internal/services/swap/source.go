@@ -8,8 +8,10 @@ import (
 )
 
 // Source is one liquidity venue that can quote a swap and build its
-// transaction. checkSourceContract (source_contract_test.go) tests the rules
-// below; README.md lists what else a new source needs.
+// transaction. checkSourceContract (source_contract_test.go) checks the route
+// shape, ctx cancellation and the transaction's account and expiry; the
+// MinOut floor, error mapping and third-party checks need the source's own
+// tests. README.md lists what else a new source needs.
 type Source interface {
 	// Name is the route's "source" field, the /swap/tx "source" a client sends
 	// back, and the metrics label, so it must never change.
@@ -26,8 +28,8 @@ type Source interface {
 	//
 	// Errors: ErrNoRoute, ErrInsufficientBalance, ErrRateLimited,
 	// ErrBadRequest, or ErrUnsupportedMode for a mode the source does not
-	// offer (not counted as a failure). A ctx deadline reports as "timeout",
-	// anything else as "error".
+	// offer (not counted as a failure). Reason maps each error to the
+	// reported reason.
 	Quote(ctx context.Context, req types.SwapQuoteRequest) (*types.SwapRoute, error)
 	// BuildTx returns an unsigned base64 TransactionEnvelope for req.Account
 	// that expires timeoutSeconds(req) from now. The user must never receive

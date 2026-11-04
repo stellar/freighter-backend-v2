@@ -299,3 +299,14 @@ func TestClassicBuildFeeFloor(t *testing.T) {
 		assert.Equal(t, int64(100*len(env.Operations())), int64(env.Fee()))
 	}
 }
+
+func TestClassicQuoteHorizon429IsRateLimited(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(srv.Close)
+	src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: srv.URL}}, nil)
+	_, err := src.Quote(context.Background(), sendReq)
+	assert.Equal(t, "rate_limited", Reason(err))
+}

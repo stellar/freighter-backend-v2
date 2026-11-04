@@ -36,33 +36,48 @@ func checkSourceContract(t *testing.T, c sourceContract) {
 	assert.NotEmpty(t, c.src.Name())
 	assert.False(t, c.src.Supports("NOT_A_NETWORK"), "Supports must be false for an unknown network")
 
+	// A fake that never answers fails the call instead of hanging the package.
+	bounded := func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), 10*time.Second)
+	}
+
+	var answered []types.SwapQuoteRequest
 	for _, req := range c.quotes {
 		t.Run("quote "+req.Mode, func(t *testing.T) {
-			rt, err := c.src.Quote(context.Background(), req)
+			ctx, cancel := bounded()
+			defer cancel()
+			rt, err := c.src.Quote(ctx, req)
 			if errors.Is(err, ErrUnsupportedMode) {
-				return
+				t.Skipf("%s does not offer %s", c.src.Name(), req.Mode)
 			}
 			require.NoError(t, err)
 			checkRoute(t, c.src.Name(), req, rt)
+			answered = append(answered, req)
 		})
 	}
+	require.NotEmpty(t, answered, "at least one quote must return a route")
 
 	t.Run("quote with a done context", func(t *testing.T) {
-		require.NotEmpty(t, c.quotes)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := c.src.Quote(ctx, c.quotes[0])
-		assert.Error(t, err, "Quote must not answer once ctx is done")
+		_, err := c.src.Quote(ctx, answered[0])
+		assert.ErrorIs(t, err, context.Canceled, "Quote must not answer once ctx is done")
 	})
 
 	t.Run("build", func(t *testing.T) {
-		x, err := c.src.BuildTx(context.Background(), c.build)
+		ctx, cancel := bounded()
+		defer cancel()
+		x, err := c.src.BuildTx(ctx, c.build)
 		require.NoError(t, err)
 		var env xdr.TransactionEnvelope
 		require.NoError(t, xdr.SafeUnmarshalBase64(x, &env))
 		assert.Equal(t, c.build.Account, env.SourceAccount().ToAccountId().Address())
 		assert.Empty(t, env.Signatures(), "the transaction must be unsigned")
-		tb := env.Preconditions().TimeBounds
+		cond := env.Preconditions()
+		tb := cond.TimeBounds
+		if cond.V2 != nil {
+			tb = cond.V2.TimeBounds
+		}
 		require.NotNil(t, tb, "the transaction must expire")
 		assert.InDelta(t, c.now().Unix()+c.build.Timeout, int64(tb.MaxTime), 5, "expiry must be now + Timeout")
 	})
@@ -70,7 +85,9 @@ func checkSourceContract(t *testing.T, c sourceContract) {
 	for _, timeout := range []int64{0, MaxTimeoutSeconds + 1} {
 		req := c.build
 		req.Timeout = timeout
-		_, err := c.src.BuildTx(context.Background(), req)
+		ctx, cancel := bounded()
+		_, err := c.src.BuildTx(ctx, req)
+		cancel()
 		assert.ErrorIs(t, err, ErrBadRequest, "timeout %d", timeout)
 	}
 }
