@@ -110,18 +110,23 @@ func TestListSources_Postgres(t *testing.T) {
 	require.NoError(t, err)
 	defer pool.Close()
 
+	const (
+		aa = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" // u1's canonical source
+		bb = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" // a key linked to u1 later
+		cc = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" // u2's canonical source
+	)
 	var u1, u2 uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx,
-		`INSERT INTO users (canonical_source_id) VALUES ('aa') RETURNING id`).Scan(&u1))
+		`INSERT INTO users (canonical_source_id) VALUES ($1) RETURNING id`, aa).Scan(&u1))
 	require.NoError(t, pool.QueryRow(ctx,
-		`INSERT INTO users (canonical_source_id) VALUES ('cc') RETURNING id`).Scan(&u2))
+		`INSERT INTO users (canonical_source_id) VALUES ($1) RETURNING id`, cc).Scan(&u2))
 	// bb is inserted first with a later created_at than aa would get by default,
 	// so the order asserted below is created_at's, not insertion's.
 	_, err = pool.Exec(ctx,
 		`INSERT INTO user_sources (source_id, user_id, kind, created_at) VALUES
-		   ('bb', $1, 'secret_key', now() + interval '1 minute'),
-		   ('aa', $1, 'phrase',     now()),
-		   ('cc', $2, 'phrase',     now())`, u1, u2)
+		   ($3, $1, 'secret_key', now() + interval '1 minute'),
+		   ($4, $1, 'phrase',     now()),
+		   ($5, $2, 'phrase',     now())`, u1, u2, bb, aa, cc)
 	require.NoError(t, err)
 
 	store := NewStore(pool)
@@ -129,9 +134,9 @@ func TestListSources_Postgres(t *testing.T) {
 	got, err := store.ListSources(ctx, u1)
 	require.NoError(t, err)
 	require.Len(t, got, 2, "only u1's rows: %+v", got)
-	assert.Equal(t, "aa", got[0].ID)
+	assert.Equal(t, aa, got[0].ID)
 	assert.Equal(t, "phrase", got[0].Kind)
-	assert.Equal(t, "bb", got[1].ID)
+	assert.Equal(t, bb, got[1].ID)
 	assert.Equal(t, "secret_key", got[1].Kind)
 	assert.False(t, got[0].CreatedAt.IsZero())
 	assert.True(t, got[0].CreatedAt.Before(got[1].CreatedAt), "ordered by created_at")
