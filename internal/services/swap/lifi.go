@@ -56,19 +56,16 @@ const (
 	SoroswapAggregator = "CARVQXFP4JF5ELLXUMQ6DALR346YVGBMQOHB4ENA7SSVXAYABXLBDDC4"
 )
 
-// DefaultTimeoutSeconds and MaxTimeoutSeconds bound a built swap's validity.
-// The default matches both clients' default transaction timeout.
-const (
-	DefaultTimeoutSeconds = 180
-	MaxTimeoutSeconds     = 86400
-)
+// MaxTimeoutSeconds bounds a built swap's validity.
+const MaxTimeoutSeconds = 86400
 
-// TimeoutSeconds is the request's validated timeout, or the default.
-func TimeoutSeconds(req types.SwapBuildRequest) int64 {
-	if req.Timeout == nil {
-		return DefaultTimeoutSeconds
+// timeoutSeconds rechecks the handler's bound: a 0 timeout would build a
+// transaction that never expires.
+func timeoutSeconds(req types.SwapBuildRequest) (int64, error) {
+	if req.Timeout < 1 || req.Timeout > MaxTimeoutSeconds {
+		return 0, fmt.Errorf("%w: timeout %d", ErrBadRequest, req.Timeout)
 	}
-	return *req.Timeout
+	return req.Timeout, nil
 }
 
 // ErrLifiMissingTx is a 200 from LI.FI without a usable transaction.
@@ -355,10 +352,10 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 		return "", fmt.Errorf("lifi: %w", ErrLifiMissingTx)
 	}
 	var env xdr.TransactionEnvelope
-	if err := xdr.SafeUnmarshalBase64(q.TransactionRequest.Data, &env); err != nil {
+	if err = xdr.SafeUnmarshalBase64(q.TransactionRequest.Data, &env); err != nil {
 		return "", fmt.Errorf("lifi: %w", ErrLifiMissingTx)
 	}
-	if err := checkLifiTx(env, lifiExpect{
+	if err = checkLifiTx(env, lifiExpect{
 		Account:       req.Account,
 		FromContract:  fromContract,
 		ToContract:    toContract,
@@ -381,8 +378,12 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 	}
 	env.V1.Tx.Fee = xdr.Uint32(total.Uint64())
 	// Safe to move: the tx is unsigned and its source-account auth has no expiry of its own.
+	timeout, err := timeoutSeconds(req)
+	if err != nil {
+		return "", err
+	}
 	tb := env.V1.Tx.Cond.TimeBounds
-	tb.MaxTime = xdr.TimePoint(s.cfg.Now().Unix() + TimeoutSeconds(req))
+	tb.MaxTime = xdr.TimePoint(s.cfg.Now().Unix() + timeout)
 	if tb.MinTime > tb.MaxTime {
 		return "", checkFailed("time bounds")
 	}

@@ -329,7 +329,7 @@ func lifiBuildReq(t *testing.T, env xdr.TransactionEnvelope) types.SwapBuildRequ
 	return types.SwapBuildRequest{
 		Network: types.PUBLIC, Account: lifiTestAccount, Source: "lifi",
 		FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "10",
-		MinOut: FormatUnits(call.MinAmountOut, 7), Fee: "0.0001", Slippage: "0.5",
+		MinOut: FormatUnits(call.MinAmountOut, 7), Fee: "0.0001", Slippage: "0.5", Timeout: 180,
 	}
 }
 
@@ -440,17 +440,25 @@ func TestLifiBuildTimeout(t *testing.T) {
 	body := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
 	env := decodeEnv(t, trustFixtureXDR(t))
 	now := int64(env.V1.Tx.Cond.TimeBounds.MaxTime) - 300
-	long := int64(3600)
 	for _, tc := range []struct {
-		timeout *int64
+		timeout int64
 		want    int64
-	}{{nil, now + 180}, {&long, now + 3600}} {
+	}{{180, now + 180}, {3600, now + 3600}} {
 		req := lifiBuildReq(t, env)
 		req.Timeout = tc.timeout
 		x, err := lifiBuildSource(t, env, 200, body).BuildTx(context.Background(), req)
 		require.NoError(t, err)
 		assert.Equal(t, xdr.TimePoint(tc.want), decodeEnv(t, x).V1.Tx.Cond.TimeBounds.MaxTime)
 	}
+}
+
+// A zero timeout would build a transaction that never expires.
+func TestLifiBuildRejectsZeroTimeout(t *testing.T) {
+	env := decodeEnv(t, trustFixtureXDR(t))
+	req := lifiBuildReq(t, env)
+	req.Timeout = 0
+	_, err := lifiBuildSource(t, env, 200, lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")).BuildTx(context.Background(), req)
+	require.ErrorIs(t, err, ErrBadRequest)
 }
 
 // A MinTime past the user's expiry would make an unsubmittable tx.
@@ -466,8 +474,7 @@ func TestLifiBuildMinTimeAfterTimeoutIsCheckFailed(t *testing.T) {
 	body, err := json.Marshal(q)
 	require.NoError(t, err)
 	req := lifiBuildReq(t, env)
-	one := int64(1)
-	req.Timeout = &one
+	req.Timeout = 1
 	_, err = lifiBuildSource(t, env, 200, body).BuildTx(context.Background(), req)
 	require.ErrorIs(t, err, ErrCheckFailed)
 }

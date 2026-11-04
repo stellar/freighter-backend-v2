@@ -60,7 +60,7 @@ func swapQuoteBody(mode, from, to, amount string) string {
 }
 
 func swapBuildBody(from, to, amount string) string {
-	return fmt.Sprintf(`{"account":%q,"source":"classic","fromAsset":%q,"toAsset":%q,"amount":%q,"minOut":"9.5","fee":"0.00001","slippage":"1"}`, swapAccount, from, to, amount)
+	return fmt.Sprintf(`{"account":%q,"source":"classic","fromAsset":%q,"toAsset":%q,"amount":%q,"minOut":"9.5","fee":"0.00001","slippage":"1","timeout":180}`, swapAccount, from, to, amount)
 }
 
 // signedIn adds a Bearer token; the auth middleware has already verified it.
@@ -293,9 +293,9 @@ func TestSwapBuild_Timeout(t *testing.T) {
 	t.Parallel()
 	good := swapBuildBody("XLM", swapUSDC, "10")
 	withTimeout := func(v string) string {
-		return strings.Replace(good, `"fee"`, `"timeout":`+v+`,"fee"`, 1)
+		return strings.Replace(good, `"timeout":180`, `"timeout":`+v, 1)
 	}
-	for _, v := range []string{"0", "-1", "86401"} {
+	for _, v := range []string{"0", "-1", "86401", "null"} {
 		t.Run("rejects "+v, func(t *testing.T) {
 			t.Parallel()
 			f := &fakeSwapService{}
@@ -312,17 +312,16 @@ func TestSwapBuild_Timeout(t *testing.T) {
 			f := &fakeSwapService{}
 			_, err := doBuild(NewSwapHandler(f), "TESTNET", withTimeout(fmt.Sprint(v)))
 			require.NoError(t, err)
-			require.NotNil(t, f.lastB.Timeout)
-			assert.Equal(t, v, *f.lastB.Timeout)
+			assert.Equal(t, v, f.lastB.Timeout)
 		})
 	}
-	t.Run("absent stays nil", func(t *testing.T) {
+	t.Run("rejects absent", func(t *testing.T) {
 		t.Parallel()
 		f := &fakeSwapService{}
-		_, err := doBuild(NewSwapHandler(f), "TESTNET", good)
-		require.NoError(t, err)
-		assert.Nil(t, f.lastB.Timeout)
-		assert.Equal(t, 1, f.calls)
+		_, err := doBuild(NewSwapHandler(f), "TESTNET", strings.Replace(good, `,"timeout":180`, "", 1))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid timeout")
+		assert.Zero(t, f.calls)
 	})
 }
 

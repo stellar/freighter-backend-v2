@@ -158,7 +158,7 @@ func TestClassicBuild(t *testing.T) {
 		src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: "unused"}}, rpc)
 		xdrB64, err := src.BuildTx(context.Background(), types.SwapBuildRequest{
 			Network: types.PUBLIC, Account: acct, Source: "classic",
-			FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0002",
+			FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0002", Timeout: 180,
 			Paths: []types.SwapPath{{Share: "1", Hops: []types.SwapHop{
 				{Venue: "stellar-dex", From: "XLM", To: "AQUA:" + aquaIssuer},
 				{Venue: "stellar-dex", From: "AQUA:" + aquaIssuer, To: "USDC:" + usdcIssuer},
@@ -205,7 +205,7 @@ func TestClassicBuildIssuerNeedsNoTrustline(t *testing.T) {
 	src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: "unused"}}, rpc)
 	xdrB64, err := src.BuildTx(context.Background(), types.SwapBuildRequest{
 		Network: types.PUBLIC, Account: usdcIssuer, Source: "classic",
-		FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0001",
+		FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0001", Timeout: 180,
 	})
 	require.NoError(t, err)
 	var env xdr.TransactionEnvelope
@@ -216,11 +216,10 @@ func TestClassicBuildIssuerNeedsNoTrustline(t *testing.T) {
 
 func TestClassicBuildTimeout(t *testing.T) {
 	t.Parallel()
-	sixty := int64(60)
 	for _, tc := range []struct {
-		timeout *int64
+		timeout int64
 		want    int64
-	}{{nil, 180}, {&sixty, 60}} {
+	}{{180, 180}, {60, 60}} {
 		acct := keypair.MustRandom().Address()
 		src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: "unused"}}, newFakeLedger(t, acct, 41, true))
 		before := time.Now().Unix()
@@ -241,6 +240,22 @@ func TestClassicBuildTimeout(t *testing.T) {
 	}
 }
 
+// A zero timeout would build a transaction that never expires.
+func TestClassicBuildRejectsZeroTimeout(t *testing.T) {
+	t.Parallel()
+	acct := keypair.MustRandom().Address()
+	src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: "unused"}}, newFakeLedger(t, acct, 41, true))
+	_, err := src.BuildTx(context.Background(), types.SwapBuildRequest{
+		Network: types.PUBLIC, Account: acct, Source: "classic",
+		FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0001",
+		Timeout: 0,
+		Paths: []types.SwapPath{{Share: "1", Hops: []types.SwapHop{
+			{Venue: "stellar-dex", From: "XLM", To: "USDC:" + usdcIssuer},
+		}}},
+	})
+	require.ErrorIs(t, err, ErrBadRequest)
+}
+
 func TestClassicBuildAccountNotFound(t *testing.T) {
 	t.Parallel()
 	rpc := newFakeLedger(t, "", 0, false)
@@ -248,7 +263,7 @@ func TestClassicBuildAccountNotFound(t *testing.T) {
 	_, err := src.BuildTx(context.Background(), types.SwapBuildRequest{
 		Network: types.PUBLIC,
 		Account: keypair.MustRandom().Address(), FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer,
-		Amount: "1", MinOut: "0.1", Fee: "0.00001",
+		Amount: "1", MinOut: "0.1", Fee: "0.00001", Timeout: 180,
 	})
 	assert.ErrorIs(t, err, ErrAccountNotFound)
 }
@@ -276,7 +291,7 @@ func TestClassicBuildFeeFloor(t *testing.T) {
 		src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: "unused"}}, newFakeLedger(t, acct, 41, hasTrustline))
 		xdrB64, err := src.BuildTx(context.Background(), types.SwapBuildRequest{
 			Network: types.PUBLIC, Account: acct, Source: "classic",
-			FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0000001",
+			FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0000001", Timeout: 180,
 		})
 		require.NoError(t, err)
 		var env xdr.TransactionEnvelope

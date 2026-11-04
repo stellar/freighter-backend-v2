@@ -280,12 +280,16 @@ func (c *ClassicSource) BuildTx(ctx context.Context, req types.SwapBuildRequest)
 	if perOp < txnbuild.MinBaseFee {
 		perOp = txnbuild.MinBaseFee
 	}
+	timeout, err := timeoutSeconds(req)
+	if err != nil {
+		return "", err
+	}
 	tx, err := txnbuild.NewTransaction(txnbuild.TransactionParams{
 		SourceAccount:        &txnbuild.SimpleAccount{AccountID: req.Account, Sequence: seq},
 		IncrementSequenceNum: true,
 		Operations:           ops,
 		BaseFee:              perOp,
-		Preconditions:        txnbuild.Preconditions{TimeBounds: txnbuild.NewTimeout(TimeoutSeconds(req))},
+		Preconditions:        txnbuild.Preconditions{TimeBounds: txnbuild.NewTimeout(timeout)},
 	})
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
