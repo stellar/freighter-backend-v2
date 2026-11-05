@@ -38,7 +38,7 @@ func TestGetAccountsPositionsSuccess(t *testing.T) {
 			TotalValueUSD: &total,
 			Positions: []types.PoolPosition{{
 				Protocol: "blend",
-				ID:       "CCEBVDYMCCECIVWVOJSKUNLTVDIRLTRUCVZDVLKXKQZWSCF3DVQGJVIX",
+				ID:       "CB3447A446DY3USGWPIDXTNQHF5EX24XDQA2EN6TAZP62JTPBTNOA52Q",
 			}},
 		}},
 	}
