@@ -40,8 +40,8 @@ func (r *Router) Quote(ctx context.Context, req types.SwapQuoteRequest) (types.S
 	out := types.SwapQuotesResponse{Routes: []types.SwapRoute{}, Unavailable: []types.SwapUnavailable{}}
 	var called []Source
 	for _, s := range r.sources {
-		if !s.Supports(req.Network) {
-			out.Unavailable = append(out.Unavailable, types.SwapUnavailable{Source: s.Name(), Reason: "unsupported_network"})
+		if !s.Supports(req) {
+			out.Unavailable = append(out.Unavailable, types.SwapUnavailable{Source: s.Name(), Reason: "unsupported"})
 			continue
 		}
 		called = append(called, s)
@@ -74,9 +74,6 @@ func (r *Router) Quote(ctx context.Context, req types.SwapQuoteRequest) (types.S
 	failed, badReq := 0, 0
 	var firstBadReq error
 	for _, res := range results {
-		if errors.Is(res.err, ErrUnsupportedMode) {
-			continue
-		}
 		if res.err == nil && !validRoute(req, res.route) {
 			res.err = errMalformedRoute
 		}
@@ -99,10 +96,10 @@ func (r *Router) Quote(ctx context.Context, req types.SwapQuoteRequest) (types.S
 		out.Routes = append(out.Routes, *res.route)
 	}
 
-	if len(out.Routes) == 0 && failed > 0 && failed == countAsked(results) {
+	if len(out.Routes) == 0 && failed > 0 && failed == len(results) {
 		return out, ErrAllSourcesFailed
 	}
-	if len(out.Routes) == 0 && badReq > 0 && badReq == countAsked(results) {
+	if len(out.Routes) == 0 && badReq > 0 && badReq == len(results) {
 		return out, firstBadReq
 	}
 	r.rank(req, out.Routes)
@@ -116,16 +113,6 @@ func recoverSource(source, op string, err *error) {
 		logger.Error("swap source panicked", "source", source, "op", op, "panic", p, "stack", string(debug.Stack()))
 		*err = fmt.Errorf("swap source %s panicked: %v", source, p)
 	}
-}
-
-func countAsked(results []result) int {
-	n := 0
-	for _, res := range results {
-		if !errors.Is(res.err, ErrUnsupportedMode) {
-			n++
-		}
-	}
-	return n
 }
 
 // validRoute reports whether rt is non-nil and its ranking amount parses;
@@ -194,8 +181,10 @@ func (r *Router) Build(ctx context.Context, req types.SwapBuildRequest) (types.S
 		if s.Name() != req.Source {
 			continue
 		}
-		if !s.Supports(req.Network) {
-			return types.SwapBuildResponse{}, fmt.Errorf("%w: source %s does not support %s", ErrBadRequest, req.Source, req.Network)
+		// A build has no mode: every source builds a send.
+		quote := types.SwapQuoteRequest{Network: req.Network, Mode: types.SwapModeSend, FromAsset: req.FromAsset, ToAsset: req.ToAsset}
+		if !s.Supports(quote) {
+			return types.SwapBuildResponse{}, fmt.Errorf("%w: source %s does not support this swap on %s", ErrBadRequest, req.Source, req.Network)
 		}
 		bctx, cancel := context.WithTimeout(ctx, r.buildTimeout)
 		x, err := func() (x string, err error) {

@@ -35,30 +35,8 @@ type rpcService struct {
 	svcMetrics      *metrics.Service
 }
 
-func createDefaultClient() *http.Client {
-	return &http.Client{
-		Timeout: 30 * time.Second, // Overall request timeout
-		Transport: &http.Transport{
-			// Connection pooling settings
-			MaxIdleConns:        100,              // Total idle connections across all hosts
-			MaxIdleConnsPerHost: 10,               // Idle connections per host
-			MaxConnsPerHost:     50,               // Total connections per host (active + idle)
-			IdleConnTimeout:     90 * time.Second, // How long idle connections stay alive
-
-			// Timeout settings to prevent hung connections
-			ResponseHeaderTimeout: 10 * time.Second, // Timeout waiting for response headers
-			ExpectContinueTimeout: 1 * time.Second,  // Timeout for 100-continue
-
-			// Connection settings
-			DisableKeepAlives:  false, // Keep connections alive for reuse
-			DisableCompression: false, // Allow compression
-			ForceAttemptHTTP2:  true,  // Try HTTP/2
-		},
-	}
-}
-
 func NewRPCService(rpcURL string, testnetRPCURL string, futurenetRPCURL string, m *metrics.Service) types.RPCService {
-	httpClient := createDefaultClient()
+	httpClient := utils.NewUpstreamHTTPClient()
 
 	return &rpcService{
 		httpClient:      httpClient,

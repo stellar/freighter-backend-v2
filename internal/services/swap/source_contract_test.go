@@ -3,7 +3,6 @@ package swap
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -22,8 +21,8 @@ import (
 // every request in it. See the Source doc comment for the rules it checks.
 type sourceContract struct {
 	src Source
-	// quotes are requests the fake upstream answers with a route. A source may
-	// instead return ErrUnsupportedMode for a mode it does not offer.
+	// quotes are requests the fake upstream answers with a route. One the
+	// source does not Support is skipped.
 	quotes []types.SwapQuoteRequest
 	// build is a request the fake upstream answers with a transaction.
 	build types.SwapBuildRequest
@@ -36,7 +35,9 @@ type sourceContract struct {
 func checkSourceContract(t *testing.T, c sourceContract) {
 	t.Helper()
 	assert.NotEmpty(t, c.src.Name())
-	assert.False(t, c.src.Supports("NOT_A_NETWORK"), "Supports must be false for an unknown network")
+	unknown := c.quotes[0]
+	unknown.Network = "NOT_A_NETWORK"
+	assert.False(t, c.src.Supports(unknown), "Supports must be false for an unknown network")
 
 	// A fake that never answers fails the call instead of hanging the package.
 	bounded := func() (context.Context, context.CancelFunc) {
@@ -46,12 +47,12 @@ func checkSourceContract(t *testing.T, c sourceContract) {
 	var answered []types.SwapQuoteRequest
 	for _, req := range c.quotes {
 		t.Run("quote "+req.Mode, func(t *testing.T) {
+			if !c.src.Supports(req) {
+				t.Skipf("%s does not offer %s", c.src.Name(), req.Mode)
+			}
 			ctx, cancel := bounded()
 			defer cancel()
 			rt, err := c.src.Quote(ctx, req)
-			if errors.Is(err, ErrUnsupportedMode) {
-				t.Skipf("%s does not offer %s", c.src.Name(), req.Mode)
-			}
 			require.NoError(t, err)
 			checkRoute(t, c.src.Name(), req, rt)
 			answered = append(answered, req)

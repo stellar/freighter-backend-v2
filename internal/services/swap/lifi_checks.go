@@ -125,6 +125,9 @@ func checkLifiParams(call *lifiCall, want lifiExpect) error {
 	if argMin, ok := scI128(a[4]); !ok || argMin.Cmp(call.MinAmountOut) != 0 {
 		return checkFailed("args min out")
 	}
+	// The cap is on the total: the auth tree bounds only the input-leg fee,
+	// and the contract may take these on the output.
+	totalBps := new(big.Int)
 	for _, f := range call.Fees {
 		dest, _ := scField(f, "fee_destination")
 		if scAddr(dest) != want.FeeRecipient {
@@ -132,7 +135,7 @@ func checkLifiParams(call *lifiCall, want lifiExpect) error {
 		}
 		bpsVal, _ := scField(f, "fee_bps")
 		bps, ok := scI128(bpsVal)
-		if !ok || bps.Sign() < 0 || bps.Cmp(big.NewInt(lifiMaxFeeBps)) > 0 {
+		if !ok || bps.Sign() < 0 || totalBps.Add(totalBps, bps).Cmp(big.NewInt(lifiMaxFeeBps)) > 0 {
 			return checkFailed("fee bps")
 		}
 	}

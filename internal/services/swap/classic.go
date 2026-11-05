@@ -17,6 +17,7 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 const classicName = "classic"
@@ -43,14 +44,21 @@ type ClassicSource struct {
 func NewClassicSource(cfg ClassicConfig, rpc types.RPCService) *ClassicSource {
 	hc := cfg.HTTPClient
 	if hc == nil {
-		hc = &http.Client{Timeout: 15 * time.Second}
+		hc = utils.NewUpstreamHTTPClient()
 	}
 	return &ClassicSource{urls: cfg.HorizonURLs, orderbook: cfg.OrderbookURLs, hc: hc, rpc: rpc, m: cfg.Metrics}
 }
 
 func (c *ClassicSource) Name() string { return classicName }
 
-func (c *ClassicSource) Supports(network string) bool { return c.urls[network] != "" }
+// maxClassicPathHops is five intermediates plus the final hop.
+const maxClassicPathHops = 6
+
+func (c *ClassicSource) Supports(req types.SwapQuoteRequest) bool {
+	from, err1 := ParseAsset(req.FromAsset)
+	to, err2 := ParseAsset(req.ToAsset)
+	return c.urls[req.Network] != "" && err1 == nil && err2 == nil && from.IsClassic() && to.IsClassic()
+}
 
 type horizonAsset struct {
 	Type   string `json:"asset_type"`
@@ -97,7 +105,7 @@ func (c *ClassicSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (
 		return nil, err
 	}
 	if !from.IsClassic() || !to.IsClassic() {
-		return nil, ErrNoRoute
+		return nil, fmt.Errorf("%w: classic swaps need classic assets", ErrBadRequest)
 	}
 	if base := c.orderbook[req.Network]; base != "" {
 		rt, err := c.orderbookQuote(ctx, base, req, from, to)
@@ -354,22 +362,29 @@ func (c *ClassicSource) BuildTx(ctx context.Context, req types.SwapBuildRequest)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
 	}
+	// The build must follow the quoted route, so the path is checked, not
+	// trusted. A PathPaymentStrictSendOp path holds at most five assets;
+	// txnbuild does not enforce it and a longer path encodes but cannot decode.
+	if len(req.Paths) != 1 || len(req.Paths[0].Hops) == 0 || len(req.Paths[0].Hops) > maxClassicPathHops {
+		return "", fmt.Errorf("%w: path", ErrBadRequest)
+	}
+	hops := req.Paths[0].Hops
+	if hops[0].From != req.FromAsset || hops[len(hops)-1].To != req.ToAsset {
+		return "", fmt.Errorf("%w: path", ErrBadRequest)
+	}
 	var path []txnbuild.Asset
-	if len(req.Paths) == 1 {
-		hops := req.Paths[0].Hops
-		for i := 0; i+1 < len(hops); i++ {
-			var mid Asset
-			mid, err = ParseAsset(hops[i].To)
-			if err != nil || !mid.IsClassic() {
-				return "", fmt.Errorf("%w: path", ErrBadRequest)
-			}
-			var midT txnbuild.Asset
-			midT, err = mid.TxnbuildAsset()
-			if err != nil {
-				return "", fmt.Errorf("%w: path", ErrBadRequest)
-			}
-			path = append(path, midT)
+	for i := 0; i+1 < len(hops); i++ {
+		var mid Asset
+		mid, err = ParseAsset(hops[i].To)
+		if err != nil || !mid.IsClassic() {
+			return "", fmt.Errorf("%w: path", ErrBadRequest)
 		}
+		var midT txnbuild.Asset
+		midT, err = mid.TxnbuildAsset()
+		if err != nil {
+			return "", fmt.Errorf("%w: path", ErrBadRequest)
+		}
+		path = append(path, midT)
 	}
 	ops := []txnbuild.Operation{}
 	if tlKeyB64 != "" {

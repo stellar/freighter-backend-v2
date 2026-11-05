@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -20,8 +22,9 @@ import (
 )
 
 type fakeSource struct {
-	name     string
-	networks map[string]bool
+	name string
+	// supports is Supports; nil serves every request.
+	supports func(types.SwapQuoteRequest) bool
 	route    *types.SwapRoute
 	err      error
 	delay    time.Duration
@@ -36,8 +39,11 @@ type fakeSource struct {
 	lateOK bool
 }
 
-func (f *fakeSource) Name() string           { return f.name }
-func (f *fakeSource) Supports(n string) bool { return f.networks == nil || f.networks[n] }
+func (f *fakeSource) Name() string { return f.name }
+func (f *fakeSource) Supports(req types.SwapQuoteRequest) bool {
+	return f.supports == nil || f.supports(req)
+}
+
 func (f *fakeSource) BuildTx(ctx context.Context, _ types.SwapBuildRequest) (string, error) {
 	f.builds++
 	if f.panics {
@@ -174,23 +180,17 @@ func TestRouterAllErroringIsAllSourcesFailed(t *testing.T) {
 	assert.ErrorIs(t, err, ErrAllSourcesFailed)
 }
 
-func TestRouterUnsupportedNetworkAndMode(t *testing.T) {
+func TestRouterUnsupportedSourceIsNotAsked(t *testing.T) {
 	t.Parallel()
-	lifi := &fakeSource{name: "lifi", networks: map[string]bool{types.PUBLIC: true}, err: ErrUnsupportedMode}
+	lifi := &fakeSource{name: "lifi", supports: func(req types.SwapQuoteRequest) bool { return req.Network == types.PUBLIC }}
 	r := NewRouter([]Source{lifi, &fakeSource{name: "classic", route: route("classic", "1", "1")}}, time.Second, time.Second, nil)
 
 	req := sendReq
 	req.Network = types.TESTNET
 	res, err := r.Quote(context.Background(), req)
 	require.NoError(t, err)
-	assert.Equal(t, []types.SwapUnavailable{{Source: "lifi", Reason: "unsupported_network"}}, res.Unavailable)
+	assert.Equal(t, []types.SwapUnavailable{{Source: "lifi", Reason: "unsupported"}}, res.Unavailable)
 	assert.Equal(t, 0, lifi.calls)
-
-	req = sendReq
-	req.Mode = types.SwapModeReceive
-	res, err = r.Quote(context.Background(), req)
-	require.NoError(t, err)
-	assert.Empty(t, res.Unavailable) // unsupported mode is omitted
 }
 
 // A hung source doesn't hold the response past the timeout.
@@ -374,9 +374,41 @@ func TestRouterDiscardsQuoteThatSucceedsAfterDeadline(t *testing.T) {
 
 func TestRouterBuildUnsupportedNetworkDoesNotBuild(t *testing.T) {
 	t.Parallel()
-	src := &fakeSource{name: "lifi", networks: map[string]bool{types.PUBLIC: true}, buildXDR: "x"}
+	src := &fakeSource{name: "lifi", supports: func(req types.SwapQuoteRequest) bool { return req.Network == types.PUBLIC }, buildXDR: "x"}
 	r := NewRouter([]Source{src}, time.Second, time.Second, nil)
 	_, err := r.Build(context.Background(), types.SwapBuildRequest{Network: types.TESTNET, Source: "lifi"})
 	assert.ErrorIs(t, err, ErrBadRequest)
 	assert.Zero(t, src.builds)
+}
+
+// A source that cannot serve the pair is not asked, so it does not dilute the
+// all-failed and all-bad-request rules on the pairs only LI.FI can route.
+func TestRouterPairOnlyOneSourceServes(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		lifiErr error
+		wantErr error
+		reason  string
+	}{
+		{"all failed", errors.New("boom"), ErrAllSourcesFailed, "error"},
+		{"all bad request", fmt.Errorf("%w: amount", ErrBadRequest), ErrBadRequest, "bad_request"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			horizon := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				t.Errorf("Horizon was asked for a Soroban pair: %s", r.URL)
+			}))
+			t.Cleanup(horizon.Close)
+			m := metrics.NewSwap(prometheus.NewRegistry())
+			classic := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: horizon.URL}}, nil)
+			r := NewRouter([]Source{classic, &fakeSource{name: "lifi", err: tc.lifiErr}}, time.Second, time.Second, m)
+
+			req := sendReq
+			req.FromAsset = "CBI7UCH5KGSVQRO5H4SUCZUTZABCITZLRHQQZTWL2TK4RZ72TAR6IHRV"
+			res, err := r.Quote(context.Background(), req)
+			assert.ErrorIs(t, err, tc.wantErr)
+			assert.Equal(t, []types.SwapUnavailable{{Source: "classic", Reason: "unsupported"}, {Source: "lifi", Reason: tc.reason}}, res.Unavailable)
+			assert.Equal(t, 1, testutil.CollectAndCount(m.SourceRequests), "only the asked source is recorded")
+		})
+	}
 }

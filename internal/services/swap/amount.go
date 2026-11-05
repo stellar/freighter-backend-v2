@@ -13,9 +13,13 @@ var decimalRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
 
 var errBadAmount = errors.New("invalid amount")
 
+// maxAmountLen bounds the input before big.Int.SetString, which is superlinear
+// in digits: an i128 is 39 digits, plus the point.
+const maxAmountLen = 40
+
 // ParseUnits converts a positive decimal string to integer units.
 func ParseUnits(s string, decimals int) (*big.Int, error) {
-	if !decimalRe.MatchString(s) {
+	if len(s) > maxAmountLen || !decimalRe.MatchString(s) {
 		return nil, errBadAmount
 	}
 	whole, frac, _ := strings.Cut(s, ".")
