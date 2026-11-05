@@ -558,11 +558,17 @@ func TestServeCmd_SwapEnvOverrides(t *testing.T) {
 	t.Setenv("SWAP_LIFI_ENABLED", "true")
 	t.Setenv("SWAP_LIFI_API_KEY", "k")
 	t.Setenv("SWAP_SOURCE_TIMEOUT_SECONDS", "2")
+	t.Setenv("SWAP_SDEX_ORDERBOOK_PUBNET_URL", "http://ob-pubnet")
+	t.Setenv("SWAP_SDEX_ORDERBOOK_TESTNET_URL", "http://ob-testnet")
+	t.Setenv("SWAP_SDEX_ORDERBOOK_FUTURENET_URL", "http://ob-futurenet")
 
 	cfg := executeServeWithArgs(t)
 	assert.True(t, cfg.SwapConfig.LifiEnabled)
 	assert.Equal(t, "k", cfg.SwapConfig.LifiAPIKey)
 	assert.Equal(t, 2, cfg.SwapConfig.SourceTimeoutSeconds)
+	assert.Equal(t, "http://ob-pubnet", cfg.SwapConfig.SdexOrderbookPubnetURL)
+	assert.Equal(t, "http://ob-testnet", cfg.SwapConfig.SdexOrderbookTestnetURL)
+	assert.Equal(t, "http://ob-futurenet", cfg.SwapConfig.SdexOrderbookFuturenetURL)
 }
 
 func TestServeCmd_LifiRequiresAPIKey(t *testing.T) {

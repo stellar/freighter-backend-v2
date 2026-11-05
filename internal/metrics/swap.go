@@ -41,8 +41,8 @@ func NewSwap(reg prometheus.Registerer) *Swap {
 		}, []string{"winner"}),
 		OrderbookFallbacks: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_swap_orderbook_fallback_total",
-			Help: "Classic quotes answered by Horizon because sdex-orderbook could not, by reason (not_ready|timeout|error).",
-		}, []string{"reason"}),
+			Help: "Classic quotes answered by Horizon because sdex-orderbook could not, by network and reason (not_ready|timeout|error).",
+		}, []string{"network", "reason"}),
 	}
 	reg.MustRegister(s.SourceRequests, s.UnknownHops, s.Winners, s.MarginBps, s.OrderbookFallbacks)
 	return s
@@ -80,9 +80,9 @@ func RecordSwapWinner(m *Swap, winner, pair string, marginBps float64) {
 
 // RecordSwapOrderbookFallback records a classic quote that fell back to
 // Horizon. Nil-safe.
-func RecordSwapOrderbookFallback(m *Swap, reason string) {
+func RecordSwapOrderbookFallback(m *Swap, network, reason string) {
 	if m == nil {
 		return
 	}
-	m.OrderbookFallbacks.WithLabelValues(reason).Inc()
+	m.OrderbookFallbacks.WithLabelValues(network, reason).Inc()
 }

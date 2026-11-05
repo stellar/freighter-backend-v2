@@ -526,7 +526,7 @@ func TestClassicQuoteFallsBackToHorizon(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, int32(1), hzCalls.Load())
 			assert.NotEmpty(t, rt.ToAmount)
-			assert.Equal(t, 1.0, testutil.ToFloat64(m.OrderbookFallbacks.WithLabelValues(tc.reason)))
+			assert.Equal(t, 1.0, testutil.ToFloat64(m.OrderbookFallbacks.WithLabelValues(types.PUBLIC, tc.reason)))
 		})
 	}
 }
@@ -545,6 +545,29 @@ func TestClassicQuoteOrderbookOtherNetwork(t *testing.T) {
 	_, err := src.Quote(context.Background(), req)
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), hzCalls.Load())
+}
+
+// Each network's sdex-orderbook is asked for that network, and its fallbacks
+// are counted under it.
+func TestClassicQuoteOrderbookPerNetwork(t *testing.T) {
+	t.Parallel()
+	hz, hzCalls := countingHorizon(t)
+	m := metrics.NewSwap(prometheus.NewRegistry())
+	src := NewClassicSource(ClassicConfig{
+		HorizonURLs: map[string]string{types.TESTNET: hz.URL},
+		OrderbookURLs: map[string]string{
+			types.PUBLIC:  "http://unused.invalid",
+			types.TESTNET: orderbookFixture(t, http.StatusServiceUnavailable, `{"code":"not_ready","message":"loading"}`).URL,
+		},
+		Metrics: m,
+	}, nil)
+	req := sendReq
+	req.Network = types.TESTNET
+
+	_, err := src.Quote(context.Background(), req)
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), hzCalls.Load())
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.OrderbookFallbacks.WithLabelValues(types.TESTNET, "not_ready")))
 }
 
 // hangingOrderbook accepts the quote and never answers; arrived is closed
@@ -575,7 +598,7 @@ func TestClassicQuoteOrderbookHungNoDeadline(t *testing.T) {
 	require.NoError(t, err)
 	assert.Less(t, time.Since(start), 5*time.Second) // not the client timeout
 	assert.Equal(t, int32(1), hzCalls.Load())
-	assert.Equal(t, 1.0, testutil.ToFloat64(m.OrderbookFallbacks.WithLabelValues("timeout")))
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.OrderbookFallbacks.WithLabelValues(types.PUBLIC, "timeout")))
 }
 
 // A caller that goes away is not a fallback: Horizon is not asked.
@@ -607,7 +630,7 @@ func TestClassicQuoteOrderbookHungShortBudget(t *testing.T) {
 	_, err := src.Quote(ctx, sendReq)
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), hzCalls.Load())
-	assert.Equal(t, 1.0, testutil.ToFloat64(m.OrderbookFallbacks.WithLabelValues("timeout")))
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.OrderbookFallbacks.WithLabelValues(types.PUBLIC, "timeout")))
 }
 
 // A caller that leaves while the body is still arriving is not a fallback.

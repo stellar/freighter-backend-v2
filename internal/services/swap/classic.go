@@ -113,7 +113,7 @@ func (c *ClassicSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (
 		if !errors.As(err, &fb) {
 			return rt, err
 		}
-		metrics.RecordSwapOrderbookFallback(c.m, fb.reason)
+		metrics.RecordSwapOrderbookFallback(c.m, req.Network, fb.reason)
 	}
 	var endpoint string
 	var q url.Values

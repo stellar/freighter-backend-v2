@@ -168,8 +168,12 @@ func (s *ApiServer) initServices() error {
 			types.TESTNET:   s.cfg.HorizonConfig.HorizonTestnetURL,
 			types.FUTURENET: s.cfg.HorizonConfig.HorizonFuturenetURL,
 		},
-		OrderbookURLs: map[string]string{types.PUBLIC: s.cfg.SwapConfig.SdexOrderbookPubnetURL},
-		Metrics:       s.appMetrics.Swap,
+		OrderbookURLs: map[string]string{
+			types.PUBLIC:    s.cfg.SwapConfig.SdexOrderbookPubnetURL,
+			types.TESTNET:   s.cfg.SwapConfig.SdexOrderbookTestnetURL,
+			types.FUTURENET: s.cfg.SwapConfig.SdexOrderbookFuturenetURL,
+		},
+		Metrics: s.appMetrics.Swap,
 	}, s.rpcService))
 	if s.cfg.SwapConfig.LifiEnabled {
 		sources = append(sources, swap.NewLifiSource(swap.LifiConfig{
