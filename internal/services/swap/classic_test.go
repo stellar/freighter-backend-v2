@@ -3,6 +3,7 @@ package swap
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -202,6 +203,43 @@ func TestClassicBuild(t *testing.T) {
 	}
 }
 
+// The build must follow the quoted route: one path from fromAsset to toAsset
+// with at most five intermediates (the PathPaymentStrictSendOp limit, which
+// txnbuild does not enforce, so a longer path encodes but cannot decode).
+func TestClassicBuildRejectsPathsNotMatchingTheQuote(t *testing.T) {
+	t.Parallel()
+	xlmToUSDC := []types.SwapHop{{From: "XLM", To: "USDC:" + usdcIssuer}}
+	var long []types.SwapHop
+	prev := "XLM"
+	for i := 0; i < 6; i++ {
+		mid := fmt.Sprintf("A%d:%s", i, keypair.MustRandom().Address())
+		long = append(long, types.SwapHop{From: prev, To: mid})
+		prev = mid
+	}
+	long = append(long, types.SwapHop{From: prev, To: "USDC:" + usdcIssuer})
+
+	for name, paths := range map[string][]types.SwapPath{
+		"no path":           nil,
+		"two paths":         {{Share: "0.5", Hops: xlmToUSDC}, {Share: "0.5", Hops: xlmToUSDC}},
+		"no hops":           {{Share: "1"}},
+		"starts elsewhere":  {{Share: "1", Hops: []types.SwapHop{{From: "USDC:" + usdcIssuer, To: "AQUA:" + aquaIssuer}, {From: "AQUA:" + aquaIssuer, To: "USDC:" + usdcIssuer}}}},
+		"ends elsewhere":    {{Share: "1", Hops: []types.SwapHop{{From: "XLM", To: "AQUA:" + aquaIssuer}, {From: "AQUA:" + aquaIssuer, To: "XLM"}}}},
+		"six intermediates": {{Share: "1", Hops: long}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			acct := keypair.MustRandom().Address()
+			src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: "unused"}}, newFakeLedger(t, acct, 41, true))
+			x, err := src.BuildTx(context.Background(), types.SwapBuildRequest{
+				Network: types.PUBLIC, Account: acct, Source: "classic",
+				FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0002", Timeout: 180,
+				Paths: paths,
+			})
+			assert.ErrorIs(t, err, ErrBadRequest)
+			assert.Empty(t, x)
+		})
+	}
+}
+
 func TestClassicBuildIssuerNeedsNoTrustline(t *testing.T) {
 	t.Parallel()
 	rpc := newFakeLedger(t, usdcIssuer, 41, false)
@@ -209,6 +247,7 @@ func TestClassicBuildIssuerNeedsNoTrustline(t *testing.T) {
 	xdrB64, err := src.BuildTx(context.Background(), types.SwapBuildRequest{
 		Network: types.PUBLIC, Account: usdcIssuer, Source: "classic",
 		FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0001", Timeout: 180,
+		Paths: []types.SwapPath{{Share: "1", Hops: []types.SwapHop{{Venue: "stellar-dex", From: "XLM", To: "USDC:" + usdcIssuer}}}},
 	})
 	require.NoError(t, err)
 	var env xdr.TransactionEnvelope
@@ -295,6 +334,7 @@ func TestClassicBuildFeeFloor(t *testing.T) {
 		xdrB64, err := src.BuildTx(context.Background(), types.SwapBuildRequest{
 			Network: types.PUBLIC, Account: acct, Source: "classic",
 			FromAsset: "XLM", ToAsset: "USDC:" + usdcIssuer, Amount: "100", MinOut: "17.5", Fee: "0.0000001", Timeout: 180,
+			Paths: []types.SwapPath{{Share: "1", Hops: []types.SwapHop{{Venue: "stellar-dex", From: "XLM", To: "USDC:" + usdcIssuer}}}},
 		})
 		require.NoError(t, err)
 		var env xdr.TransactionEnvelope

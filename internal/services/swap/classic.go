@@ -40,6 +40,9 @@ func NewClassicSource(cfg ClassicConfig, rpc types.RPCService) *ClassicSource {
 
 func (c *ClassicSource) Name() string { return classicName }
 
+// maxClassicPathHops is five intermediates plus the final hop.
+const maxClassicPathHops = 6
+
 func (c *ClassicSource) Supports(req types.SwapQuoteRequest) bool {
 	from, err1 := ParseAsset(req.FromAsset)
 	to, err2 := ParseAsset(req.ToAsset)
@@ -243,22 +246,29 @@ func (c *ClassicSource) BuildTx(ctx context.Context, req types.SwapBuildRequest)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
 	}
+	// The build must follow the quoted route, so the path is checked, not
+	// trusted. A PathPaymentStrictSendOp path holds at most five assets;
+	// txnbuild does not enforce it and a longer path encodes but cannot decode.
+	if len(req.Paths) != 1 || len(req.Paths[0].Hops) == 0 || len(req.Paths[0].Hops) > maxClassicPathHops {
+		return "", fmt.Errorf("%w: path", ErrBadRequest)
+	}
+	hops := req.Paths[0].Hops
+	if hops[0].From != req.FromAsset || hops[len(hops)-1].To != req.ToAsset {
+		return "", fmt.Errorf("%w: path", ErrBadRequest)
+	}
 	var path []txnbuild.Asset
-	if len(req.Paths) == 1 {
-		hops := req.Paths[0].Hops
-		for i := 0; i+1 < len(hops); i++ {
-			var mid Asset
-			mid, err = ParseAsset(hops[i].To)
-			if err != nil || !mid.IsClassic() {
-				return "", fmt.Errorf("%w: path", ErrBadRequest)
-			}
-			var midT txnbuild.Asset
-			midT, err = mid.TxnbuildAsset()
-			if err != nil {
-				return "", fmt.Errorf("%w: path", ErrBadRequest)
-			}
-			path = append(path, midT)
+	for i := 0; i+1 < len(hops); i++ {
+		var mid Asset
+		mid, err = ParseAsset(hops[i].To)
+		if err != nil || !mid.IsClassic() {
+			return "", fmt.Errorf("%w: path", ErrBadRequest)
 		}
+		var midT txnbuild.Asset
+		midT, err = mid.TxnbuildAsset()
+		if err != nil {
+			return "", fmt.Errorf("%w: path", ErrBadRequest)
+		}
+		path = append(path, midT)
 	}
 	ops := []txnbuild.Operation{}
 	if tlKeyB64 != "" {
