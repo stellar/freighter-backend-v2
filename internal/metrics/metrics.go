@@ -50,19 +50,21 @@ func (e *UpstreamError) Unwrap() error { return e.Err }
 
 // Metrics groups all Prometheus metrics. Must be created via NewMetrics.
 type Metrics struct {
-	HTTP    *HTTP
-	Service *Service
-	Auth    *Auth
-	Prices  *Prices
+	HTTP     *HTTP
+	Service  *Service
+	Auth     *Auth
+	Prices   *Prices
+	UserLink *UserLink
 }
 
 // NewMetrics creates and registers all application metrics with the given registerer.
 func NewMetrics(reg prometheus.Registerer) *Metrics {
 	return &Metrics{
-		HTTP:    NewHTTP(reg),
-		Service: NewService(reg),
-		Auth:    NewAuth(reg),
-		Prices:  NewPrices(reg),
+		HTTP:     NewHTTP(reg),
+		Service:  NewService(reg),
+		Auth:     NewAuth(reg),
+		Prices:   NewPrices(reg),
+		UserLink: NewUserLink(reg),
 	}
 }
 
@@ -158,6 +160,68 @@ func RecordAuth(a *Auth, result, reason, client string) {
 		return
 	}
 	a.RequestsTotal.WithLabelValues(result, reason, client).Inc()
+}
+
+// UserLink source outcome label values. The set is closed: every value is
+// assigned by the handler from the store's outcome, never from a request field,
+// so a caller cannot grow cardinality.
+const (
+	LinkSourceWritten  = "written"  // a user_sources row this call inserted
+	LinkSourceConflict = "conflict" // a submitted id that belongs to another user, left untouched
+)
+
+// UserLink holds metrics for POST /api/v1/user/link, the only write to the
+// identity tables. A valid JWT proves possession of some keypair and anyone can
+// mint one, so every request can create permanent rows that are never retired;
+// these series are how a storage-exhaustion attack is seen. Request outcomes
+// (400, 403, 5xx, 200) are not repeated here: they come from
+// freighter_http_requests_total{handler="POST /api/v1/user/link", code}.
+type UserLink struct {
+	// UsersCreatedTotal counts link requests that created a new users row (the
+	// signer rooted a new cluster). Its rate is the alert signal: a real wallet
+	// creates one user, once. Resolved requests are the 200s minus this.
+	UsersCreatedTotal prometheus.Counter
+	// SourcesTotal counts submitted sources by what happened to them. Only the
+	// two outcomes that carry a signal are counted: rows written (the
+	// amplification of one request into permanent storage) and conflicts (a
+	// caller presenting sources another user owns). Sources already in the
+	// caller's cluster are not counted.
+	//   outcome: "written" | "conflict"
+	SourcesTotal *prometheus.CounterVec
+}
+
+// NewUserLink creates and registers user-link metrics with the given registerer.
+func NewUserLink(reg prometheus.Registerer) *UserLink {
+	m := &UserLink{
+		UsersCreatedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "freighter_user_link_users_created_total",
+			Help: "Total number of users created by POST /api/v1/user/link. A rising rate is a sybil storage-exhaustion signal. Request outcomes are in freighter_http_requests_total.",
+		}),
+		SourcesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_user_link_sources_total",
+			Help: "Total number of sources submitted to POST /api/v1/user/link, by outcome (written: a new user_sources row; conflict: owned by another user, left untouched).",
+		}, []string{"outcome"}),
+	}
+	reg.MustRegister(m.UsersCreatedTotal, m.SourcesTotal)
+	return m
+}
+
+// RecordUserLinkUserCreated records one link request that created a user.
+// Nil-safe so the handler and its tests can run without a metrics registry.
+func RecordUserLinkUserCreated(m *UserLink) {
+	if m == nil {
+		return
+	}
+	m.UsersCreatedTotal.Inc()
+}
+
+// RecordUserLinkSources adds n sources with the given outcome. Nil-safe; a
+// non-positive n records nothing.
+func RecordUserLinkSources(m *UserLink, outcome string, n int) {
+	if m == nil || n <= 0 {
+		return
+	}
+	m.SourcesTotal.WithLabelValues(outcome).Add(float64(n))
 }
 
 // HTTP holds HTTP request metrics.

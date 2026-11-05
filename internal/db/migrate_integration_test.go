@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -77,6 +78,12 @@ const userSchemaIndex = "user_sources_user_id_idx"
 // The UNIQUE constraint on users.canonical_source_id doubles as its lookup index.
 const usersCanonicalSourceIndex = "users_canonical_source_id_key"
 
+// Canonical source ids (64 lowercase hex characters) for the users-schema tests.
+var (
+	sourceA = strings.Repeat("a", 64)
+	sourceB = strings.Repeat("b", 64)
+)
+
 func TestMigrate_UsersSchema_UpCreatesTablesAndIndex(t *testing.T) {
 	dsn := startPostgres(t)
 	ctx := context.Background()
@@ -97,12 +104,12 @@ func TestMigrate_UsersSchema_UpCreatesTablesAndIndex(t *testing.T) {
 	// users.id defaults to a generated UUID and canonical_source_id is required.
 	var userID string
 	err = conn.QueryRow(ctx,
-		`INSERT INTO users (canonical_source_id) VALUES ('aa') RETURNING id::text`).Scan(&userID)
+		`INSERT INTO users (canonical_source_id) VALUES ($1) RETURNING id::text`, sourceA).Scan(&userID)
 	require.NoError(t, err)
 	assert.Len(t, userID, 36, "users.id should default to a UUID")
 
 	// canonical_source_id is the exposed user id, so two users can't share one.
-	_, err = conn.Exec(ctx, `INSERT INTO users (canonical_source_id) VALUES ('aa')`)
+	_, err = conn.Exec(ctx, `INSERT INTO users (canonical_source_id) VALUES ($1)`, sourceA)
 	require.Error(t, err, "duplicate canonical_source_id should be rejected")
 	var pgErr *pgconn.PgError
 	require.ErrorAs(t, err, &pgErr)
@@ -110,8 +117,30 @@ func TestMigrate_UsersSchema_UpCreatesTablesAndIndex(t *testing.T) {
 
 	// user_sources rows hang off users(id) and are removed with their user.
 	_, err = conn.Exec(ctx,
-		`INSERT INTO user_sources (source_id, user_id, kind) VALUES ('aa', $1, 'phrase')`, userID)
+		`INSERT INTO user_sources (source_id, user_id, kind) VALUES ($1, $2, 'phrase')`, sourceA, userID)
 	require.NoError(t, err)
+
+	// Rows are permanent, so the schema refuses ids ResolveUser could never find
+	// again and kinds the link consent can't carry.
+	checkViolations := []struct {
+		name string
+		sql  string
+		args []any
+	}{
+		{"short canonical id", `INSERT INTO users (canonical_source_id) VALUES ('aa')`, nil},
+		{"uppercase canonical id", `INSERT INTO users (canonical_source_id) VALUES ($1)`, []any{strings.ToUpper(sourceB)}},
+		{"short source id", `INSERT INTO user_sources (source_id, user_id, kind) VALUES ('bb', $1, 'phrase')`, []any{userID}},
+		{"uppercase source id", `INSERT INTO user_sources (source_id, user_id, kind) VALUES ($1, $2, 'phrase')`, []any{strings.ToUpper(sourceB), userID}},
+		{"unknown kind", `INSERT INTO user_sources (source_id, user_id, kind) VALUES ($1, $2, 'hardware')`, []any{sourceB, userID}},
+		{"empty kind", `INSERT INTO user_sources (source_id, user_id, kind) VALUES ($1, $2, '')`, []any{sourceB, userID}},
+	}
+	for _, tc := range checkViolations {
+		_, err = conn.Exec(ctx, tc.sql, tc.args...)
+		require.Error(t, err, tc.name)
+		require.ErrorAs(t, err, &pgErr, tc.name)
+		assert.Equal(t, "23514", pgErr.Code, "%s: expected check_violation", tc.name)
+	}
+
 	_, err = conn.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
 	require.NoError(t, err)
 	var remaining int

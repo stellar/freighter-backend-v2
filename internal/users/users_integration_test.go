@@ -56,9 +56,9 @@ func TestResolveUser_Postgres(t *testing.T) {
 	defer pool.Close()
 
 	const (
-		canonical = "aa" // the phrase that created the user
-		linked    = "bb" // an account key linked to it later
-		unknown   = "cc" // a key nobody has linked
+		canonical = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" // the phrase that created the user
+		linked    = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" // an account key linked to it later
+		unknown   = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" // a key nobody has linked
 	)
 	var seededUserID uuid.UUID
 	err = pool.QueryRow(ctx,
@@ -97,4 +97,51 @@ func TestResolveUser_Postgres(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, seededUserID, userID)
 	assert.Equal(t, canonical, gotCanonical)
+}
+
+// ListSources against the real schema: exactly the rows under the user, in
+// (created_at, source_id) order with their kinds; and nothing for an unknown
+// user. Link's integration tests cover ListSources on a transaction.
+func TestListSources_Postgres(t *testing.T) {
+	dsn := startMigratedPostgres(t)
+	ctx := context.Background()
+
+	pool, err := db.OpenDBConnectionPool(ctx, dsn)
+	require.NoError(t, err)
+	defer pool.Close()
+
+	const (
+		aa = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" // u1's canonical source
+		bb = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" // a key linked to u1 later
+		cc = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" // u2's canonical source
+	)
+	var u1, u2 uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO users (canonical_source_id) VALUES ($1) RETURNING id`, aa).Scan(&u1))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO users (canonical_source_id) VALUES ($1) RETURNING id`, cc).Scan(&u2))
+	// bb is inserted first with a later created_at than aa would get by default,
+	// so the order asserted below is created_at's, not insertion's.
+	_, err = pool.Exec(ctx,
+		`INSERT INTO user_sources (source_id, user_id, kind, created_at) VALUES
+		   ($3, $1, 'secret_key', now() + interval '1 minute'),
+		   ($4, $1, 'phrase',     now()),
+		   ($5, $2, 'phrase',     now())`, u1, u2, bb, aa, cc)
+	require.NoError(t, err)
+
+	store := NewStore(pool)
+
+	got, err := store.ListSources(ctx, u1)
+	require.NoError(t, err)
+	require.Len(t, got, 2, "only u1's rows: %+v", got)
+	assert.Equal(t, aa, got[0].ID)
+	assert.Equal(t, "phrase", got[0].Kind)
+	assert.Equal(t, bb, got[1].ID)
+	assert.Equal(t, "secret_key", got[1].Kind)
+	assert.False(t, got[0].CreatedAt.IsZero())
+	assert.True(t, got[0].CreatedAt.Before(got[1].CreatedAt), "ordered by created_at")
+
+	empty, err := store.ListSources(ctx, uuid.New())
+	require.NoError(t, err)
+	assert.Empty(t, empty)
 }

@@ -4,13 +4,20 @@
 -- follows. `users.canonical_source_id` is the user id as exposed to clients.
 -- Proofs of possession are verified at link time and discarded: no table here
 -- stores a consent signature.
+--
+-- The CHECK constraints are the last guard on rows that are never retired: a
+-- source id must be the canonical form auth.IsCanonicalSourceID accepts (64
+-- lowercase hex characters, the form ResolveUser looks up), and a kind must be
+-- auth.SourceKindPhrase or auth.SourceKindSecretKey. The link handler rejects
+-- anything else first; these catch a caller that skipped it.
 
 -- +migrate Up
 
 CREATE TABLE users (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     canonical_source_id TEXT NOT NULL UNIQUE, -- the root source: the sub that created this user; THE user id, as exposed; never changes. UNIQUE doubles as its lookup index.
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT users_canonical_source_id_canonical CHECK (canonical_source_id ~ '^[0-9a-f]{64}$')
 );
 
 COMMENT ON COLUMN users.canonical_source_id IS
@@ -22,7 +29,9 @@ CREATE TABLE user_sources (
     source_id   TEXT PRIMARY KEY,              -- hex ed25519 pubkey
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     kind        TEXT NOT NULL,                 -- 'phrase' | 'secret_key'; read from the signed consent
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT user_sources_source_id_canonical CHECK (source_id ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT user_sources_kind_known CHECK (kind IN ('phrase', 'secret_key'))
 );
 
 -- The primary key is source_id, so lookups by user need their own index.
