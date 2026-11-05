@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -66,6 +67,10 @@ type fakeStellarExpert struct {
 	beforeCandles   func()
 	concurrentInUse atomic.Int64
 	maxConcurrent   atomic.Int64
+	// listAssets answers ListAssets; the asset-search tests set it. Unset,
+	// a ListAssets call fails the request: the prices and history services
+	// never list assets.
+	listAssets func(ctx context.Context, network string, query url.Values) (json.RawMessage, error)
 }
 
 func newFakeStellarExpert() *fakeStellarExpert {
@@ -169,6 +174,13 @@ func (f *fakeStellarExpert) GetAssetCandles(ctx context.Context, network, assetI
 		return kept, nil
 	}
 	return rows, nil
+}
+
+func (f *fakeStellarExpert) ListAssets(ctx context.Context, network string, query url.Values) (json.RawMessage, error) {
+	if f.listAssets == nil {
+		return nil, errors.New("fakeStellarExpert: unexpected ListAssets call")
+	}
+	return f.listAssets(ctx, network, query)
 }
 
 func (f *fakeStellarExpert) Set(assetID string, asset *types.StellarExpertAsset) {
@@ -1101,6 +1113,7 @@ func (c *errCache) MGetJSON(context.Context, []string, func() any) (map[string]a
 	}
 	return map[string]any{}, nil
 }
+
 func (c *errCache) SetJSON(context.Context, string, any, time.Duration) error {
 	if c.setErr != nil {
 		return fmt.Errorf("redis SET: %w", c.setErr)

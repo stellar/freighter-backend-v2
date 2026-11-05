@@ -47,6 +47,7 @@ type ApiServer struct {
 	pricesService        types.PricesService
 	priceHistoryService  types.PriceHistoryService
 	tokenStatsService    types.TokenStatsService
+	assetSearchService   types.AssetSearchService
 	registry             *prometheus.Registry
 	appMetrics           *metrics.Metrics
 	authMode             auth.Mode
@@ -157,6 +158,11 @@ func (s *ApiServer) initServices() error {
 	s.priceHistoryService = historyAndStats
 	s.tokenStatsService = historyAndStats
 
+	s.assetSearchService = services.NewAssetSearchService(stellarExpert, s.redis, services.AssetSearchServiceConfig{
+		CacheTTL: time.Duration(s.cfg.AssetSearchConfig.CacheTTLSeconds) * time.Second,
+		MaxLimit: s.cfg.AssetSearchConfig.MaxLimit,
+	}, s.appMetrics.Prices)
+
 	return nil
 }
 
@@ -242,6 +248,7 @@ func (s *ApiServer) routes() ([]route, error) {
 	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest, s.appMetrics.Prices)
 	tokenPriceHistoryHandler := handlers.NewTokenPriceHistoryHandler(s.priceHistoryService)
 	tokenStatsHandler := handlers.NewTokenStatsHandler(s.tokenStatsService)
+	assetSearchHandler := handlers.NewAssetSearchHandler(s.assetSearchService)
 	accountHistoryHandler, err := handlers.NewAccountHistoryHandler(
 		s.walletBackendService,
 		s.cfg.AppConfig.AccountHistoryDefaultLimit,
@@ -288,6 +295,11 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true, true},
 		{http.MethodGet, "/api/v1/token-price-history", handlers.CustomHandler(tokenPriceHistoryHandler.GetTokenPriceHistory), true, true},
 		{http.MethodGet, "/api/v1/token-stats", handlers.CustomHandler(tokenStatsHandler.GetTokenStats), true, true},
+		// StellarExpert's /asset list (search, and sorted lists such as
+		// trending) behind our API key and a shared cache. The wallets call
+		// it instead of StellarExpert since anonymous access there ended on
+		// 2026-11-06.
+		{http.MethodGet, "/api/v1/assets/search", handlers.CustomHandler(assetSearchHandler.SearchAssets), true, true},
 		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, true},
 	}, nil
 }

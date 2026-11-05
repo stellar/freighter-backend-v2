@@ -325,6 +325,11 @@ type Prices struct {
 	// freighter_service_errors_total{error_type="http_error:404"} rather
 	// than here. Labeled by network.
 	VolumeVerdictNull *prometheus.CounterVec
+	// AssetSearchCacheOutcomes counts assetsearch:v1 cache outcomes for
+	// /assets/search: "hit" or "miss", by network. StellarExpert bills every
+	// call we make, so each miss is a paid call unless a concurrent miss for
+	// the same query is already fetching it.
+	AssetSearchCacheOutcomes *prometheus.CounterVec
 }
 
 // NewPrices creates and registers prices-service metrics with the given registerer.
@@ -340,7 +345,7 @@ func NewPrices(reg prometheus.Registerer) *Prices {
 		}, []string{"network"}),
 		RedisErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_redis_errors_total",
-			Help: "Redis operation failures, shared by three routes: /token-prices, /token-price-history and /token-stats (the last two both served by the price-history service). Caller cancellations are excluded.",
+			Help: "Redis operation failures, shared by four routes: /token-prices, /token-price-history, /token-stats (the last two both served by the price-history service) and /assets/search. Caller cancellations are excluded.",
 		}, []string{"op"}),
 		SkippedTokens: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_prices_skipped_tokens_total",
@@ -358,9 +363,13 @@ func NewPrices(reg prometheus.Registerer) *Prices {
 			Name: "freighter_price_history_volume_verdict_null_total",
 			Help: "/token-price-history responses whose lowVolume verdict was null because UPSTREAM DEGRADED. Deliberately excludes the other four routes to a null verdict — an authoritative 404/400, a caller that cancelled, an absent volume7d, and a zero conversion divisor — so ordinary traffic cannot bury the signal.",
 		}, []string{"network"}),
+		AssetSearchCacheOutcomes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_asset_search_cache_outcomes_total",
+			Help: "Cache outcomes for /assets/search (hit, miss). StellarExpert bills every call, so a miss is a paid call. Miss is not fetch: concurrent cold requests for one query each record a miss against a single coalesced upstream call.",
+		}, []string{"network", "outcome"}),
 	}
 	reg.MustRegister(p.CacheOutcomes, p.MissBudgetExhausted, p.RedisErrors, p.SkippedTokens,
-		p.HistoryCacheOutcomes, p.TokenStatsCacheOutcomes, p.VolumeVerdictNull)
+		p.HistoryCacheOutcomes, p.TokenStatsCacheOutcomes, p.VolumeVerdictNull, p.AssetSearchCacheOutcomes)
 	return p
 }
 

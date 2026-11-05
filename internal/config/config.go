@@ -15,6 +15,7 @@ type Config struct {
 	HorizonConfig       HorizonConfig
 	PricesConfig        PricesConfig
 	PriceHistoryConfig  PriceHistoryConfig
+	AssetSearchConfig   AssetSearchConfig
 	BlockaidConfig      BlockaidConfig
 	CoinbaseConfig      CoinbaseConfig
 	WalletBackendConfig WalletBackendConfig
@@ -146,6 +147,19 @@ type PricesConfig struct {
 	PriceFetchTimeoutSeconds  int
 	MaxTokensPerRequest       int
 	MaxConcurrentPriceFetches int
+}
+
+// AssetSearchConfig tunes GET /api/v1/assets/search, the cached StellarExpert
+// /asset proxy. Values are env-var backed (flag-name upper-snake) and
+// fail-fast validated in the serve command's PersistentPreRunE.
+type AssetSearchConfig struct {
+	// CacheTTLSeconds is how long one query's answer is reused
+	// (assetsearch:v1 entries). StellarExpert bills every call, so this sets
+	// the price of a popular query: one paid call per window.
+	CacheTTLSeconds int
+	// MaxLimit is the largest `limit` forwarded upstream; larger values are
+	// clamped to it. The cost of one call grows with it.
+	MaxLimit int
 }
 
 // PriceHistoryConfig tunes the token-price-history and token-stats
