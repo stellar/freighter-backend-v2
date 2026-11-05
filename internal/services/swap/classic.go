@@ -8,13 +8,13 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 const classicName = "classic"
@@ -33,7 +33,7 @@ type ClassicSource struct {
 func NewClassicSource(cfg ClassicConfig, rpc types.RPCService) *ClassicSource {
 	hc := cfg.HTTPClient
 	if hc == nil {
-		hc = &http.Client{Timeout: 15 * time.Second}
+		hc = utils.NewUpstreamHTTPClient()
 	}
 	return &ClassicSource{urls: cfg.HorizonURLs, hc: hc, rpc: rpc}
 }

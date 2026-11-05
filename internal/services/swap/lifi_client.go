@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 const LifiStellarChainID = "1201081091099710"
@@ -27,7 +27,7 @@ type LifiClient struct {
 
 func NewLifiClient(baseURL, apiKey string, hc *http.Client) *LifiClient {
 	if hc == nil {
-		hc = &http.Client{Timeout: 30 * time.Second}
+		hc = utils.NewUpstreamHTTPClient()
 	}
 	if hc.CheckRedirect == nil {
 		// Go forwards custom headers such as x-lifi-api-key on redirects.

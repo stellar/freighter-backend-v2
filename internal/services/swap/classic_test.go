@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -57,6 +60,46 @@ func TestClassicQuoteSend(t *testing.T) {
 		assert.Empty(t, h.Pool)
 	}
 	assert.Empty(t, rt.Fees)
+}
+
+// The default client keeps a pool wide enough for a burst: Go's default
+// transport keeps two idle connections per host, so a second burst of ten
+// re-dials eight (TCP+TLS inside the 4 s quote budget on a public Horizon).
+func TestClassicQuoteReusesConnectionsAcrossBursts(t *testing.T) {
+	t.Parallel()
+	fixture, err := os.ReadFile("testdata/horizon_strict_send_xlm_usdc.json")
+	require.NoError(t, err)
+	var newConns atomic.Int32
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(50 * time.Millisecond) // hold the connection so the burst is concurrent
+		_, _ = w.Write(fixture)
+	}))
+	srv.Config.ConnState = func(_ net.Conn, st http.ConnState) {
+		if st == http.StateNew {
+			newConns.Add(1)
+		}
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+	src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: srv.URL}}, nil)
+
+	const burst = 10
+	quoteBurst := func() {
+		var wg sync.WaitGroup
+		for i := 0; i < burst; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := src.Quote(context.Background(), sendReq)
+				assert.NoError(t, err)
+			}()
+		}
+		wg.Wait()
+	}
+	quoteBurst()
+	assert.Equal(t, int32(burst), newConns.Load(), "first burst dials one connection per request")
+	quoteBurst()
+	assert.Equal(t, int32(burst), newConns.Load(), "second burst reuses every connection")
 }
 
 func TestClassicQuoteReceive(t *testing.T) {
