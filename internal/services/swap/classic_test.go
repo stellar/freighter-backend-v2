@@ -485,6 +485,9 @@ func TestClassicQuoteOrderbookNoRoute(t *testing.T) {
 	assert.Equal(t, 0, testutil.CollectAndCount(m.OrderbookFallbacks))
 }
 
+// longPath is six intermediates, one more than a classic build accepts.
+var longPath = strings.Repeat("USDC:"+usdcIssuer+`","`, 5) + "USDC:" + usdcIssuer
+
 func TestClassicQuoteFallsBackToHorizon(t *testing.T) {
 	t.Parallel()
 	hang := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -492,16 +495,13 @@ func TestClassicQuoteFallsBackToHorizon(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	t.Cleanup(hang.Close)
-	closed := httptest.NewServer(http.NotFoundHandler())
-	closed.Close()
-
 	cases := []struct {
 		name, url, reason string
 	}{
 		{"not ready", orderbookFixture(t, http.StatusServiceUnavailable, `{"code":"not_ready","message":"loading"}`).URL, "not_ready"},
 		{"search timeout", orderbookFixture(t, http.StatusGatewayTimeout, `{"code":"timeout","message":"slow"}`).URL, "timeout"},
 		{"hung", hang.URL, "timeout"},
-		{"unreachable", closed.URL, "error"},
+		{"unreachable", "http://127.0.0.1:1", "error"}, // a closed test server's port can be reused by a parallel test
 		{"bad request", orderbookFixture(t, http.StatusBadRequest, `{"code":"invalid_request","message":"x"}`).URL, "error"},
 		{"bad path asset", orderbookFixture(t, http.StatusOK, `{"fromAmount":"100","toAmount":"1","path":["native"]}`).URL, "error"},
 		{"bad json", orderbookFixture(t, http.StatusOK, `{`).URL, "error"},
@@ -510,6 +510,8 @@ func TestClassicQuoteFallsBackToHorizon(t *testing.T) {
 		{"missing amount", orderbookFixture(t, http.StatusOK, `{"fromAmount":"100","path":[]}`).URL, "error"},
 		{"zero amount", orderbookFixture(t, http.StatusOK, `{"fromAmount":"100","toAmount":"0.0000000","path":[]}`).URL, "error"},
 		{"fraction amount", orderbookFixture(t, http.StatusOK, `{"fromAmount":"100","toAmount":"1/3","path":[]}`).URL, "error"},
+		{"path longer than a build allows", orderbookFixture(t, http.StatusOK, `{"fromAmount":"100","toAmount":"1","path":["`+longPath+`"]}`).URL, "error"},
+		{"fixed side not the request", orderbookFixture(t, http.StatusOK, `{"fromAmount":"60","toAmount":"10","path":[]}`).URL, "error"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -571,7 +573,7 @@ func TestClassicQuoteOrderbookHungNoDeadline(t *testing.T) {
 	start := time.Now()
 	_, err := src.Quote(context.Background(), sendReq)
 	require.NoError(t, err)
-	assert.Less(t, time.Since(start), 5*time.Second) // not the 15s client timeout
+	assert.Less(t, time.Since(start), 5*time.Second) // not the client timeout
 	assert.Equal(t, int32(1), hzCalls.Load())
 	assert.Equal(t, 1.0, testutil.ToFloat64(m.OrderbookFallbacks.WithLabelValues("timeout")))
 }

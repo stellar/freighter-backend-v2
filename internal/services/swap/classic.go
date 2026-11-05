@@ -247,6 +247,19 @@ func (c *ClassicSource) orderbookQuote(parent context.Context, base string, req 
 	if err = json.NewDecoder(body).Decode(&q); err != nil {
 		return nil, failed(err)
 	}
+	if len(q.Path) > maxClassicPathHops-1 {
+		return nil, &orderbookFallback{"error", fmt.Errorf("path of %d assets", len(q.Path))}
+	}
+	// The route shows req.Amount on the fixed side, so a quote for any other
+	// amount is not an answer to this request.
+	echo := q.FromAmount
+	if req.Mode == types.SwapModeReceive {
+		echo = q.ToAmount
+	}
+	want, _ := ParseUnits(req.Amount, ClassicDecimals)
+	if got, perr := ParseUnits(echo, ClassicDecimals); perr != nil || want == nil || got.Cmp(want) != 0 {
+		return nil, &orderbookFallback{"error", fmt.Errorf("quoted amount %q for %q", echo, req.Amount)}
+	}
 	for _, p := range q.Path {
 		if a, perr := ParseAsset(p); perr != nil || !a.IsClassic() {
 			return nil, &orderbookFallback{"error", fmt.Errorf("path asset %q", p)}
