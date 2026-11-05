@@ -16,9 +16,10 @@ type Source interface {
 	// Name is the route's "source" field, the /swap/tx "source" a client sends
 	// back, and the metrics label, so it must never change.
 	Name() string
-	// Supports reports whether the source serves a network. The router does
-	// not call Quote or BuildTx for one it does not.
-	Supports(network string) bool
+	// Supports reports whether the source serves a request: its network, mode
+	// and asset kinds. The router does not call Quote or BuildTx for one it
+	// does not, so Quote and BuildTx may assume it.
+	Supports(req types.SwapQuoteRequest) bool
 	// Quote returns a route with Source == Name(). Amounts are decimal
 	// strings in each asset's own decimals; the fixed side (FromAmount for
 	// send, ToAmount for receive) equals req.Amount. Paths run from
@@ -26,10 +27,8 @@ type Source interface {
 	// 1; Fees is [] when there are none. It returns once ctx is done: the
 	// router gives each source its own timeout.
 	//
-	// Errors: ErrNoRoute, ErrInsufficientBalance, ErrRateLimited,
-	// ErrBadRequest, or ErrUnsupportedMode for a mode the source does not
-	// offer (not counted as a failure). Reason maps each error to the
-	// reported reason.
+	// Errors: ErrNoRoute, ErrInsufficientBalance, ErrRateLimited or
+	// ErrBadRequest. Reason maps each error to the reported reason.
 	Quote(ctx context.Context, req types.SwapQuoteRequest) (*types.SwapRoute, error)
 	// BuildTx returns an unsigned base64 TransactionEnvelope for req.Account
 	// that expires timeoutSeconds(req) from now. The user must never receive
@@ -44,7 +43,6 @@ var (
 	ErrNoRoute             = errors.New("no route")
 	ErrInsufficientBalance = errors.New("insufficient balance")
 	ErrRateLimited         = errors.New("rate limited")
-	ErrUnsupportedMode     = errors.New("unsupported mode")
 	ErrQuoteMoved          = errors.New("quote moved")
 	ErrCheckFailed         = errors.New("transaction check failed")
 	ErrBadRequest          = errors.New("bad request")

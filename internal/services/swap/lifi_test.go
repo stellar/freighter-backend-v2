@@ -205,11 +205,16 @@ func TestLifiQuote1003IsNoRoute(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNoRoute)
 }
 
-func TestLifiQuoteReceiveUnsupported(t *testing.T) {
+func TestLifiSupportsPublicSendOnly(t *testing.T) {
+	src := NewLifiSource(LifiConfig{}, nil)
+	assert.Equal(t, "lifi", src.Name())
+	assert.True(t, src.Supports(lifiReq("10")))
 	req := lifiReq("10")
+	req.Network = types.TESTNET
+	assert.False(t, src.Supports(req))
+	req = lifiReq("10")
 	req.Mode = types.SwapModeReceive
-	_, err := lifiServer(t, 200, []byte(`{}`)).Quote(context.Background(), req)
-	assert.ErrorIs(t, err, ErrUnsupportedMode)
+	assert.False(t, src.Supports(req))
 }
 
 func TestLifiQuoteTooManyDecimalsIsBadRequest(t *testing.T) {
@@ -289,13 +294,6 @@ func TestLifiQuoteMalformedFee(t *testing.T) {
 			assert.Contains(t, err.Error(), "fee")
 		})
 	}
-}
-
-func TestLifiSupportsPublicOnly(t *testing.T) {
-	src := NewLifiSource(LifiConfig{}, nil)
-	assert.Equal(t, "lifi", src.Name())
-	assert.True(t, src.Supports(types.PUBLIC))
-	assert.False(t, src.Supports(types.TESTNET))
 }
 
 func lifiBuildSource(t *testing.T, env xdr.TransactionEnvelope, status int, body []byte) *LifiSource {

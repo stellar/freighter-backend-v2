@@ -40,7 +40,11 @@ func NewClassicSource(cfg ClassicConfig, rpc types.RPCService) *ClassicSource {
 
 func (c *ClassicSource) Name() string { return classicName }
 
-func (c *ClassicSource) Supports(network string) bool { return c.urls[network] != "" }
+func (c *ClassicSource) Supports(req types.SwapQuoteRequest) bool {
+	from, err1 := ParseAsset(req.FromAsset)
+	to, err2 := ParseAsset(req.ToAsset)
+	return c.urls[req.Network] != "" && err1 == nil && err2 == nil && from.IsClassic() && to.IsClassic()
+}
 
 type horizonAsset struct {
 	Type   string `json:"asset_type"`
@@ -87,7 +91,7 @@ func (c *ClassicSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (
 		return nil, err
 	}
 	if !from.IsClassic() || !to.IsClassic() {
-		return nil, ErrNoRoute
+		return nil, fmt.Errorf("%w: classic swaps need classic assets", ErrBadRequest)
 	}
 	var endpoint string
 	var q url.Values

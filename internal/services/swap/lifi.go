@@ -97,14 +97,13 @@ func NewLifiSource(cfg LifiConfig, m *metrics.Swap) *LifiSource {
 
 func (s *LifiSource) Name() string { return lifiName }
 
-func (s *LifiSource) Supports(network string) bool { return network == types.PUBLIC }
+func (s *LifiSource) Supports(req types.SwapQuoteRequest) bool {
+	return req.Network == types.PUBLIC && req.Mode == types.SwapModeSend
+}
 
 var lifiFeeNames = map[string]string{"LIFI Fixed Fee": "LI.FI fee", "Soroswap Fee": "Soroswap fee"}
 
 func (s *LifiSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (*types.SwapRoute, error) {
-	if req.Mode == types.SwapModeReceive {
-		return nil, ErrUnsupportedMode
-	}
 	from, err := ParseAsset(req.FromAsset)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBadRequest, err)

@@ -82,17 +82,20 @@ func TestClassicQuoteNoRoute(t *testing.T) {
 	_, err := src.Quote(context.Background(), sendReq)
 	assert.ErrorIs(t, err, ErrNoRoute)
 
-	req := sendReq
-	req.ToAsset = "CBI7UCH5KGSVQRO5H4SUCZUTZABCITZLRHQQZTWL2TK4RZ72TAR6IHRV"
-	_, err = src.Quote(context.Background(), req)
-	assert.ErrorIs(t, err, ErrNoRoute) // not called for Soroban-only assets
 }
 
-func TestClassicSupportsConfiguredNetworksOnly(t *testing.T) {
+func TestClassicSupportsConfiguredNetworksAndClassicPairs(t *testing.T) {
 	t.Parallel()
 	src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: "x", types.TESTNET: "y"}}, nil)
-	assert.True(t, src.Supports(types.TESTNET))
-	assert.False(t, src.Supports(types.FUTURENET))
+	assert.True(t, src.Supports(sendReq))
+	req := sendReq
+	req.Network = types.FUTURENET
+	assert.False(t, src.Supports(req))
+	req = sendReq
+	req.ToAsset = "CBI7UCH5KGSVQRO5H4SUCZUTZABCITZLRHQQZTWL2TK4RZ72TAR6IHRV"
+	assert.False(t, src.Supports(req))
+	_, err := src.Quote(context.Background(), req)
+	assert.ErrorIs(t, err, ErrBadRequest)
 }
 
 const aquaIssuer = "GBNZILSTVQZ4R7IKQDGHYGY2QXL5QOFJYQMXPKWRRM5PAV7Y4M67AQUA"
