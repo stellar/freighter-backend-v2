@@ -243,6 +243,12 @@ func TestLifiChecksTamperFails(t *testing.T) {
 			setField(t, fees[0], "fee_bps", i128Val(26))
 			syncRoot(e)
 		}},
+		{"two fee entries of 25", "fee bps", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
+			vec := *mustField(t, swapParams(e), "fees").Vec
+			require.NotEmpty(t, *vec)
+			*vec = append(*vec, (*vec)[0])
+			syncRoot(e)
+		}},
 		{"partner bps 26", "partner bps", func(t *testing.T, e *xdr.TransactionEnvelope, _ *lifiExpect) {
 			args := scVec(mustField(t, swapParams(e), "args"))
 			setField(t, args[6], "bps", u32Val(26))
