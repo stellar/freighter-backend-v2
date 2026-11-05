@@ -43,6 +43,7 @@ func (f *fakeSource) Name() string { return f.name }
 func (f *fakeSource) Supports(req types.SwapQuoteRequest) bool {
 	return f.supports == nil || f.supports(req)
 }
+
 func (f *fakeSource) BuildTx(ctx context.Context, _ types.SwapBuildRequest) (string, error) {
 	f.builds++
 	if f.panics {

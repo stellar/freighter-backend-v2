@@ -96,10 +96,11 @@ func TestClassicQuoteReusesConnectionsAcrossBursts(t *testing.T) {
 		}
 		wg.Wait()
 	}
+	// A late goroutine may reuse a connection the burst already released, so
+	// bound the dials rather than count them.
 	quoteBurst()
-	assert.Equal(t, int32(burst), newConns.Load(), "first burst dials one connection per request")
 	quoteBurst()
-	assert.Equal(t, int32(burst), newConns.Load(), "second burst reuses every connection")
+	assert.LessOrEqual(t, newConns.Load(), int32(burst), "the second burst reuses the first burst's connections")
 }
 
 func TestClassicQuoteReceive(t *testing.T) {
@@ -125,7 +126,6 @@ func TestClassicQuoteNoRoute(t *testing.T) {
 	src := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: srv.URL}}, nil)
 	_, err := src.Quote(context.Background(), sendReq)
 	assert.ErrorIs(t, err, ErrNoRoute)
-
 }
 
 func TestClassicSupportsConfiguredNetworksAndClassicPairs(t *testing.T) {
