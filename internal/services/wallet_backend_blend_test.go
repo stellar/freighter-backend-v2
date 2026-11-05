@@ -43,8 +43,8 @@ func TestGetBlendPositions(t *testing.T) {
 				"accountByAddress": {
 					"blendPositions": {
 						"pools": [{
-							"poolAddress": "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF",
-							"poolName": "TestnetV2",
+							"poolAddress": "CB3447A446DY3USGWPIDXTNQHF5EX24XDQA2EN6TAZP62JTPBTNOA52Q",
+							"poolName": "Testnet v2.1",
 							"usdValue": 3619.27,
 							"suppliedUsd": 3619.29,
 							"borrowedUsd": 0.02,
@@ -115,8 +115,8 @@ func TestGetBlendPools(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 		assert.Contains(t, req.Query, "blendPools")
 		_, _ = w.Write([]byte(`{"data": {"blendPools": [{
-			"address": "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF",
-			"name": "TestnetV2",
+			"address": "CB3447A446DY3USGWPIDXTNQHF5EX24XDQA2EN6TAZP62JTPBTNOA52Q",
+			"name": "Testnet v2.1",
 			"status": "ACTIVE",
 			"suppliedUsd": 2100000.5,
 			"reserves": []
