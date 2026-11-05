@@ -49,4 +49,9 @@ func TestIntegrationTests(t *testing.T) {
 			appPostgresContainer: containers.AppPostgresContainer,
 		})
 	})
+	t.Run("UserTestSuite", func(t *testing.T) {
+		suite.Run(t, &UserTestSuite{
+			freighterContainer: containers.FreighterContainer,
+		})
+	})
 }
