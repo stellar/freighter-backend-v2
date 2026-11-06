@@ -1,0 +1,213 @@
+package swap
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math/big"
+	"runtime/debug"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/stellar/freighter-backend-v2/internal/logger"
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
+	"github.com/stellar/freighter-backend-v2/internal/types"
+)
+
+var ErrAllSourcesFailed = errors.New("all swap sources failed")
+
+var errMalformedRoute = errors.New("source returned a malformed route")
+
+type Router struct {
+	sources      []Source
+	timeout      time.Duration
+	buildTimeout time.Duration
+	m            *metrics.Swap
+}
+
+func NewRouter(sources []Source, timeout, buildTimeout time.Duration, m *metrics.Swap) *Router {
+	return &Router{sources: sources, timeout: timeout, buildTimeout: buildTimeout, m: m}
+}
+
+type result struct {
+	src   Source
+	route *types.SwapRoute
+	err   error
+}
+
+func (r *Router) Quote(ctx context.Context, req types.SwapQuoteRequest) (types.SwapQuotesResponse, error) {
+	out := types.SwapQuotesResponse{Routes: []types.SwapRoute{}, Unavailable: []types.SwapUnavailable{}}
+	var called []Source
+	for _, s := range r.sources {
+		if !s.Supports(req) {
+			out.Unavailable = append(out.Unavailable, types.SwapUnavailable{Source: s.Name(), Reason: "unsupported"})
+			continue
+		}
+		called = append(called, s)
+	}
+
+	results := make([]result, len(called))
+	var wg sync.WaitGroup
+	for i, s := range called {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sctx, cancel := context.WithTimeout(ctx, r.timeout)
+			defer cancel()
+			rt, err := func() (rt *types.SwapRoute, err error) {
+				defer recoverSource(s.Name(), "quote", &err)
+				return s.Quote(sctx, req)
+			}()
+			if err == nil && sctx.Err() != nil {
+				err = sctx.Err()
+			}
+			results[i] = result{src: s, route: rt, err: err}
+		}()
+	}
+	wg.Wait()
+	// The client went away: not a source failure, so nothing to record.
+	if err := ctx.Err(); err != nil {
+		return out, err
+	}
+
+	failed, badReq := 0, 0
+	var firstBadReq error
+	for _, res := range results {
+		if res.err == nil && !validRoute(req, res.route) {
+			res.err = errMalformedRoute
+		}
+		reason := Reason(res.err)
+		metrics.RecordSwapSource(r.m, res.src.Name(), "quote", reason)
+		if res.err != nil {
+			out.Unavailable = append(out.Unavailable, types.SwapUnavailable{Source: res.src.Name(), Reason: reason})
+			if reason == "bad_request" {
+				badReq++
+				if firstBadReq == nil {
+					firstBadReq = res.err
+				}
+			}
+			if reason == "timeout" || reason == "rate_limited" || reason == "error" {
+				failed++
+				logger.Warn("swap source quote failed", "source", res.src.Name(), "reason", reason, "error", res.err)
+			}
+			continue
+		}
+		out.Routes = append(out.Routes, *res.route)
+	}
+
+	if len(out.Routes) == 0 && failed > 0 && failed == len(results) {
+		return out, ErrAllSourcesFailed
+	}
+	if len(out.Routes) == 0 && badReq > 0 && badReq == len(results) {
+		return out, firstBadReq
+	}
+	r.rank(req, out.Routes)
+	return out, nil
+}
+
+// recoverSource turns a panicking source call into an error, so one source
+// cannot crash the process. Must be deferred directly.
+func recoverSource(source, op string, err *error) {
+	if p := recover(); p != nil {
+		logger.Error("swap source panicked", "source", source, "op", op, "panic", p, "stack", string(debug.Stack()))
+		*err = fmt.Errorf("swap source %s panicked: %v", source, p)
+	}
+}
+
+// validRoute reports whether rt is non-nil and its ranking amount parses;
+// rat() maps garbage to 0, which would let a bad route win in receive mode.
+func validRoute(req types.SwapQuoteRequest, rt *types.SwapRoute) bool {
+	if rt == nil {
+		return false
+	}
+	amt := rt.ToAmount
+	if req.Mode == types.SwapModeReceive {
+		amt = rt.FromAmount
+	}
+	_, ok := new(big.Rat).SetString(amt)
+	return ok
+}
+
+func rat(s string) *big.Rat {
+	v, ok := new(big.Rat).SetString(s)
+	if !ok {
+		return new(big.Rat)
+	}
+	return v
+}
+
+func (r *Router) rank(req types.SwapQuoteRequest, routes []types.SwapRoute) {
+	send := req.Mode != types.SwapModeReceive
+	key := func(rt types.SwapRoute) *big.Rat {
+		if send {
+			return rat(rt.ToAmount)
+		}
+		return rat(rt.FromAmount)
+	}
+	sort.SliceStable(routes, func(i, j int) bool {
+		c := key(routes[i]).Cmp(key(routes[j]))
+		if send {
+			return c > 0
+		}
+		return c < 0
+	})
+	if len(routes) < 2 {
+		return
+	}
+	best, second := key(routes[0]), key(routes[1])
+	if second.Sign() == 0 {
+		return
+	}
+	diff := new(big.Rat).Sub(best, second)
+	if !send {
+		diff.Neg(diff)
+	}
+	bps, _ := new(big.Rat).Mul(new(big.Rat).Quo(diff, second), big.NewRat(10000, 1)).Float64()
+	metrics.RecordSwapWinner(r.m, routes[0].Source, pairKind(req), bps)
+}
+
+func pairKind(req types.SwapQuoteRequest) string {
+	from, err1 := ParseAsset(req.FromAsset)
+	to, err2 := ParseAsset(req.ToAsset)
+	if err1 == nil && err2 == nil && from.IsClassic() && to.IsClassic() {
+		return "classic"
+	}
+	return "soroban"
+}
+
+func (r *Router) Build(ctx context.Context, req types.SwapBuildRequest) (types.SwapBuildResponse, error) {
+	for _, s := range r.sources {
+		if s.Name() != req.Source {
+			continue
+		}
+		// A build has no mode: every source builds a send.
+		quote := types.SwapQuoteRequest{Network: req.Network, Mode: types.SwapModeSend, FromAsset: req.FromAsset, ToAsset: req.ToAsset}
+		if !s.Supports(quote) {
+			return types.SwapBuildResponse{}, fmt.Errorf("%w: source %s does not support this swap on %s", ErrBadRequest, req.Source, req.Network)
+		}
+		bctx, cancel := context.WithTimeout(ctx, r.buildTimeout)
+		x, err := func() (x string, err error) {
+			defer recoverSource(s.Name(), "build", &err)
+			return s.BuildTx(bctx, req)
+		}()
+		cancel()
+		if cerr := ctx.Err(); cerr != nil {
+			return types.SwapBuildResponse{}, cerr
+		}
+		metrics.RecordSwapSource(r.m, s.Name(), "build", Reason(err))
+		if err != nil {
+			return types.SwapBuildResponse{}, err
+		}
+		toContract := ""
+		if to, perr := ParseAsset(req.ToAsset); perr == nil {
+			toContract, _ = to.ContractID(req.Network)
+		}
+		adds, err := AddsTrustline(x, req.Account, toContract)
+		if err != nil {
+			return types.SwapBuildResponse{}, err
+		}
+		return types.SwapBuildResponse{XDR: x, AddsTrustline: adds}, nil
+	}
+	return types.SwapBuildResponse{}, fmt.Errorf("%w: unknown source %q", ErrBadRequest, req.Source)
+}
