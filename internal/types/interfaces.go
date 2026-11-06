@@ -3,6 +3,7 @@ package types
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"time"
 
 	"github.com/stellar/go-stellar-sdk/txnbuild"
@@ -203,6 +204,9 @@ type StellarExpertService interface {
 	Service
 	GetAsset(ctx context.Context, network, assetID string) (*StellarExpertAsset, error)
 	GetAssetCandles(ctx context.Context, network, assetID string, from, to time.Time, resolutionSec int) ([]StellarExpertCandle, error)
+	// ListAssets calls the /asset list endpoint (search and sorted lists)
+	// with query exactly as given and returns the response body unchanged.
+	ListAssets(ctx context.Context, network string, query url.Values) (json.RawMessage, error)
 }
 
 // PriceEntry is the per-token shape returned to the client. Numeric fields
@@ -282,4 +286,14 @@ type TokenStats struct {
 type TokenStatsService interface {
 	Service
 	GetTokenStats(ctx context.Context, canonical, network string) (*TokenStats, error)
+}
+
+// AssetSearchService serves StellarExpert's /asset list (searches and sorted
+// lists such as trending) through our API key and a shared cache.
+type AssetSearchService interface {
+	Service
+	// SearchAssets returns StellarExpert's /asset response body for params,
+	// which is the client's query minus `network`. Params the service refuses
+	// return an error wrapping services.ErrInvalidAssetSearchParams.
+	SearchAssets(ctx context.Context, network string, params url.Values) (json.RawMessage, error)
 }

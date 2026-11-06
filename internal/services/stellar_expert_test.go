@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -334,4 +335,123 @@ func TestStellarExpert_NotFoundAndMalformedCarryTheirHTTPStatus(t *testing.T) {
 				"an upstream status must never be labelled as our own internal failure")
 		})
 	}
+}
+
+// ListAssets backs GET /api/v1/assets/search: it must call /asset with the
+// query it is given, carry our credentials, and hand the body back
+// untouched, because the route serves StellarExpert's records as they are.
+func TestStellarExpert_ListAssets_ForwardsQueryAndReturnsBodyVerbatim(t *testing.T) {
+	t.Parallel()
+
+	var gotPath, gotQuery, gotAuth, gotOrigin string
+	body := `{"_links":{"self":{"href":"/explorer/public/asset?search=usdc&order=desc&limit=50&cursor=0"}},"_embedded":{"records":[{"asset":"USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN-1","domain":"centre.io","price":1.0001,"tomlInfo":{"code":"USDC","issuer":"GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"}}]}}`
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotAuth = r.Header.Get("Authorization")
+		gotOrigin = r.Header.Get("Origin")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+
+	got, err := svc.ListAssets(context.Background(), types.PUBLIC, url.Values{"search": {"usdc"}, "limit": {"50"}})
+	require.NoError(t, err)
+	assert.Equal(t, "/explorer/public/asset", gotPath)
+	assert.Equal(t, "limit=50&search=usdc", gotQuery)
+	assert.Equal(t, "Bearer test-key", gotAuth)
+	assert.Equal(t, "https://stellar.expert", gotOrigin)
+	assert.Equal(t, body, string(got), "the body must come back byte-for-byte")
+}
+
+// A value is encoded as ONE value: a term containing & or = must not become
+// extra upstream parameters (for example a larger limit than we allow).
+func TestStellarExpert_ListAssets_EncodesValuesSoTheyCannotAddParams(t *testing.T) {
+	t.Parallel()
+
+	var gotQuery url.Values
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`{"_embedded":{"records":[]}}`))
+	}))
+
+	_, err := svc.ListAssets(context.Background(), types.PUBLIC, url.Values{"search": {"yieldblox dao&limit=10000"}})
+	require.NoError(t, err)
+	assert.Equal(t, url.Values{"search": {"yieldblox dao&limit=10000"}}, gotQuery)
+}
+
+func TestStellarExpert_ListAssets_TestnetURL(t *testing.T) {
+	t.Parallel()
+
+	var gotPath string
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"_embedded":{"records":[]}}`))
+	}))
+
+	_, err := svc.ListAssets(context.Background(), types.TESTNET, url.Values{"limit": {"50"}})
+	require.NoError(t, err)
+	assert.Equal(t, "/explorer/testnet/asset", gotPath)
+}
+
+// Upstream statuses keep the meanings callers branch on: 402 (a rejected key,
+// or an exhausted balance) is the loud credential sentinel, 400 is
+// StellarExpert rejecting the query, and 429/5xx are transient.
+func TestStellarExpert_ListAssets_MapsUpstreamStatuses(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		status   int
+		sentinel error // nil: a plain transient *metrics.UpstreamError
+	}{
+		{"402 is a credential failure", http.StatusPaymentRequired, ErrUpstreamAuth},
+		{"400 is a rejected query", http.StatusBadRequest, ErrAssetMalformed},
+		{"429 is transient", http.StatusTooManyRequests, nil},
+		{"503 is transient", http.StatusServiceUnavailable, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, `{"error":"nope"}`, tc.status)
+			}))
+
+			got, err := svc.ListAssets(context.Background(), types.PUBLIC, url.Values{"search": {"usdc"}})
+			require.Error(t, err)
+			assert.Nil(t, got)
+			var upErr *metrics.UpstreamError
+			require.True(t, errors.As(err, &upErr), "must stay an UpstreamError for the dependency metric")
+			assert.Equal(t, tc.status, upErr.Code)
+			if tc.sentinel != nil {
+				assert.ErrorIs(t, err, tc.sentinel)
+				return
+			}
+			assert.NotErrorIs(t, err, ErrUpstreamAuth)
+			assert.NotErrorIs(t, err, ErrAssetMalformed)
+		})
+	}
+}
+
+// A 200 that is not JSON (an HTML page from something in between) is an
+// error, never a body we would cache and serve as records.
+func TestStellarExpert_ListAssets_RejectsNonJSONBody(t *testing.T) {
+	t.Parallel()
+
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<html>maintenance</html>`))
+	}))
+
+	got, err := svc.ListAssets(context.Background(), types.PUBLIC, url.Values{"search": {"usdc"}})
+	require.Error(t, err)
+	assert.Nil(t, got)
+}
+
+func TestStellarExpert_ListAssets_RejectsUnknownNetwork(t *testing.T) {
+	t.Parallel()
+
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("an unconfigured network must not reach upstream")
+	}))
+
+	_, err := svc.ListAssets(context.Background(), types.FUTURENET, url.Values{})
+	require.ErrorIs(t, err, ErrNetworkNotConfigured)
 }

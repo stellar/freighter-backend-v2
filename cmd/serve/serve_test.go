@@ -527,3 +527,63 @@ func TestServeCmd_RejectsDurationSecondsThatOverflow(t *testing.T) {
 		assert.EqualValues(t, maxDurationSeconds, serveCmd.Cfg.PriceHistoryConfig.CacheTTL1DSeconds)
 	})
 }
+
+// The agreed defaults for /assets/search. StellarExpert bills every call we
+// make, so the TTL sets the price of a popular query (one call per window)
+// and the cap bounds the price of a single call.
+func TestServeCmd_AssetSearchFlagDefaults(t *testing.T) {
+	t.Parallel()
+
+	cmd := (&ServeCmd{Cfg: &config.Config{}}).Command()
+
+	ttl, err := cmd.Flags().GetInt("asset-search-cache-ttl-seconds")
+	require.NoError(t, err)
+	assert.Equal(t, 21600, ttl, "6 hours")
+
+	emptyTTL, err := cmd.Flags().GetInt("asset-search-empty-cache-ttl-seconds")
+	require.NoError(t, err)
+	assert.Equal(t, 300, emptyTTL, "5 minutes")
+
+	maxLimit, err := cmd.Flags().GetInt("asset-search-max-limit")
+	require.NoError(t, err)
+	assert.Equal(t, 100, maxLimit)
+}
+
+func TestServeCmd_AssetSearchValidation(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		// A zero TTL would silently turn off caching against a paid upstream.
+		{"zero cache TTL", []string{"--asset-search-cache-ttl-seconds", "0"}, "--asset-search-cache-ttl-seconds=0 must be positive"},
+		{"zero empty-answer cache TTL", []string{"--asset-search-empty-cache-ttl-seconds", "0"}, "--asset-search-empty-cache-ttl-seconds=0 must be positive"},
+		{"zero max limit", []string{"--asset-search-max-limit", "0"}, "--asset-search-max-limit=0 must be positive"},
+		{"negative max limit", []string{"--asset-search-max-limit", "-1"}, "--asset-search-max-limit=-1 must be positive"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := execServe(t, tc.args...)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+func TestServeCmd_AssetSearchAcceptsValidConfig(t *testing.T) {
+	t.Parallel()
+
+	serveCmd, err := execServe(t,
+		"--asset-search-cache-ttl-seconds", "900",
+		"--asset-search-empty-cache-ttl-seconds", "120",
+		"--asset-search-max-limit", "50",
+		"--database-url", "postgres://localhost/test",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, 900, serveCmd.Cfg.AssetSearchConfig.CacheTTLSeconds)
+	assert.Equal(t, 120, serveCmd.Cfg.AssetSearchConfig.EmptyCacheTTLSeconds)
+	assert.Equal(t, 50, serveCmd.Cfg.AssetSearchConfig.MaxLimit)
+}

@@ -352,9 +352,11 @@ func TestPrices_HelpStringsNameEveryDrivingEndpoint(t *testing.T) {
 		// spot anchor through it, so both drive these two.
 		"freighter_prices_cache_outcomes_total":        {must: []string{"/token-prices", "/token-price-history"}},
 		"freighter_prices_miss_budget_exhausted_total": {must: []string{"/token-prices", "/token-price-history"}},
-		// Incremented directly by the prices service and by the price-history
-		// service, which serves two routes of its own.
-		"freighter_prices_redis_errors_total": {must: []string{"/token-prices", "/token-price-history", "/token-stats"}},
+		// Incremented directly by the prices service, by the price-history
+		// service, which serves two routes of its own, and by asset search.
+		"freighter_prices_redis_errors_total": {must: []string{"/token-prices", "/token-price-history", "/token-stats", "/assets/search"}},
+		// Single-route: only the asset search service writes it.
+		"freighter_asset_search_cache_outcomes_total": {must: []string{"/assets/search"}, mustNot: []string{"/token-"}},
 		// getAssetMeta resolves the asset payload on EVERY history request.
 		"freighter_token_stats_cache_outcomes_total": {must: []string{"/token-stats", "/token-price-history"}},
 		// Single-route. The mustNot is the neighbour each would wrongly gain:

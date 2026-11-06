@@ -165,6 +165,37 @@ func (s *stellarExpertService) GetAssetCandles(ctx context.Context, network, ass
 	return candles, nil
 }
 
+// ListAssets calls the /asset list endpoint (search and sorted lists) with
+// query exactly as given, and returns the 200 body unchanged so callers can
+// serve StellarExpert's records without re-encoding them. Which parameters
+// are allowed is the caller's decision; this client forwards what it gets.
+// Statuses map as in doJSON: 400 → ErrAssetMalformed (StellarExpert rejected
+// the query), 401/402/403 → ErrUpstreamAuth, anything else → UpstreamError.
+func (s *stellarExpertService) ListAssets(ctx context.Context, network string, query url.Values) (_ json.RawMessage, err error) {
+	start := time.Now()
+	defer func() {
+		metrics.Record(s.svcMetrics, stellarExpertServiceName, "ListAssets", network, time.Since(start).Seconds(), err)
+	}()
+
+	baseURL, err := s.baseURLForNetwork(network)
+	if err != nil {
+		return nil, err
+	}
+
+	reqURL := baseURL + "/asset"
+	if encoded := query.Encode(); encoded != "" {
+		reqURL += "?" + encoded
+	}
+	// RawMessage keeps the exact bytes, but decoding into it still rejects a
+	// body that is not JSON (an HTML page from a proxy in between), so such a
+	// page is an error rather than something a caller would cache and serve.
+	var body json.RawMessage
+	if err = s.doJSON(ctx, reqURL, "asset list", &body); err != nil {
+		return nil, err
+	}
+	return body, nil
+}
+
 // doJSON issues a GET to reqURL and decodes a 200 response body into dest.
 // Every non-200 becomes an *UpstreamError so the service-error metric always
 // carries the real status rather than "internal"; 404, 400 and the three

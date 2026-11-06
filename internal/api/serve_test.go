@@ -471,3 +471,42 @@ func TestApiServer_initHandlers_AllUserFacingRoutesGatedInStrict(t *testing.T) {
 	}
 	require.Positive(t, gated, "expected routes() to contain at least one gated route")
 }
+
+// The asset search is wired end to end from config: a cap set by flag reaches
+// the upstream call (not the service's own default), with our key, and the
+// route answers anonymous callers in permissive mode like its siblings.
+func TestApiServer_AssetSearchRouteIsWiredFromConfig(t *testing.T) {
+	var gotPath, gotLimit, gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotLimit = r.URL.Query().Get("limit")
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"_embedded":{"records":[]}}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	cfg := testCfg("permissive")
+	cfg.AppConfig.WalletBackendBalanceConcurrency = 10
+	cfg.PricesConfig = config.PricesConfig{
+		StellarExpertAPIKey:    "test-key",
+		StellarExpertPubnetURL: upstream.URL + "/explorer/public",
+	}
+	cfg.AssetSearchConfig = config.AssetSearchConfig{CacheTTLSeconds: 60, MaxLimit: 25}
+	// There is no Redis here, so the cache read and write each fail after
+	// go-redis's own retries (about 2s apiece): that is this test's runtime.
+	// A cache that cannot be reached only costs the cache, so the request
+	// still succeeds; the service tests cover the cache itself.
+	s := newTestAPIServer(t, cfg)
+	require.NoError(t, s.initServices())
+	mux, err := s.initHandlers()
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/assets/search?network=PUBLIC&sort=volume7d&limit=500", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `{"data":{"_embedded":{"records":[]}}}`, rec.Body.String())
+	assert.Equal(t, "/explorer/public/asset", gotPath)
+	assert.Equal(t, "25", gotLimit, "--asset-search-max-limit must reach the service")
+	assert.Equal(t, "Bearer test-key", gotAuth)
+}

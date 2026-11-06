@@ -54,6 +54,9 @@ func (s *ServeCmd) Command() *cobra.Command {
 			if n := s.Cfg.PricesConfig.MaxTokensPerRequest; n <= 0 {
 				return fmt.Errorf("--max-tokens-per-request=%d must be positive", n)
 			}
+			if n := s.Cfg.AssetSearchConfig.MaxLimit; n <= 0 {
+				return fmt.Errorf("--asset-search-max-limit=%d must be positive", n)
+			}
 			// Every integer-seconds flag that internal/api/serve.go multiplies
 			// by time.Second, bounded on both sides in one place. Past
 			// maxDurationSeconds the multiply wraps and the override is
@@ -76,6 +79,8 @@ func (s *ServeCmd) Command() *cobra.Command {
 				{"price-history-cache-ttl-all-seconds", s.Cfg.PriceHistoryConfig.CacheTTLALLSeconds, false},
 				{"price-history-fetch-timeout-seconds", s.Cfg.PriceHistoryConfig.FetchTimeoutSeconds, false},
 				{"token-stats-cache-ttl-seconds", s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds, false},
+				{"asset-search-cache-ttl-seconds", s.Cfg.AssetSearchConfig.CacheTTLSeconds, false},
+				{"asset-search-empty-cache-ttl-seconds", s.Cfg.AssetSearchConfig.EmptyCacheTTLSeconds, false},
 			} {
 				switch {
 				case f.zeroOK && f.value < 0:
@@ -232,6 +237,11 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().Float64Var(&s.Cfg.PriceHistoryConfig.MinVolume7dUSD, "price-history-min-volume-7d-usd", 7000, "Low-volume warning threshold in USD 7-day volume; 0 disables the guard and the verdict reads false (the check ran, nothing is flagged). Two things still outrank a disabled guard and report null: the verdict is null while --price-history-volume-7d-conversion-divisor is 0, and a failed or absent asset payload is null rather than false, because degradation is not a clean bill of health")
 	cmd.Flags().Float64Var(&s.Cfg.PriceHistoryConfig.Volume7dConversionDivisor, "price-history-volume-7d-conversion-divisor", 10_000_000, "Divisor converting the raw upstream volume7d into USD (raw ÷ divisor). Stellar Expert reports volume7d as USD scaled by 1e7, whatever the token's decimals; 0 disables the conversion and the lowVolume verdict is reported null")
 	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds, "token-stats-cache-ttl-seconds", 3600, "Redis TTL for the cached token-stats asset payload (seconds), shared with the history service's volume verdict")
+
+	// Asset Search Config (GET /api/v1/assets/search)
+	cmd.Flags().IntVar(&s.Cfg.AssetSearchConfig.CacheTTLSeconds, "asset-search-cache-ttl-seconds", int(services.DefaultAssetSearchCacheTTL/time.Second), "Redis TTL for cached /assets/search answers (seconds). StellarExpert bills every call, so each distinct query costs one paid call per window")
+	cmd.Flags().IntVar(&s.Cfg.AssetSearchConfig.EmptyCacheTTLSeconds, "asset-search-empty-cache-ttl-seconds", int(services.DefaultAssetSearchEmptyCacheTTL/time.Second), "Redis TTL for /assets/search answers with no records (seconds), so a token searched before StellarExpert indexes it shows up soon after. Capped at --asset-search-cache-ttl-seconds")
+	cmd.Flags().IntVar(&s.Cfg.AssetSearchConfig.MaxLimit, "asset-search-max-limit", services.DefaultAssetSearchMaxLimit, "Largest limit parameter /assets/search forwards to StellarExpert; larger values are clamped to it. The cost of one call grows with it (about 10 + 6×limit units per search)")
 
 	return cmd
 }
