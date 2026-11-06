@@ -51,6 +51,7 @@ type fakeDecimalsRPC struct {
 	ledger func(keys []string) (map[string]string, error)
 
 	mu       sync.Mutex
+	ctx      context.Context // the last call's ctx, for a fake that blocks on it
 	reads    int
 	calls    map[string]int
 	last     simulated
@@ -64,11 +65,12 @@ type simulated struct {
 	network  string
 }
 
-func (f *fakeDecimalsRPC) SimulateInvocation(_ context.Context, id xdr.ScAddress, acct *txnbuild.SimpleAccount, fn xdr.ScSymbol,
+func (f *fakeDecimalsRPC) SimulateInvocation(ctx context.Context, id xdr.ScAddress, acct *txnbuild.SimpleAccount, fn xdr.ScSymbol,
 	_ []xdr.ScVal, _ txnbuild.TimeBounds, network string,
 ) (types.SimulateTransactionResponse, error) {
 	contract := addrString(id)
 	f.mu.Lock()
+	f.ctx = ctx
 	if f.calls == nil {
 		f.calls = map[string]int{}
 	}
@@ -543,17 +545,117 @@ func TestLifiBadTokenDecimals(t *testing.T) {
 				})
 				require.Error(t, qerr)
 				require.Error(t, berr)
-				assert.Equal(t, "error", Reason(qerr))
-				assert.Equal(t, "error", Reason(berr))
-				var ue *metrics.UpstreamError
-				require.ErrorAs(t, qerr, &ue)
-				assert.Equal(t, "invalid_response", ue.Kind)
-				require.ErrorAs(t, berr, &ue)
-				assert.Equal(t, "invalid_response", ue.Kind)
+				assert.Equal(t, "bad_request", Reason(qerr))
+				assert.Equal(t, "bad_request", Reason(berr))
+				assert.ErrorIs(t, qerr, ErrUnsupportedToken)
+				assert.ErrorIs(t, berr, ErrUnsupportedToken)
 				assert.Equal(t, 2, rpc.callsTo(otherContract), "bad decimals must not be cached (quote and build each read)")
 			})
 		}
 	}
+}
+
+// A decimals() simulation the contract itself fails (trap, no such function)
+// is the token's problem and a bad request; only a failed RPC call is upstream.
+func TestLifiTokenDecimalsSimulationFailure(t *testing.T) {
+	env := decodeEnv(t, trustFixtureXDR(t))
+	quote := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
+	for name, tc := range map[string]struct {
+		err        error
+		wantReason string
+		wantIs     error
+		wantAs     bool
+	}{
+		"contract error": {
+			err:        &metrics.UpstreamError{Kind: "simulation_error", Err: errors.New("HostError: Error(WasmVm, MissingValue)")},
+			wantReason: "bad_request",
+			wantIs:     ErrUnsupportedToken,
+		},
+		"transport error": {
+			err:        errors.New("simulateTransaction RPC failed: dial tcp: i/o timeout"),
+			wantReason: "error",
+			wantAs:     true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rpc := &fakeDecimalsRPC{fn: func(string) (*xdr.ScVal, error) { return nil, tc.err }}
+			src := lifiServerRPC(t, 200, quote, rpc)
+			bsrc := lifiBuildSourceRPC(t, env, 200, quote, rpc)
+			qreq := lifiReq("10")
+			breq := lifiBuildReq(t, env)
+			qreq.FromAsset, breq.FromAsset = otherContract, otherContract
+			_, qerr := src.Quote(context.Background(), qreq)
+			_, berr := bsrc.BuildTx(context.Background(), breq)
+			for _, err := range []error{qerr, berr} {
+				require.Error(t, err)
+				assert.Equal(t, tc.wantReason, Reason(err))
+				if tc.wantIs != nil {
+					assert.ErrorIs(t, err, tc.wantIs)
+				} else {
+					assert.NotErrorIs(t, err, ErrBadRequest)
+				}
+				var ue *metrics.UpstreamError
+				assert.Equal(t, tc.wantAs, errors.As(err, &ue))
+			}
+			assert.Equal(t, 2, rpc.callsTo(otherContract), "a failed read must not be cached")
+		})
+	}
+}
+
+// When one token's read is definitive (unsupported) and the other's RPC call
+// fails, the answer must not depend on which goroutine finishes first: the
+// token is unsupported however the other read went. The RPC failure is made
+// to land first so a first-error-wins implementation is caught.
+func TestLifiPairDecimalsPrefersUnsupportedToken(t *testing.T) {
+	env := decodeEnv(t, trustFixtureXDR(t))
+	quote := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
+	rpc := &fakeDecimalsRPC{fn: func(contract string) (*xdr.ScVal, error) {
+		if contract == usdcContract {
+			return nil, errors.New("simulateTransaction RPC failed: dial tcp: i/o timeout")
+		}
+		time.Sleep(20 * time.Millisecond)
+		return nil, &metrics.UpstreamError{Kind: "simulation_error", Err: errors.New("HostError: Error(WasmVm, MissingValue)")}
+	}}
+	src := lifiServerRPC(t, 200, quote, rpc)
+	bsrc := lifiBuildSourceRPC(t, env, 200, quote, rpc)
+	qreq := lifiReq("10")
+	breq := lifiBuildReq(t, env)
+	qreq.FromAsset, qreq.ToAsset = otherContract, usdcContract
+	breq.FromAsset, breq.ToAsset = otherContract, usdcContract
+	_, qerr := src.Quote(context.Background(), qreq)
+	_, berr := bsrc.BuildTx(context.Background(), breq)
+	for _, err := range []error{qerr, berr} {
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrUnsupportedToken)
+		assert.Equal(t, "bad_request", Reason(err))
+	}
+}
+
+// An unsupported token is a final answer: the other token's read is cancelled
+// rather than waited for, so a slow RPC node does not delay the 400 until the
+// source timeout.
+func TestLifiPairDecimalsUnsupportedTokenCancelsTheOtherRead(t *testing.T) {
+	quote := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
+	rpc := &fakeDecimalsRPC{}
+	rpc.fn = func(contract string) (*xdr.ScVal, error) {
+		if contract == otherContract {
+			return nil, &metrics.UpstreamError{Kind: "simulation_error", Err: errors.New("HostError: Error(WasmVm, MissingValue)")}
+		}
+		rpc.mu.Lock()
+		ctx := rpc.ctx
+		rpc.mu.Unlock()
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	src := lifiServerRPC(t, 200, quote, rpc)
+	qreq := lifiReq("10")
+	qreq.FromAsset, qreq.ToAsset = otherContract, usdcContract
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err := src.Quote(ctx, qreq)
+	assert.ErrorIs(t, err, ErrUnsupportedToken)
+	assert.Less(t, time.Since(start), time.Second, "the hung read must be cancelled, not waited for")
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -873,18 +975,6 @@ func TestLifiToClassic(t *testing.T) {
 			assert.Equal(t, i, rpc.ledgerReads())
 		}
 	})
-}
-
-// RPC can't reliably tell "not a token" from a failed simulation, so both stay a visible error.
-func TestLifiDecimalsSimulationErrorIsError(t *testing.T) {
-	rpc := &fakeDecimalsRPC{fn: func(string) (*xdr.ScVal, error) {
-		return nil, &metrics.UpstreamError{Kind: "simulation_error", Err: errors.New("host error")}
-	}}
-	src := NewLifiSource(LifiConfig{RPC: rpc}, nil)
-	a, err := ParseAsset(otherContract)
-	require.NoError(t, err)
-	_, err = src.tokenDecimals(context.Background(), lifiTestAccount, a)
-	assert.Equal(t, "error", Reason(err))
 }
 
 func mustLifiCall(t *testing.T, env xdr.TransactionEnvelope) *lifiCall {

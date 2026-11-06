@@ -185,6 +185,8 @@ func mapSwapError(err error, build bool) *httperror.HttpError {
 		return httperror.BadGateway("swap sources unavailable", err)
 	case errors.Is(err, swap.ErrAccountNotFound):
 		return httperror.BadRequest("account not found", err)
+	case errors.Is(err, swap.ErrUnsupportedToken):
+		return httperror.BadRequest("unsupported token", err)
 	case errors.Is(err, swap.ErrBadRequest):
 		return httperror.BadRequest("invalid swap request", err)
 	case errors.Is(err, swap.ErrCheckFailed):

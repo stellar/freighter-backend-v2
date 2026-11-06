@@ -3,6 +3,7 @@ package swap
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
@@ -47,6 +48,9 @@ var (
 	ErrCheckFailed         = errors.New("transaction check failed")
 	ErrBadRequest          = errors.New("bad request")
 	ErrAccountNotFound     = errors.New("account not found")
+	// ErrUnsupportedToken wraps ErrBadRequest: a token whose contract cannot
+	// answer decimals() is the client's problem, not an outage to retry.
+	ErrUnsupportedToken = fmt.Errorf("%w: unsupported token", ErrBadRequest)
 )
 
 // Reason maps a Source error to the reason string reported in SwapUnavailable

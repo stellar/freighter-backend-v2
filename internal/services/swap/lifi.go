@@ -187,13 +187,29 @@ func (s *LifiSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (*ty
 const maxTokenDecimals = 38
 
 // pairDecimals reads both tokens together so a cold pair costs one round trip.
+// An unsupported token is final and cancels the other read. A failed RPC call
+// is not: the other read goes on, so it can still find the token unsupported,
+// and the answer does not depend on which read returns first.
 func (s *LifiSource) pairDecimals(ctx context.Context, account string, from, to Asset) (int, int, error) {
 	var fromDec, toDec int
+	var fromErr, toErr error
+	final := func(err error) error {
+		if errors.Is(err, ErrUnsupportedToken) {
+			return err
+		}
+		return nil
+	}
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() (err error) { fromDec, err = s.tokenDecimals(gctx, account, from); return })
-	g.Go(func() (err error) { toDec, err = s.tokenDecimals(gctx, account, to); return })
+	g.Go(func() error { fromDec, fromErr = s.tokenDecimals(gctx, account, from); return final(fromErr) })
+	g.Go(func() error { toDec, toErr = s.tokenDecimals(gctx, account, to); return final(toErr) })
 	if err := g.Wait(); err != nil {
 		return 0, 0, err
+	}
+	if fromErr != nil {
+		return 0, 0, fromErr
+	}
+	if toErr != nil {
+		return 0, 0, toErr
 	}
 	return fromDec, toDec, nil
 }
@@ -213,11 +229,19 @@ func (s *LifiSource) tokenDecimals(ctx context.Context, account string, a Asset)
 	}
 	res, err := s.cfg.RPC.SimulateInvocation(ctx, *id, &txnbuild.SimpleAccount{AccountID: account}, "decimals", nil, txnbuild.NewTimeout(300), types.PUBLIC)
 	if err != nil {
-		return 0, &metrics.UpstreamError{Kind: "simulation_error", Err: fmt.Errorf("token %s decimals: %w", a.Contract, err)}
+		// A failure the simulation itself reported is treated as the token's
+		// fault (a trap, no such function, no such contract); a failed RPC
+		// call is not. The read is not cached, so a node that is briefly
+		// behind costs one quote.
+		var ue *metrics.UpstreamError
+		if errors.As(err, &ue) && ue.Kind == "simulation_error" {
+			return 0, fmt.Errorf("%w: %s decimals(): %v", ErrUnsupportedToken, a.Contract, err)
+		}
+		return 0, &metrics.UpstreamError{Kind: "rpc_error", Err: fmt.Errorf("token %s decimals: %w", a.Contract, err)}
 	}
 	// Checked before caching: ParseUnits/FormatUnits size strings by decimals.
 	if res == nil || res.Type != xdr.ScValTypeScvU32 || res.U32 == nil || *res.U32 > maxTokenDecimals {
-		return 0, &metrics.UpstreamError{Kind: "invalid_response", Err: fmt.Errorf("token %s: unusable decimals() result", a.Contract)}
+		return 0, fmt.Errorf("%w: %s: unusable decimals() result", ErrUnsupportedToken, a.Contract)
 	}
 	d := int(*res.U32)
 	s.decimals.Store(a.Contract, d)

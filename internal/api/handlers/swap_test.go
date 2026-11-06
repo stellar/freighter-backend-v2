@@ -185,6 +185,7 @@ func TestSwapQuotes_ErrorMapping(t *testing.T) {
 	}{
 		"all failed":    {swap.ErrAllSourcesFailed, http.StatusBadGateway},
 		"bad request":   {swap.ErrBadRequest, http.StatusBadRequest},
+		"unsupported":   {fmt.Errorf("lifi: %w", swap.ErrUnsupportedToken), http.StatusBadRequest},
 		"deadline":      {context.DeadlineExceeded, http.StatusServiceUnavailable},
 		"canceled":      {context.Canceled, http.StatusServiceUnavailable},
 		"other":         {errors.New("boom"), http.StatusInternalServerError},
@@ -338,6 +339,7 @@ func TestSwapBuild_ErrorMapping(t *testing.T) {
 		"lifi missing tx":      {swap.ErrLifiMissingTx, http.StatusBadGateway},
 		"account not found":    {swap.ErrAccountNotFound, http.StatusBadRequest},
 		"bad request":          {swap.ErrBadRequest, http.StatusBadRequest},
+		"unsupported token":    {fmt.Errorf("lifi: %w", swap.ErrUnsupportedToken), http.StatusBadRequest},
 		"all failed":           {swap.ErrAllSourcesFailed, http.StatusBadGateway},
 		"upstream error":       {fmt.Errorf("lifi: %w", &metrics.UpstreamError{Kind: "http_error", Code: 424, Err: errors.New("x")}), http.StatusBadGateway},
 		"rate limited":         {swap.ErrRateLimited, http.StatusBadGateway},
@@ -353,6 +355,18 @@ func TestSwapBuild_ErrorMapping(t *testing.T) {
 			assert.Equal(t, tc.want, statusOf(t, err))
 		})
 	}
+}
+
+// The message must say the token is the problem: "invalid swap request" and
+// a 502 both send the user back to retry.
+func TestSwapQuotes_UnsupportedTokenMessage(t *testing.T) {
+	t.Parallel()
+	f := &fakeSwapService{quoteErr: fmt.Errorf("lifi: %w", swap.ErrUnsupportedToken)}
+	_, err := doQuotes(NewSwapHandler(f), "PUBLIC", swapQuoteBody("send", "XLM", swapUSDC, "10"))
+	var he *httperror.HttpError
+	require.ErrorAs(t, err, &he)
+	assert.Equal(t, http.StatusBadRequest, he.HttpStatus())
+	assert.Contains(t, he.Message, "unsupported token")
 }
 
 func TestSwapBuild_AccountNotFoundMessage(t *testing.T) {
