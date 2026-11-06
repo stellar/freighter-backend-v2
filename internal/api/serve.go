@@ -159,8 +159,9 @@ func (s *ApiServer) initServices() error {
 	s.tokenStatsService = historyAndStats
 
 	s.assetSearchService = services.NewAssetSearchService(stellarExpert, s.redis, services.AssetSearchServiceConfig{
-		CacheTTL: time.Duration(s.cfg.AssetSearchConfig.CacheTTLSeconds) * time.Second,
-		MaxLimit: s.cfg.AssetSearchConfig.MaxLimit,
+		CacheTTL:      time.Duration(s.cfg.AssetSearchConfig.CacheTTLSeconds) * time.Second,
+		EmptyCacheTTL: time.Duration(s.cfg.AssetSearchConfig.EmptyCacheTTLSeconds) * time.Second,
+		MaxLimit:      s.cfg.AssetSearchConfig.MaxLimit,
 	}, s.appMetrics.Prices)
 
 	return nil

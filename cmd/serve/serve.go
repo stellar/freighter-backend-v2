@@ -80,6 +80,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 				{"price-history-fetch-timeout-seconds", s.Cfg.PriceHistoryConfig.FetchTimeoutSeconds, false},
 				{"token-stats-cache-ttl-seconds", s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds, false},
 				{"asset-search-cache-ttl-seconds", s.Cfg.AssetSearchConfig.CacheTTLSeconds, false},
+				{"asset-search-empty-cache-ttl-seconds", s.Cfg.AssetSearchConfig.EmptyCacheTTLSeconds, false},
 			} {
 				switch {
 				case f.zeroOK && f.value < 0:
@@ -239,6 +240,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 
 	// Asset Search Config (GET /api/v1/assets/search)
 	cmd.Flags().IntVar(&s.Cfg.AssetSearchConfig.CacheTTLSeconds, "asset-search-cache-ttl-seconds", int(services.DefaultAssetSearchCacheTTL/time.Second), "Redis TTL for cached /assets/search answers (seconds). StellarExpert bills every call, so each distinct query costs one paid call per window")
+	cmd.Flags().IntVar(&s.Cfg.AssetSearchConfig.EmptyCacheTTLSeconds, "asset-search-empty-cache-ttl-seconds", int(services.DefaultAssetSearchEmptyCacheTTL/time.Second), "Redis TTL for /assets/search answers with no records (seconds), so a token searched before StellarExpert indexes it shows up soon after. Capped at --asset-search-cache-ttl-seconds")
 	cmd.Flags().IntVar(&s.Cfg.AssetSearchConfig.MaxLimit, "asset-search-max-limit", services.DefaultAssetSearchMaxLimit, "Largest limit parameter /assets/search forwards to StellarExpert; larger values are clamped to it. The cost of one call grows with it (about 10 + 6×limit units per search)")
 
 	return cmd

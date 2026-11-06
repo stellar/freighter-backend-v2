@@ -157,6 +157,10 @@ type AssetSearchConfig struct {
 	// (assetsearch:v1 entries). StellarExpert bills every call, so this sets
 	// the price of a popular query: one paid call per window.
 	CacheTTLSeconds int
+	// EmptyCacheTTLSeconds is how long an answer with no records is reused,
+	// so a token searched before StellarExpert indexes it shows up soon
+	// after. The service caps it at CacheTTLSeconds.
+	EmptyCacheTTLSeconds int
 	// MaxLimit is the largest `limit` forwarded upstream; larger values are
 	// clamped to it. The cost of one call grows with it.
 	MaxLimit int

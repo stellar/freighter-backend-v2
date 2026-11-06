@@ -49,6 +49,19 @@ func TestCanonicalAssetSearchParams(t *testing.T) {
 			want: url.Values{"sort": {"created"}, "cursor": {"8812"}, "includeUninitialized": {"true"}},
 		},
 		{
+			name: "ascending order passes through",
+			in:   url.Values{"order": {"asc"}},
+			want: url.Values{"order": {"asc"}},
+		},
+		{
+			// StellarExpert reads includeUninitialized as true whenever it
+			// has a value, "false" included (measured on Testnet with
+			// sort=created), so false is sent as the parameter's absence.
+			name: "includeUninitialized=false is dropped",
+			in:   url.Values{"sort": {"created"}, "includeUninitialized": {"false"}},
+			want: url.Values{"sort": {"created"}},
+		},
+		{
 			// StellarExpert ignores case for codes and names (measured on
 			// Testnet: usdc, USDC and UsDc return identical bodies).
 			name: "search text is trimmed and lowercased",
@@ -135,6 +148,17 @@ func TestCanonicalAssetSearchParams_Rejects(t *testing.T) {
 		{"a non-numeric limit", url.Values{"limit": {"ten"}}},
 		{"a zero limit", url.Values{"limit": {"0"}}},
 		{"a negative limit", url.Values{"limit": {"-5"}}},
+		// StellarExpert matches sort and order exactly and answers anything
+		// else with its default instead of an error (measured on Testnet:
+		// VOLUME7D sorted by rating, ASC sorted descending), so a typo would
+		// quietly return a list the caller did not ask for.
+		{"an unknown sort", url.Values{"sort": {"foo"}}},
+		{"a sort in another case", url.Values{"sort": {"VOLUME7D"}}},
+		{"an unknown order", url.Values{"order": {"up"}}},
+		{"an order in another case", url.Values{"order": {"ASC"}}},
+		// StellarExpert would read either of these as true.
+		{"a non-boolean includeUninitialized", url.Values{"includeUninitialized": {"1"}}},
+		{"includeUninitialized in another case", url.Values{"includeUninitialized": {"False"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -146,8 +170,22 @@ func TestCanonicalAssetSearchParams_Rejects(t *testing.T) {
 	}
 }
 
+// Every sort in StellarExpert's /asset spec must still reach it.
+func TestCanonicalAssetSearchParams_AcceptsEveryDocumentedSort(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []string{"rating", "created", "payments", "trades", "trustlines", "volume", "volume7d"} {
+		got, err := canonicalAssetSearchParams(url.Values{"sort": {value}}, testMaxLimit)
+		require.NoError(t, err, value)
+		assert.Equal(t, url.Values{"sort": {value}}, got)
+	}
+}
+
 // searchBody is a StellarExpert /asset response in its real shape.
 const searchBody = `{"_links":{"self":{"href":"/explorer/public/asset?search=usdc&order=desc&limit=50&cursor=0"}},"_embedded":{"records":[{"asset":"USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN-1","domain":"centre.io","price":1.0001,"volume7d":123456789,"tomlInfo":{"code":"USDC","issuer":"GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"}}]}}`
+
+// emptyBody is StellarExpert's real /asset answer when nothing matches.
+const emptyBody = `{"_links":{"self":{"href":"/explorer/public/asset?order=desc&limit=50&cursor=0"},"prev":{"href":"/explorer/public/asset?order=asc&limit=50&cursor=0"},"next":{"href":"/explorer/public/asset?order=desc&limit=50&cursor=0"}},"_embedded":{"records":[]}}`
 
 // listCall is one ListAssets call the fake upstream received.
 type listCall struct {
@@ -176,6 +214,8 @@ func newListingExpert(respond func(call int) (json.RawMessage, error)) (*fakeSte
 }
 
 func alwaysBody(int) (json.RawMessage, error) { return json.RawMessage(searchBody), nil }
+
+func alwaysEmpty(int) (json.RawMessage, error) { return json.RawMessage(emptyBody), nil }
 
 // onlyTTL returns the TTL of the cache's single entry.
 func onlyTTL(t *testing.T, cache *fakeJSONCache) time.Duration {
@@ -223,6 +263,63 @@ func TestAssetSearch_ZeroConfigFallsBackToSafeDefaults(t *testing.T) {
 	require.Len(t, calls(), 1)
 	assert.Equal(t, url.Values{"limit": {"100"}}, calls()[0].query, "the limit cap defaults to 100")
 	assert.Equal(t, 6*time.Hour, onlyTTL(t, cache), "the cache TTL defaults to 6h")
+}
+
+// An answer with no records is reused only briefly, so a token searched
+// before StellarExpert has indexed it shows up minutes later, not hours. A
+// body without a records list counts as empty too, so an unexpected shape is
+// not replayed for hours either.
+func TestAssetSearch_EmptyAnswersAreCachedBriefly(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		body    string
+		wantTTL time.Duration
+	}{
+		{"an answer with records", searchBody, 5 * time.Hour},
+		{"an answer with no records", emptyBody, 7 * time.Minute},
+		{"an answer without a records list", `{"_links":{"self":{"href":"/explorer/public/asset"}}}`, 7 * time.Minute},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fake, _ := newListingExpert(func(int) (json.RawMessage, error) { return json.RawMessage(tc.body), nil })
+			cache := newFakeJSONCache()
+			svc := NewAssetSearchService(fake, cache, AssetSearchServiceConfig{CacheTTL: 5 * time.Hour, EmptyCacheTTL: 7 * time.Minute, MaxLimit: testMaxLimit}, nil)
+
+			got, err := svc.SearchAssets(context.Background(), types.PUBLIC, url.Values{"search": {"usdc"}})
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.body, string(got), "the body is returned unchanged")
+			assert.Equal(t, tc.wantTTL, onlyTTL(t, cache))
+		})
+	}
+}
+
+func TestAssetSearch_EmptyAnswerTTLDefaultsToFiveMinutes(t *testing.T) {
+	t.Parallel()
+
+	fake, _ := newListingExpert(alwaysEmpty)
+	cache := newFakeJSONCache()
+	svc := NewAssetSearchService(fake, cache, AssetSearchServiceConfig{}, nil)
+
+	_, err := svc.SearchAssets(context.Background(), types.PUBLIC, url.Values{"search": {"zzqq"}})
+	require.NoError(t, err)
+	assert.Equal(t, 5*time.Minute, onlyTTL(t, cache))
+}
+
+// With a main TTL below the empty one, an empty answer would outlive a full
+// one; it is capped instead.
+func TestAssetSearch_EmptyAnswersNeverOutliveFullOnes(t *testing.T) {
+	t.Parallel()
+
+	fake, _ := newListingExpert(alwaysEmpty)
+	cache := newFakeJSONCache()
+	svc := NewAssetSearchService(fake, cache, AssetSearchServiceConfig{CacheTTL: 2 * time.Minute}, nil)
+
+	_, err := svc.SearchAssets(context.Background(), types.PUBLIC, url.Values{"search": {"zzqq"}})
+	require.NoError(t, err)
+	assert.Equal(t, 2*time.Minute, onlyTTL(t, cache))
 }
 
 func TestAssetSearch_EquivalentQueriesShareOneUpstreamCall(t *testing.T) {
