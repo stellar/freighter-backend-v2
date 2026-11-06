@@ -65,6 +65,13 @@ func parseJWT(tokenString, methodAndPath string, body []byte, leeway time.Durati
 		jwtgo.WithLeeway(leeway),
 	)
 	if err != nil {
+		if errors.Is(err, jwtgo.ErrTokenExpired) || errors.Is(err, jwtgo.ErrTokenNotValidYet) {
+			// The signature verified, so the claims are authentic; the clock
+			// error must not skip the request binding.
+			if berr := claims.checkBinding(methodAndPath, body); berr != nil {
+				return nil, berr
+			}
+		}
 		switch {
 		case errors.Is(err, jwtgo.ErrTokenExpired):
 			// Lagging client clock.
