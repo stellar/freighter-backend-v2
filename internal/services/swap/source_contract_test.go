@@ -2,6 +2,7 @@ package swap
 
 import (
 	"context"
+	"encoding/json"
 	"math/big"
 	"testing"
 	"time"
@@ -142,5 +143,24 @@ func TestClassicSourceContract(t *testing.T) {
 			Paths: []types.SwapPath{{Share: "1", Hops: []types.SwapHop{{Venue: "stellar-dex", From: "XLM", To: "USDC:" + usdcIssuer}}}},
 		},
 		now: time.Now,
+	})
+}
+
+func TestLifiSourceContract(t *testing.T) {
+	t.Parallel()
+	body := lifiFixture(t, "lifi_quote_xlm_usdc_trust.json")
+	var q LifiQuote
+	require.NoError(t, json.Unmarshal(body, &q))
+	env := decodeEnv(t, trustFixtureXDR(t))
+	src := lifiBuildSource(t, env, 200, body)
+	send := lifiReq(fmtRaw(t, q.Action.FromAmount, 7))
+	receive := send
+	receive.Mode = types.SwapModeReceive
+
+	checkSourceContract(t, sourceContract{
+		src:    src,
+		quotes: []types.SwapQuoteRequest{send, receive},
+		build:  lifiBuildReq(t, env),
+		now:    func() time.Time { return time.Unix(int64(env.V1.Tx.Cond.TimeBounds.MaxTime)-300, 0) },
 	})
 }

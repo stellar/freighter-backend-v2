@@ -19,9 +19,6 @@ import (
 
 const classicName = "classic"
 
-// maxUpstreamBody caps how much of a LI.FI or Horizon response is read.
-const maxUpstreamBody = 1 << 20
-
 type ClassicConfig struct {
 	HorizonURLs map[string]string // network → base URL
 	HTTPClient  *http.Client
@@ -315,14 +312,4 @@ func (c *ClassicSource) BuildTx(ctx context.Context, req types.SwapBuildRequest)
 		return "", fmt.Errorf("%w: %v", ErrBadRequest, err)
 	}
 	return tx.Base64()
-}
-
-// MaxTimeoutSeconds bounds a built swap's validity.
-const MaxTimeoutSeconds = 86400
-
-func timeoutSeconds(req types.SwapBuildRequest) (int64, error) {
-	if req.Timeout < 1 || req.Timeout > MaxTimeoutSeconds {
-		return 0, fmt.Errorf("%w: timeout %d", ErrBadRequest, req.Timeout)
-	}
-	return req.Timeout, nil
 }
