@@ -363,6 +363,10 @@ func (stubRPCService) GetLedgerEntries(ctx context.Context, keys []string, netwo
 	return nil, nil
 }
 
+func (stubRPCService) GetLedgerEntriesXDR(ctx context.Context, keys []string, network string) (map[string]string, error) {
+	return nil, nil
+}
+
 func TestApiServer_initHandlers_HealthRoutesAnonymousInStrict(t *testing.T) {
 	s := newTestAPIServer(t, testCfg("strict"))
 	s.rpcService = stubRPCService{} // so /rpc-health can be invoked without a live RPC

@@ -204,3 +204,28 @@ func (r *rpcService) GetLedgerEntries(ctx context.Context, keys []string, networ
 
 	return entries, nil
 }
+
+func (r *rpcService) GetLedgerEntriesXDR(ctx context.Context, keys []string, network string) (_ map[string]string, err error) {
+	start := time.Now()
+	defer func() {
+		metrics.Record(r.svcMetrics, serviceName, "GetLedgerEntriesXDR", network, time.Since(start).Seconds(), err)
+	}()
+
+	if len(keys) > MaxLedgerEntryKeys {
+		return nil, fmt.Errorf("too many ledger entry keys: maximum is %d, got %d", MaxLedgerEntryKeys, len(keys))
+	}
+
+	response, err := r.configureNetworkClient(network).GetLedgerEntries(ctx, rpc.GetLedgerEntriesRequest{
+		Keys:   keys,
+		Format: rpc.FormatBase64,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ledger entries: %w", err)
+	}
+
+	out := make(map[string]string, len(response.Entries))
+	for _, entry := range response.Entries {
+		out[entry.KeyXDR] = entry.DataXDR
+	}
+	return out, nil
+}

@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -377,4 +379,36 @@ func TestRouterBuildUnsupportedNetworkDoesNotBuild(t *testing.T) {
 	_, err := r.Build(context.Background(), types.SwapBuildRequest{Network: types.TESTNET, Source: "lifi"})
 	assert.ErrorIs(t, err, ErrBadRequest)
 	assert.Zero(t, src.builds)
+}
+
+// A source that cannot serve the pair is not asked, so it does not dilute the
+// all-failed and all-bad-request rules on the pairs only LI.FI can route.
+func TestRouterPairOnlyOneSourceServes(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		lifiErr error
+		wantErr error
+		reason  string
+	}{
+		{"all failed", errors.New("boom"), ErrAllSourcesFailed, "error"},
+		{"all bad request", fmt.Errorf("%w: amount", ErrBadRequest), ErrBadRequest, "bad_request"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			horizon := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				t.Errorf("Horizon was asked for a Soroban pair: %s", r.URL)
+			}))
+			t.Cleanup(horizon.Close)
+			m := metrics.NewSwap(prometheus.NewRegistry())
+			classic := NewClassicSource(ClassicConfig{HorizonURLs: map[string]string{types.PUBLIC: horizon.URL}}, nil)
+			r := NewRouter([]Source{classic, &fakeSource{name: "lifi", err: tc.lifiErr}}, time.Second, time.Second, m)
+
+			req := sendReq
+			req.FromAsset = "CBI7UCH5KGSVQRO5H4SUCZUTZABCITZLRHQQZTWL2TK4RZ72TAR6IHRV"
+			res, err := r.Quote(context.Background(), req)
+			assert.ErrorIs(t, err, tc.wantErr)
+			assert.Equal(t, []types.SwapUnavailable{{Source: "classic", Reason: "unsupported"}, {Source: "lifi", Reason: tc.reason}}, res.Unavailable)
+			assert.Equal(t, 1, testutil.CollectAndCount(m.SourceRequests), "only the asked source is recorded")
+		})
+	}
 }
