@@ -454,7 +454,7 @@ func TestClassicQuoteFromOrderbookReceive(t *testing.T) {
 	var got map[string]string
 	ob := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
-		_, _ = w.Write([]byte(`{"fromAmount":"2.8500000","toAmount":"0.5000000","path":[],"ledger":1}`))
+		_, _ = w.Write([]byte(`{"mode":"receive","fromAsset":"USDC:` + usdcIssuer + `","toAsset":"XLM","fromAmount":"2.8500000","toAmount":"0.5000000","path":[],"ledger":1}`))
 	}))
 	t.Cleanup(ob.Close)
 	src := newOrderbookSource("http://unused.invalid", ob.URL, nil)
@@ -485,6 +485,9 @@ func TestClassicQuoteOrderbookNoRoute(t *testing.T) {
 	assert.Equal(t, 0, testutil.CollectAndCount(m.OrderbookFallbacks))
 }
 
+// sendEcho opens a 200 body that repeats sendReq's mode and pair.
+var sendEcho = `{"mode":"send","fromAsset":"XLM","toAsset":"USDC:` + usdcIssuer + `",`
+
 // longPath is six intermediates, one more than a classic build accepts.
 var longPath = strings.Repeat("USDC:"+usdcIssuer+`","`, 5) + "USDC:" + usdcIssuer
 
@@ -503,15 +506,17 @@ func TestClassicQuoteFallsBackToHorizon(t *testing.T) {
 		{"hung", hang.URL, "timeout"},
 		{"unreachable", "http://127.0.0.1:1", "error"}, // a closed test server's port can be reused by a parallel test
 		{"bad request", orderbookFixture(t, http.StatusBadRequest, `{"code":"invalid_request","message":"x"}`).URL, "error"},
-		{"bad path asset", orderbookFixture(t, http.StatusOK, `{"fromAmount":"100","toAmount":"1","path":["native"]}`).URL, "error"},
+		{"bad path asset", orderbookFixture(t, http.StatusOK, sendEcho+`"fromAmount":"100","toAmount":"1","path":["native"]}`).URL, "error"},
 		{"bad json", orderbookFixture(t, http.StatusOK, `{`).URL, "error"},
 		{"404 not no_route", orderbookFixture(t, http.StatusNotFound, `{"code":"not_found","message":"x"}`).URL, "error"},
 		{"404 plain text", orderbookFixture(t, http.StatusNotFound, `404 page not found`).URL, "error"},
-		{"missing amount", orderbookFixture(t, http.StatusOK, `{"fromAmount":"100","path":[]}`).URL, "error"},
-		{"zero amount", orderbookFixture(t, http.StatusOK, `{"fromAmount":"100","toAmount":"0.0000000","path":[]}`).URL, "error"},
-		{"fraction amount", orderbookFixture(t, http.StatusOK, `{"fromAmount":"100","toAmount":"1/3","path":[]}`).URL, "error"},
-		{"path longer than a build allows", orderbookFixture(t, http.StatusOK, `{"fromAmount":"100","toAmount":"1","path":["`+longPath+`"]}`).URL, "error"},
-		{"fixed side not the request", orderbookFixture(t, http.StatusOK, `{"fromAmount":"60","toAmount":"10","path":[]}`).URL, "error"},
+		{"missing amount", orderbookFixture(t, http.StatusOK, sendEcho+`"fromAmount":"100","path":[]}`).URL, "error"},
+		{"zero amount", orderbookFixture(t, http.StatusOK, sendEcho+`"fromAmount":"100","toAmount":"0.0000000","path":[]}`).URL, "error"},
+		{"fraction amount", orderbookFixture(t, http.StatusOK, sendEcho+`"fromAmount":"100","toAmount":"1/3","path":[]}`).URL, "error"},
+		{"path longer than a build allows", orderbookFixture(t, http.StatusOK, sendEcho+`"fromAmount":"100","toAmount":"1","path":["`+longPath+`"]}`).URL, "error"},
+		{"other pair", orderbookFixture(t, http.StatusOK, `{"mode":"send","fromAsset":"XLM","toAsset":"AQUA:`+aquaIssuer+`","fromAmount":"100","toAmount":"1","path":[]}`).URL, "error"},
+		{"other mode", orderbookFixture(t, http.StatusOK, `{"mode":"receive","fromAsset":"XLM","toAsset":"USDC:`+usdcIssuer+`","fromAmount":"100","toAmount":"1","path":[]}`).URL, "error"},
+		{"fixed side not the request", orderbookFixture(t, http.StatusOK, sendEcho+`"fromAmount":"60","toAmount":"10","path":[]}`).URL, "error"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

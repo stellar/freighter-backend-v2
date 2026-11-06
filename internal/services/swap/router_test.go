@@ -232,6 +232,8 @@ func TestRouterUnparseableRankingAmountIsDropped(t *testing.T) {
 	}{
 		{types.SwapModeSend, route("bad", "100", "abc"), route("good", "100", "17.9")},
 		{types.SwapModeReceive, route("bad", "abc", "1"), route("good", "3", "1")},
+		{types.SwapModeSend, route("bad", "100", "0"), route("good", "100", "17.9")},
+		{types.SwapModeReceive, route("bad", "-1", "1"), route("good", "3", "1")},
 	} {
 		r := NewRouter([]Source{
 			&fakeSource{name: "bad", route: tc.bad},

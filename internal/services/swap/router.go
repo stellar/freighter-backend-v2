@@ -115,7 +115,7 @@ func recoverSource(source, op string, err *error) {
 	}
 }
 
-// validRoute reports whether rt is non-nil and its ranking amount parses;
+// validRoute reports whether rt is non-nil and its ranking amount is positive;
 // rat() maps garbage to 0, which would let a bad route win in receive mode.
 func validRoute(req types.SwapQuoteRequest, rt *types.SwapRoute) bool {
 	if rt == nil {
@@ -125,8 +125,8 @@ func validRoute(req types.SwapQuoteRequest, rt *types.SwapRoute) bool {
 	if req.Mode == types.SwapModeReceive {
 		amt = rt.FromAmount
 	}
-	_, ok := new(big.Rat).SetString(amt)
-	return ok
+	v, ok := new(big.Rat).SetString(amt)
+	return ok && v.Sign() > 0
 }
 
 func rat(s string) *big.Rat {

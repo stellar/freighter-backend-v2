@@ -181,7 +181,8 @@ func (e *orderbookFallback) Error() string {
 func (e *orderbookFallback) Unwrap() error { return e.err }
 
 // orderbookQuote asks sdex-orderbook (github.com/stellar/sdex-orderbook).
-// Only a 200 with positive amounts and a 404 with code no_route are answers;
+// Only a 200 that echoes the request's mode and pair, with positive amounts,
+// and a 404 with code no_route are answers;
 // anything else returns *orderbookFallback.
 func (c *ClassicSource) orderbookQuote(parent context.Context, base string, req types.SwapQuoteRequest, from, to Asset) (*types.SwapRoute, error) {
 	limit := orderbookTimeout
@@ -240,12 +241,18 @@ func (c *ClassicSource) orderbookQuote(parent context.Context, base string, req 
 		return nil, &orderbookFallback{"error", fmt.Errorf("status %d", resp.StatusCode)}
 	}
 	var q struct {
+		Mode       string   `json:"mode"`
+		FromAsset  string   `json:"fromAsset"`
+		ToAsset    string   `json:"toAsset"`
 		FromAmount string   `json:"fromAmount"`
 		ToAmount   string   `json:"toAmount"`
 		Path       []string `json:"path"`
 	}
 	if err = json.NewDecoder(body).Decode(&q); err != nil {
 		return nil, failed(err)
+	}
+	if q.Mode != req.Mode || q.FromAsset != from.ID || q.ToAsset != to.ID {
+		return nil, &orderbookFallback{"error", fmt.Errorf("quote for %s %s->%s", q.Mode, q.FromAsset, q.ToAsset)}
 	}
 	if len(q.Path) > maxClassicPathHops-1 {
 		return nil, &orderbookFallback{"error", fmt.Errorf("path of %d assets", len(q.Path))}

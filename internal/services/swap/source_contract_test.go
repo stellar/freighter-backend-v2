@@ -171,13 +171,14 @@ func TestLifiSourceContract(t *testing.T) {
 func TestClassicOrderbookSourceContract(t *testing.T) {
 	t.Parallel()
 	ob := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req struct{ Mode, Amount string }
+		var req struct{ Mode, FromAsset, ToAsset, Amount string }
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 		from, to := req.Amount, "17.5450814"
 		if req.Mode == types.SwapModeReceive {
 			from, to = "2.8500000", req.Amount
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
+			"mode": req.Mode, "fromAsset": req.FromAsset, "toAsset": req.ToAsset,
 			"fromAmount": from, "toAmount": to, "path": []string{"EURC:" + eurcIssuer}, "ledger": 1,
 		})
 	}))
