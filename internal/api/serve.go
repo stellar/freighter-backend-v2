@@ -23,13 +23,16 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/services"
+	"github.com/stellar/freighter-backend-v2/internal/services/swap"
 	"github.com/stellar/freighter-backend-v2/internal/store"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
 const (
-	DefaultReadTimeout    = 10 * time.Second
-	DefaultWriteTimeout   = 10 * time.Second
+	DefaultReadTimeout  = 10 * time.Second
+	DefaultWriteTimeout = 10 * time.Second
+	// swapBuildTimeout leaves the handler time to write its error before the write timeout.
+	swapBuildTimeout      = DefaultWriteTimeout - 2*time.Second
 	DefaultIdleTimeout    = 120 * time.Second
 	ServerShutdownTimeout = 10 * time.Second
 	// DatabaseConnectTimeout bounds the boot-time connect + ping so a reachable
@@ -47,6 +50,7 @@ type ApiServer struct {
 	pricesService        types.PricesService
 	priceHistoryService  types.PriceHistoryService
 	tokenStatsService    types.TokenStatsService
+	swapService          types.SwapService
 	registry             *prometheus.Registry
 	appMetrics           *metrics.Metrics
 	authMode             auth.Mode
@@ -157,6 +161,26 @@ func (s *ApiServer) initServices() error {
 	s.priceHistoryService = historyAndStats
 	s.tokenStatsService = historyAndStats
 
+	var sources []swap.Source
+	sources = append(sources, swap.NewClassicSource(swap.ClassicConfig{HorizonURLs: map[string]string{
+		types.PUBLIC:    s.cfg.HorizonConfig.HorizonPubnetURL,
+		types.TESTNET:   s.cfg.HorizonConfig.HorizonTestnetURL,
+		types.FUTURENET: s.cfg.HorizonConfig.HorizonFuturenetURL,
+	}}, s.rpcService))
+	if s.cfg.SwapConfig.LifiEnabled {
+		sources = append(sources, swap.NewLifiSource(swap.LifiConfig{
+			Client:       swap.NewLifiClient(swap.LifiBaseURL, s.cfg.SwapConfig.LifiAPIKey, nil),
+			SwapContract: swap.LifiSwapContract,
+			FeeRecipient: swap.LifiFeeRecipient,
+			PartnerID:    swap.LifiPartnerID,
+			Aggregator:   swap.SoroswapAggregator,
+			RPC:          s.rpcService,
+		}, s.appMetrics.Swap))
+	}
+	s.swapService = swap.NewRouter(sources,
+		time.Duration(s.cfg.SwapConfig.SourceTimeoutSeconds)*time.Second,
+		swapBuildTimeout, s.appMetrics.Swap)
+
 	return nil
 }
 
@@ -242,6 +266,7 @@ func (s *ApiServer) routes() ([]route, error) {
 	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest, s.appMetrics.Prices)
 	tokenPriceHistoryHandler := handlers.NewTokenPriceHistoryHandler(s.priceHistoryService)
 	tokenStatsHandler := handlers.NewTokenStatsHandler(s.tokenStatsService)
+	swapHandler := handlers.NewSwapHandler(s.swapService)
 	accountHistoryHandler, err := handlers.NewAccountHistoryHandler(
 		s.walletBackendService,
 		s.cfg.AppConfig.AccountHistoryDefaultLimit,
@@ -286,6 +311,8 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
 
 		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true, true},
+		{http.MethodPost, "/api/v1/swap/quotes", handlers.CustomHandler(swapHandler.Quotes), true, true},
+		{http.MethodPost, "/api/v1/swap/tx", handlers.CustomHandler(swapHandler.Build), true, true},
 		{http.MethodGet, "/api/v1/token-price-history", handlers.CustomHandler(tokenPriceHistoryHandler.GetTokenPriceHistory), true, true},
 		{http.MethodGet, "/api/v1/token-stats", handlers.CustomHandler(tokenStatsHandler.GetTokenStats), true, true},
 		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, true},

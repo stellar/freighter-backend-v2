@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stellar/freighter-backend-v2/internal/api"
 	"github.com/stellar/freighter-backend-v2/internal/api/handlers"
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/services"
@@ -526,4 +527,63 @@ func TestServeCmd_RejectsDurationSecondsThatOverflow(t *testing.T) {
 		require.NoError(t, err, "the boundary is the largest value that survives the multiply")
 		assert.EqualValues(t, maxDurationSeconds, serveCmd.Cfg.PriceHistoryConfig.CacheTTL1DSeconds)
 	})
+}
+
+func executeServeWithArgs(t *testing.T) *config.Config {
+	t.Helper()
+	serveCmd := &ServeCmd{Cfg: &config.Config{}}
+	cmd := serveCmd.Command()
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--db-enabled=false"})
+	require.NoError(t, cmd.Execute())
+	return serveCmd.Cfg
+}
+
+func TestServeCmd_SwapDefaults(t *testing.T) {
+	// No t.Parallel(): t.Setenv is incompatible with parallel tests.
+	t.Setenv("DATABASE_URL", "")
+
+	cfg := executeServeWithArgs(t)
+	assert.False(t, cfg.SwapConfig.LifiEnabled)
+	assert.Equal(t, 4, cfg.SwapConfig.SourceTimeoutSeconds)
+	assert.Equal(t, "", cfg.SwapConfig.LifiAPIKey)
+	assert.Equal(t, "https://horizon-futurenet.stellar.org", cfg.HorizonConfig.HorizonFuturenetURL)
+}
+
+func TestServeCmd_SwapEnvOverrides(t *testing.T) {
+	// No t.Parallel(): t.Setenv is incompatible with parallel tests.
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("SWAP_LIFI_ENABLED", "true")
+	t.Setenv("SWAP_LIFI_API_KEY", "k")
+	t.Setenv("SWAP_SOURCE_TIMEOUT_SECONDS", "2")
+
+	cfg := executeServeWithArgs(t)
+	assert.True(t, cfg.SwapConfig.LifiEnabled)
+	assert.Equal(t, "k", cfg.SwapConfig.LifiAPIKey)
+	assert.Equal(t, 2, cfg.SwapConfig.SourceTimeoutSeconds)
+}
+
+func TestServeCmd_LifiRequiresAPIKey(t *testing.T) {
+	t.Parallel()
+	_, err := execServe(t, "--db-enabled=false", "--swap-lifi-enabled")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--swap-lifi-api-key (env SWAP_LIFI_API_KEY) is required when --swap-lifi-enabled is true")
+
+	s, err := execServe(t, "--db-enabled=false", "--swap-lifi-enabled", "--swap-lifi-api-key", "k")
+	require.NoError(t, err)
+	assert.True(t, s.Cfg.SwapConfig.LifiEnabled)
+}
+
+func TestServeCmd_SwapSourceTimeoutStaysBelowWriteTimeout(t *testing.T) {
+	t.Parallel()
+	limit := int(api.DefaultWriteTimeout / time.Second)
+	_, err := execServe(t, "--db-enabled=false", "--swap-source-timeout-seconds", strconv.Itoa(limit))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--swap-source-timeout-seconds="+strconv.Itoa(limit)+" must be below the server write timeout")
+
+	s, err := execServe(t, "--db-enabled=false", "--swap-source-timeout-seconds", strconv.Itoa(limit-1))
+	require.NoError(t, err)
+	assert.Equal(t, limit-1, s.Cfg.SwapConfig.SourceTimeoutSeconds)
 }

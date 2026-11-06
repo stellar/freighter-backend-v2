@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -76,6 +77,7 @@ func (s *ServeCmd) Command() *cobra.Command {
 				{"price-history-cache-ttl-all-seconds", s.Cfg.PriceHistoryConfig.CacheTTLALLSeconds, false},
 				{"price-history-fetch-timeout-seconds", s.Cfg.PriceHistoryConfig.FetchTimeoutSeconds, false},
 				{"token-stats-cache-ttl-seconds", s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds, false},
+				{"swap-source-timeout-seconds", s.Cfg.SwapConfig.SourceTimeoutSeconds, false},
 			} {
 				switch {
 				case f.zeroOK && f.value < 0:
@@ -85,6 +87,12 @@ func (s *ServeCmd) Command() *cobra.Command {
 				case int64(f.value) > maxDurationSeconds:
 					return fmt.Errorf("--%s=%d overflows when converted to a duration; must be <= %d", f.name, f.value, maxDurationSeconds)
 				}
+			}
+			if n := s.Cfg.SwapConfig.SourceTimeoutSeconds; time.Duration(n)*time.Second >= api.DefaultWriteTimeout {
+				return fmt.Errorf("--swap-source-timeout-seconds=%d must be below the server write timeout (%s)", n, api.DefaultWriteTimeout)
+			}
+			if s.Cfg.SwapConfig.LifiEnabled && s.Cfg.SwapConfig.LifiAPIKey == "" {
+				return errors.New("--swap-lifi-api-key (env SWAP_LIFI_API_KEY) is required when --swap-lifi-enabled is true")
 			}
 			// The volume threshold and conversion divisor are magnitudes
 			// where 0 is meaningful ("guard disabled" / "conversion not
@@ -172,6 +180,10 @@ func (s *ServeCmd) Command() *cobra.Command {
 	// Horizon Config
 	cmd.Flags().StringVar(&s.Cfg.HorizonConfig.HorizonPubnetURL, "horizon-pubnet-url", "https://horizon.stellar.org/", "The URL of the pubnet Horizon")
 	cmd.Flags().StringVar(&s.Cfg.HorizonConfig.HorizonTestnetURL, "horizon-testnet-url", "https://horizon-testnet.stellar.org", "The URL of the testnet Horizon")
+	cmd.Flags().StringVar(&s.Cfg.HorizonConfig.HorizonFuturenetURL, "horizon-futurenet-url", "https://horizon-futurenet.stellar.org", "The URL of the futurenet Horizon")
+	cmd.Flags().BoolVar(&s.Cfg.SwapConfig.LifiEnabled, "swap-lifi-enabled", false, "Enable the LI.FI swap source")
+	cmd.Flags().IntVar(&s.Cfg.SwapConfig.SourceTimeoutSeconds, "swap-source-timeout-seconds", 4, "Per-source timeout in seconds for swap quote requests")
+	cmd.Flags().StringVar(&s.Cfg.SwapConfig.LifiAPIKey, "swap-lifi-api-key", "", "LI.FI API key")
 
 	// Redis Config
 	cmd.Flags().StringVar(&s.Cfg.RedisConfig.ConnectionName, "redis-connection-name", "freighter-redis", "The name of the Redis connection")
