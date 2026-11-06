@@ -33,8 +33,10 @@ func NewSwapHandler(svc types.SwapService) *SwapHandler {
 }
 
 // requireToken rejects requests without a Bearer token, even under permissive
-// auth, because each quote spends LI.FI quota. The auth middleware has already
-// 401ed every Bearer token except a valid one or a correctly signed one from a
+// auth, to keep anonymous callers off a route where each quote spends LI.FI
+// quota. It is not a quota guard: tokens are self-signed, so any client that
+// speaks the auth protocol gets through. The auth middleware has already 401ed
+// every Bearer token except a valid one or a correctly signed one from a
 // device with a wrong clock. Delete once auth is strict.
 func requireToken(r *http.Request) *httperror.HttpError {
 	if !auth.HasBearerToken(r) {
