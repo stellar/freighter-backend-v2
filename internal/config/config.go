@@ -143,6 +143,10 @@ type SwapConfig struct {
 	LifiEnabled          bool
 	SourceTimeoutSeconds int
 	LifiAPIKey           string
+
+	SdexOrderbookPubnetURL    string
+	SdexOrderbookTestnetURL   string
+	SdexOrderbookFuturenetURL string
 }
 
 type PricesConfig struct {

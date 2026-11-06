@@ -6,7 +6,7 @@ for the route the user picked, through the source that quoted it.
 
 | Source | File | Pairs | Upstream |
 |---|---|---|---|
-| `classic` | `classic.go` | classic assets only | Horizon path finding |
+| `classic` | `classic.go` | classic assets only | sdex-orderbook where configured, else Horizon path finding |
 | `lifi` | `lifi.go` | any, pubnet, send mode only | LI.FI API |
 
 The router (`router.go`) does not refer to a source by name. It handles

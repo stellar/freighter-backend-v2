@@ -1,13 +1,16 @@
 package swap
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
@@ -19,15 +22,23 @@ import (
 
 const classicName = "classic"
 
+// orderbookTimeout caps the sdex-orderbook call; it also never takes more
+// than half the caller's remaining budget, so Horizon keeps time to answer.
+const orderbookTimeout = time.Second
+
 type ClassicConfig struct {
-	HorizonURLs map[string]string // network → base URL
-	HTTPClient  *http.Client
+	HorizonURLs   map[string]string // network → base URL
+	OrderbookURLs map[string]string // network → sdex-orderbook base URL
+	HTTPClient    *http.Client
+	Metrics       *metrics.Swap
 }
 
 type ClassicSource struct {
-	urls map[string]string
-	hc   *http.Client
-	rpc  types.RPCService
+	urls      map[string]string
+	orderbook map[string]string
+	hc        *http.Client
+	rpc       types.RPCService
+	m         *metrics.Swap
 }
 
 func NewClassicSource(cfg ClassicConfig, rpc types.RPCService) *ClassicSource {
@@ -35,7 +46,7 @@ func NewClassicSource(cfg ClassicConfig, rpc types.RPCService) *ClassicSource {
 	if hc == nil {
 		hc = utils.NewUpstreamHTTPClient()
 	}
-	return &ClassicSource{urls: cfg.HorizonURLs, hc: hc, rpc: rpc}
+	return &ClassicSource{urls: cfg.HorizonURLs, orderbook: cfg.OrderbookURLs, hc: hc, rpc: rpc, m: cfg.Metrics}
 }
 
 func (c *ClassicSource) Name() string { return classicName }
@@ -96,6 +107,14 @@ func (c *ClassicSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (
 	if !from.IsClassic() || !to.IsClassic() {
 		return nil, fmt.Errorf("%w: classic swaps need classic assets", ErrBadRequest)
 	}
+	if base := c.orderbook[req.Network]; base != "" {
+		rt, err := c.orderbookQuote(ctx, base, req, from, to)
+		var fb *orderbookFallback
+		if !errors.As(err, &fb) {
+			return rt, err
+		}
+		metrics.RecordSwapOrderbookFallback(c.m, req.Network, fb.reason)
+	}
 	var endpoint string
 	var q url.Values
 	if req.Mode == types.SwapModeReceive {
@@ -121,28 +140,138 @@ func (c *ClassicSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (
 	if best == nil {
 		return nil, ErrNoRoute
 	}
-	chain := []string{from.ID}
+	path := make([]string, 0, len(best.Path))
 	for _, a := range best.Path {
 		if a.Type == "native" {
-			chain = append(chain, "XLM")
+			path = append(path, "XLM")
 		} else {
-			chain = append(chain, a.Code+":"+a.Issuer)
+			path = append(path, a.Code+":"+a.Issuer)
 		}
 	}
-	chain = append(chain, to.ID)
+	return classicRoute(req, from, to, path, best.SourceAmount, best.DestinationAmount), nil
+}
+
+// classicRoute builds a single-path route through the intermediate assets.
+func classicRoute(req types.SwapQuoteRequest, from, to Asset, path []string, sourceAmt, destAmt string) *types.SwapRoute {
+	chain := append(append([]string{from.ID}, path...), to.ID)
 	hops := make([]types.SwapHop, 0, len(chain)-1)
 	for i := 0; i+1 < len(chain); i++ {
 		hops = append(hops, types.SwapHop{Venue: "stellar-dex", From: chain[i], To: chain[i+1]})
 	}
-	// The fixed side echoes the request; Horizon pads it to 7 decimals.
-	fromAmt, toAmt := req.Amount, best.DestinationAmount
+	// The fixed side echoes the request; upstreams pad it to 7 decimals.
+	fromAmt, toAmt := req.Amount, destAmt
 	if req.Mode == types.SwapModeReceive {
-		fromAmt, toAmt = best.SourceAmount, req.Amount
+		fromAmt, toAmt = sourceAmt, req.Amount
 	}
 	return &types.SwapRoute{
 		Source: classicName, FromAmount: fromAmt, ToAmount: toAmt,
 		Paths: []types.SwapPath{{Share: "1", Hops: hops}}, Fees: []types.SwapFee{},
-	}, nil
+	}
+}
+
+// orderbookFallback means sdex-orderbook gave no answer and Horizon should.
+type orderbookFallback struct {
+	reason string // not_ready | timeout | error
+	err    error
+}
+
+func (e *orderbookFallback) Error() string {
+	return "sdex-orderbook " + e.reason + ": " + e.err.Error()
+}
+func (e *orderbookFallback) Unwrap() error { return e.err }
+
+// orderbookQuote asks sdex-orderbook (github.com/stellar/sdex-orderbook).
+// Only a 200 with positive amounts and a 404 with code no_route are answers;
+// anything else returns *orderbookFallback.
+func (c *ClassicSource) orderbookQuote(parent context.Context, base string, req types.SwapQuoteRequest, from, to Asset) (*types.SwapRoute, error) {
+	limit := orderbookTimeout
+	if dl, ok := parent.Deadline(); ok {
+		limit = min(limit, time.Until(dl)/2)
+	}
+	ctx, cancel := context.WithTimeout(parent, limit)
+	defer cancel()
+	// When the caller's own context is done, Horizon has no time left either.
+	failed := func(err error) error {
+		if parent.Err() != nil {
+			return parent.Err()
+		}
+		if ctx.Err() != nil {
+			return &orderbookFallback{"timeout", err}
+		}
+		return &orderbookFallback{"error", err}
+	}
+	reqBody, err := json.Marshal(map[string]string{
+		"mode": req.Mode, "fromAsset": from.ID, "toAsset": to.ID, "amount": req.Amount,
+	})
+	if err != nil {
+		return nil, &orderbookFallback{"error", err}
+	}
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+"/v1/quote", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, &orderbookFallback{"error", err}
+	}
+	hreq.Header.Set("Content-Type", "application/json")
+	resp, err := c.hc.Do(hreq)
+	if err != nil {
+		return nil, failed(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	body := io.LimitReader(resp.Body, maxUpstreamBody)
+	defer io.Copy(io.Discard, body) //nolint:errcheck
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		// A 404 from a wrong path or a proxy is not an answer.
+		var e struct {
+			Code string `json:"code"`
+		}
+		if derr := json.NewDecoder(body).Decode(&e); derr != nil {
+			return nil, failed(derr)
+		}
+		if e.Code == "no_route" {
+			return nil, ErrNoRoute
+		}
+		return nil, &orderbookFallback{"error", fmt.Errorf("status 404 code %q", e.Code)}
+	case http.StatusServiceUnavailable:
+		return nil, &orderbookFallback{"not_ready", fmt.Errorf("status %d", resp.StatusCode)}
+	case http.StatusGatewayTimeout:
+		return nil, &orderbookFallback{"timeout", fmt.Errorf("status %d", resp.StatusCode)}
+	default:
+		return nil, &orderbookFallback{"error", fmt.Errorf("status %d", resp.StatusCode)}
+	}
+	var q struct {
+		FromAmount string   `json:"fromAmount"`
+		ToAmount   string   `json:"toAmount"`
+		Path       []string `json:"path"`
+	}
+	if err = json.NewDecoder(body).Decode(&q); err != nil {
+		return nil, failed(err)
+	}
+	if len(q.Path) > maxClassicPathHops-1 {
+		return nil, &orderbookFallback{"error", fmt.Errorf("path of %d assets", len(q.Path))}
+	}
+	// The route shows req.Amount on the fixed side, so a quote for any other
+	// amount is not an answer to this request.
+	echo := q.FromAmount
+	if req.Mode == types.SwapModeReceive {
+		echo = q.ToAmount
+	}
+	want, _ := ParseUnits(req.Amount, ClassicDecimals)
+	if got, perr := ParseUnits(echo, ClassicDecimals); perr != nil || want == nil || got.Cmp(want) != 0 {
+		return nil, &orderbookFallback{"error", fmt.Errorf("quoted amount %q for %q", echo, req.Amount)}
+	}
+	for _, p := range q.Path {
+		if a, perr := ParseAsset(p); perr != nil || !a.IsClassic() {
+			return nil, &orderbookFallback{"error", fmt.Errorf("path asset %q", p)}
+		}
+	}
+	rt := classicRoute(req, from, to, q.Path, q.FromAmount, q.ToAmount)
+	for _, amt := range []string{rt.FromAmount, rt.ToAmount} {
+		if v, perr := ParseUnits(amt, ClassicDecimals); perr != nil || v.Sign() <= 0 {
+			return nil, &orderbookFallback{"error", fmt.Errorf("amount %q", amt)}
+		}
+	}
+	return rt, nil
 }
 
 func pickPath(recs []horizonPath, receive bool) *horizonPath {
