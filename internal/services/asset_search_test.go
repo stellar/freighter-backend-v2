@@ -103,6 +103,14 @@ func TestCanonicalAssetSearchParams(t *testing.T) {
 			want: url.Values{"limit": {"50"}},
 		},
 		{
+			// StellarExpert reads a cursor as a whole number, so 007 and 7
+			// are the same page (measured on Testnet: 03 returned the page
+			// after 3).
+			name: "cursor is written canonically",
+			in:   url.Values{"cursor": {" 007 "}},
+			want: url.Values{"cursor": {"7"}},
+		},
+		{
 			name: "limit at the cap is kept",
 			in:   url.Values{"limit": {"100"}},
 			want: url.Values{"limit": {"100"}},
@@ -159,6 +167,15 @@ func TestCanonicalAssetSearchParams_Rejects(t *testing.T) {
 		// StellarExpert would read either of these as true.
 		{"a non-boolean includeUninitialized", url.Values{"includeUninitialized": {"1"}}},
 		{"includeUninitialized in another case", url.Values{"includeUninitialized": {"False"}}},
+		// Paging tokens are whole numbers, and StellarExpert reads anything
+		// else as some other page instead of failing (measured on Testnet:
+		// abc and -1 returned the first page, 1e1 the page after 1).
+		{"a non-numeric cursor", url.Values{"cursor": {"abc"}}},
+		{"a negative cursor", url.Values{"cursor": {"-1"}}},
+		{"a fractional cursor", url.Values{"cursor": {"3.5"}}},
+		{"a signed cursor", url.Values{"cursor": {"+3"}}},
+		{"a cursor in exponent notation", url.Values{"cursor": {"1e1"}}},
+		{"a cursor too large for a whole number", url.Values{"cursor": {"99999999999999999999999"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

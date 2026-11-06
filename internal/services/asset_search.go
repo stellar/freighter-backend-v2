@@ -230,15 +230,18 @@ var ErrInvalidAssetSearchParams = errors.New("invalid asset search parameters")
 // its canonical form. That form is BOTH what is sent upstream and what the
 // cache key is built from, so the cache can never answer one query with
 // another's result. It rewrites only what StellarExpert treats as equal:
-// surrounding spaces, letter case in search text, and a limit above
-// maxLimit, which is clamped the way StellarExpert clamps past a plan's
-// batch size. Empty values carry nothing and are dropped, and so is
-// includeUninitialized=false, which StellarExpert would read as true.
+// surrounding spaces, letter case in search text, leading zeros in limit and
+// cursor, and a limit above maxLimit, which is clamped the way StellarExpert
+// clamps past a plan's batch size. Empty values carry nothing and are
+// dropped, and so is includeUninitialized=false, which StellarExpert would
+// read as true.
 //
 // sort, order and includeUninitialized must be values StellarExpert matches
-// exactly. It answers anything else with its default rather than an error
-// (measured on Testnet: VOLUME7D sorts by rating, ASC sorts descending), so
-// a typo would otherwise quietly return a list nobody asked for.
+// exactly, and cursor a whole number like the paging tokens it issues. It
+// answers anything else with its default rather than an error (measured on
+// Testnet: VOLUME7D sorts by rating, ASC sorts descending, a cursor of abc
+// or -1 returns the first page), so a typo would otherwise quietly return a
+// list nobody asked for.
 func canonicalAssetSearchParams(in url.Values, maxLimit int) (url.Values, error) {
 	out := url.Values{}
 	for key, values := range in {
@@ -267,6 +270,12 @@ func canonicalAssetSearchParams(in url.Values, maxLimit int) (url.Values, error)
 				return nil, fmt.Errorf("%w: limit must be a positive integer", ErrInvalidAssetSearchParams)
 			}
 			value = strconv.Itoa(min(n, maxLimit))
+		case "cursor":
+			n, err := strconv.ParseUint(value, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("%w: cursor must be a non-negative integer", ErrInvalidAssetSearchParams)
+			}
+			value = strconv.FormatUint(n, 10)
 		case "sort":
 			if !slices.Contains(assetSearchSorts, value) {
 				return nil, fmt.Errorf("%w: sort must be one of %s", ErrInvalidAssetSearchParams, strings.Join(assetSearchSorts, ", "))
