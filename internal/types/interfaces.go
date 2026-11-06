@@ -43,6 +43,9 @@ type RPCService interface {
 		network string,
 	) (SimulateTransactionResponse, error)
 	GetLedgerEntries(ctx context.Context, keys []string, network string) ([]LedgerEntryMap, error)
+	// GetLedgerEntriesXDR returns base64 LedgerEntryData keyed by the base64
+	// LedgerKey requested. Entries that don't exist are absent.
+	GetLedgerEntriesXDR(ctx context.Context, keys []string, network string) (map[string]string, error)
 }
 
 type WalletBackendService interface {

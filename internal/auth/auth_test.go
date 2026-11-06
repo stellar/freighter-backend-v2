@@ -285,6 +285,28 @@ func TestParseJWT_FutureNotBeforeIsClockAhead(t *testing.T) {
 	assert.Equal(t, ReasonClockAhead, Reason(err))
 }
 
+// A wrong clock does not free a token from the request it was signed for:
+// permissive serves clock-skewed tokens, so an unbound one would be a reusable
+// credential on routes that require a token.
+func TestParseJWT_ClockSkewedTokenStillBoundToRequest(t *testing.T) {
+	_, priv, sub := newKeypair(t)
+	nbfAhead := validClaims(sub, testMethodAndPath, nil)
+	nbfAhead.NotBefore = jwtgo.NewNumericDate(time.Now().Add(time.Hour))
+	for name, c := range map[string]Claims{
+		"expired":   skewedClaims(sub, testMethodAndPath, nil, -time.Hour),
+		"iat ahead": skewedClaims(sub, testMethodAndPath, nil, time.Hour),
+		"nbf ahead": nbfAhead,
+	} {
+		t.Run(name, func(t *testing.T) {
+			token := mint(t, priv, c)
+			_, err := ParseJWT(token, "POST /api/v1/swap/quotes", nil)
+			assert.Equal(t, ReasonBadMethodPath, Reason(err))
+			_, err = ParseJWT(token, testMethodAndPath, []byte(`{"other":"body"}`))
+			assert.Equal(t, ReasonBadBodyHash, Reason(err))
+		})
+	}
+}
+
 // --- VerifyHTTPRequest ---
 
 func newRequest(t *testing.T, method, target string, body []byte, bearer string) *http.Request {

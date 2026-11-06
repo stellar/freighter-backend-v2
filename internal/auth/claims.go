@@ -61,6 +61,9 @@ func (c *Claims) Validate(methodAndPath string, body []byte, maxLifetime, leeway
 		// diagnostics but leave the server's threshold out of the detail.
 		return &VerificationError{Reason: ReasonBadTiming, Err: fmt.Errorf("token lifetime %s exceeds maximum", lifetime)}
 	}
+	if err := c.checkBinding(methodAndPath, body); err != nil {
+		return err
+	}
 	// Capture a single "now" so the iat/exp future bounds are checked against the
 	// same instant.
 	now := time.Now()
@@ -106,12 +109,18 @@ func (c *Claims) Validate(methodAndPath string, body []byte, maxLifetime, leeway
 		return &ClockAheadError{AheadBy: c.ExpiresAt.Sub(now.Add(maxLifetime)), Issuer: c.Issuer, Err: errors.New("exp is too far in the future")}
 	}
 
+	return nil
+}
+
+// checkBinding reports whether the token was signed for this request. It runs
+// before every clock check: middleware.Auth serves clock-skewed tokens in
+// permissive mode, and an unbound one would be reusable on any request.
+func (c *Claims) checkBinding(methodAndPath string, body []byte) error {
 	if c.MethodAndPath != strings.TrimSpace(methodAndPath) {
 		return &VerificationError{Reason: ReasonBadMethodPath, Err: fmt.Errorf("methodAndPath %q does not match expected %q", c.MethodAndPath, methodAndPath)}
 	}
 	if c.BodyHash != HashBody(body) {
 		return &VerificationError{Reason: ReasonBadBodyHash, Err: errors.New("bodyHash does not match request body")}
 	}
-
 	return nil
 }
