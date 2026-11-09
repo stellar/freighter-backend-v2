@@ -47,6 +47,10 @@ func lifiServerRPC(t *testing.T, status int, body []byte, rpc types.RPCService) 
 type fakeDecimalsRPC struct {
 	utils.MockRPCService
 	fn func(contract string) (*xdr.ScVal, error)
+	// names answers name() simulations, counted in nameCalls; nil means no
+	// contract has a name(). Kept apart so decimals() assertions are unaffected.
+	names     func(contract string) (*xdr.ScVal, error)
+	nameCalls map[string]int
 	// ledger answers GetLedgerEntriesXDR; nil means every entry is missing.
 	ledger func(keys []string) (map[string]string, error)
 
@@ -69,6 +73,18 @@ func (f *fakeDecimalsRPC) SimulateInvocation(ctx context.Context, id xdr.ScAddre
 	_ []xdr.ScVal, _ txnbuild.TimeBounds, network string,
 ) (types.SimulateTransactionResponse, error) {
 	contract := addrString(id)
+	if fn == "name" {
+		f.mu.Lock()
+		if f.nameCalls == nil {
+			f.nameCalls = map[string]int{}
+		}
+		f.nameCalls[contract]++
+		f.mu.Unlock()
+		if f.names == nil {
+			return nil, &metrics.UpstreamError{Kind: "simulation_error", Err: errors.New("no name()")}
+		}
+		return f.names(contract)
+	}
 	f.mu.Lock()
 	f.ctx = ctx
 	if f.calls == nil {
@@ -808,6 +824,7 @@ func slippageRecorder(t *testing.T, env xdr.TransactionEnvelope, body []byte) (*
 		PartnerID:    lifiPartnerID,
 		Aggregator:   lifiAggregator,
 		Now:          func() time.Time { return time.Unix(maxTime-300, 0) },
+		RPC:          &fakeDecimalsRPC{fn: decimalsOf(7)},
 	}, nil), &got
 }
 

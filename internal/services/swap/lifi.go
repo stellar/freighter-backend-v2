@@ -86,6 +86,7 @@ type LifiSource struct {
 	m        *metrics.Swap
 	decimals sync.Map // contract → int
 	sac      sync.Map // contract → bool: a non-native Stellar Asset Contract
+	labels   sync.Map // contract → its SAC's asset ID, or "" if it is not one
 }
 
 func NewLifiSource(cfg LifiConfig, m *metrics.Swap) *LifiSource {
@@ -172,11 +173,13 @@ func (s *LifiSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (*ty
 		}
 		fees = append(fees, types.SwapFee{Name: name, Amount: FormatUnits(amt, fromDecimals), Asset: req.FromAsset})
 	}
+	paths := lifiPaths(call, from, to, fromContract, toContract, s.m)
+	s.labelSACHops(ctx, req.Account, req.Network, from, to, paths)
 	return &types.SwapRoute{
 		Source:     lifiName,
 		FromAmount: req.Amount,
 		ToAmount:   FormatUnits(toAmount, toDecimals),
-		Paths:      lifiPaths(call, from, to, fromContract, toContract, s.m),
+		Paths:      paths,
 		Fees:       fees,
 	}, nil
 }
