@@ -1000,3 +1000,26 @@ func mustLifiCall(t *testing.T, env xdr.TransactionEnvelope) *lifiCall {
 	require.NoError(t, err)
 	return call
 }
+
+// LI.FI returns its transaction already simulated; the quote passes on the
+// resource fee it carries so clients can show the total before /swap/tx.
+func TestLifiQuoteResourceFee(t *testing.T) {
+	for name, want := range map[string]string{
+		"lifi_quote_xlm_usdc_trust.json": "0.0858459",
+		"lifi_quote_xlm_eurc_split.json": "0.0889579",
+		"lifi_quote_xlm_usdc_100k.json":  "0.0829193",
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := lifiFixture(t, name)
+			var q LifiQuote
+			require.NoError(t, json.Unmarshal(body, &q))
+			req := lifiReq(fmtRaw(t, q.Action.FromAmount, 7))
+			if name == "lifi_quote_xlm_eurc_split.json" {
+				req.ToAsset = eurcContract
+			}
+			rt, err := lifiServer(t, 200, body).Quote(context.Background(), req)
+			require.NoError(t, err)
+			assert.Equal(t, want, rt.ResourceFee)
+		})
+	}
+}
