@@ -191,8 +191,9 @@ func (r *Router) Build(ctx context.Context, req types.SwapBuildRequest) (types.S
 			defer recoverSource(s.Name(), "build", &err)
 			return s.BuildTx(bctx, req)
 		}()
+		timedOut := errors.Is(bctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded)
 		cancel()
-		if cerr := ctx.Err(); cerr != nil {
+		if cerr := ctx.Err(); cerr != nil && !timedOut {
 			return types.SwapBuildResponse{}, cerr
 		}
 		metrics.RecordSwapSource(r.m, s.Name(), "build", Reason(err))

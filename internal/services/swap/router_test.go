@@ -30,8 +30,9 @@ type fakeSource struct {
 	delay    time.Duration
 	buildXDR string
 	buildErr error
-	// buildBlock makes BuildTx wait for ctx to end.
+	// buildBlock makes BuildTx wait for ctx to end, then call afterBlock.
 	buildBlock bool
+	afterBlock func()
 	panics     bool
 	calls      int
 	builds     int
@@ -51,6 +52,9 @@ func (f *fakeSource) BuildTx(ctx context.Context, _ types.SwapBuildRequest) (str
 	}
 	if f.buildBlock {
 		<-ctx.Done()
+		if f.afterBlock != nil {
+			f.afterBlock()
+		}
 		return "", ctx.Err()
 	}
 	return f.buildXDR, f.buildErr
@@ -311,6 +315,20 @@ func TestRouterBuildParentCancelled(t *testing.T) {
 	_, err := r.Build(ctx, types.SwapBuildRequest{Network: types.PUBLIC, Source: "lifi"})
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, 0, testutil.CollectAndCount(m.SourceRequests))
+}
+
+// The client leaving as the build budget runs out is still our timeout.
+func TestRouterBuildDeadlineWinsOverParentCancel(t *testing.T) {
+	t.Parallel()
+	m := metrics.NewSwap(prometheus.NewRegistry())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	src := &fakeSource{name: "lifi", buildBlock: true, afterBlock: cancel}
+	r := NewRouter([]Source{src}, time.Second, 20*time.Millisecond, m)
+	_, err := r.Build(ctx, types.SwapBuildRequest{Network: types.PUBLIC, Source: "lifi"})
+	require.Error(t, ctx.Err())
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.SourceRequests.WithLabelValues("lifi", "build", "timeout")))
 }
 
 // Not parallel: it swaps the global logger's output.
