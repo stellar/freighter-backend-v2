@@ -231,9 +231,9 @@ func TestAccountAggregate(t *testing.T) {
 }
 
 func TestMapBackstop(t *testing.T) {
-	name := "TestnetV2"
+	name := "Testnet v2.1"
 	rows := mapBackstop([]wbtypes.BlendBackstopPosition{{
-		PoolAddress:         "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF",
+		PoolAddress:         "CB3447A446DY3USGWPIDXTNQHF5EX24XDQA2EN6TAZP62JTPBTNOA52Q",
 		PoolName:            &name,
 		Shares:              "1000000",
 		LpTokens:            "1100000",
@@ -263,11 +263,11 @@ func TestMapBackstop(t *testing.T) {
 }
 
 func TestGetAccountsPositionsMapsAndPassesThrough(t *testing.T) {
-	name := "TestnetV2"
+	name := "Testnet v2.1"
 	mockWB := &utils.MockWalletBackendService{
 		GetBlendPositionsResult: &wbtypes.BlendAccountPositions{
 			Pools: []wbtypes.BlendPoolPosition{{
-				PoolAddress: "CCEBVDYMCCECIVWVOJSKUNLTVDIRLTRUCVZDVLKXKQZWSCF3DVQGJVIX",
+				PoolAddress: "CB3447A446DY3USGWPIDXTNQHF5EX24XDQA2EN6TAZP62JTPBTNOA52Q",
 				PoolName:    &name,
 				UsdValue:    f64(3619.267393206),
 				SuppliedUsd: f64(3619.287393206),
@@ -288,9 +288,9 @@ func TestGetAccountsPositionsMapsAndPassesThrough(t *testing.T) {
 	require.Len(t, got.Positions, 1)
 	row := got.Positions[0]
 	assert.Equal(t, "blend", row.Protocol)
-	assert.Equal(t, "CCEBVDYMCCECIVWVOJSKUNLTVDIRLTRUCVZDVLKXKQZWSCF3DVQGJVIX", row.ID)
+	assert.Equal(t, "CB3447A446DY3USGWPIDXTNQHF5EX24XDQA2EN6TAZP62JTPBTNOA52Q", row.ID)
 	require.NotNil(t, row.Name)
-	assert.Equal(t, "TestnetV2", *row.Name)
+	assert.Equal(t, "Testnet v2.1", *row.Name)
 	require.NotNil(t, row.NetUSD)
 	assert.InDelta(t, 3619.267393206, *row.NetUSD, 1e-9)
 	require.NotNil(t, row.Blend)
