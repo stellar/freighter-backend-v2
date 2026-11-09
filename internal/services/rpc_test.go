@@ -475,6 +475,45 @@ func TestRPCService_SimulateInvocation(t *testing.T) {
 		assert.Equal(t, xdr.ScValTypeScvI64, resp.Type)
 		assert.Equal(t, val, *resp.I64)
 	})
+
+	// Every non-contract ScAddress arm leaves ContractId nil; SimulateInvocation must
+	// reject it with an error (not panic) before any RPC call is made.
+	accountKey := xdr.MustAddress(account.Address())
+	nonContractAddresses := map[string]xdr.ScAddress{
+		"account (G)": {
+			Type:      xdr.ScAddressTypeScAddressTypeAccount,
+			AccountId: &accountKey,
+		},
+		"muxed account (M)": {
+			Type:         xdr.ScAddressTypeScAddressTypeMuxedAccount,
+			MuxedAccount: &xdr.MuxedEd25519Account{Id: 1, Ed25519: *accountKey.Ed25519},
+		},
+		"muxed contract (W)": {
+			Type:          xdr.ScAddressTypeScAddressTypeMuxedContract,
+			MuxedContract: &xdr.MuxedContract{Id: 1, ContractId: contractHash},
+		},
+	}
+	for name, addr := range nonContractAddresses {
+		t.Run("rejects non-contract address: "+name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			defer server.Close()
+
+			service := NewRPCService(server.URL, server.URL, server.URL, nil)
+			var resp types.SimulateTransactionResponse
+			var err error
+			require.NotPanics(t, func() {
+				resp, err = service.SimulateInvocation(context.Background(), addr, sourceAccount, "get_metadata", []xdr.ScVal{}, timeout, "PUBLIC")
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid contract ID")
+			assert.Nil(t, resp)
+			assert.Equal(t, int32(0), calls.Load(), "no RPC call should be made for a non-contract address")
+		})
+	}
 }
 
 func TestNewRPCService_GetLedgerEntry(t *testing.T) {

@@ -2,6 +2,8 @@ package utils
 
 import (
 	"context"
+	"encoding/json"
+	"net/url"
 
 	"github.com/stellar/go-stellar-sdk/clients/rpcclient"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
@@ -212,6 +214,28 @@ func (m *MockPriceHistoryService) GetPriceHistory(ctx context.Context, canonical
 		return m.GetPriceHistoryOverride, nil
 	}
 	return &types.TokenPriceHistory{Range: historyRange, Currency: "USD", Points: []types.PricePoint{}}, nil
+}
+
+// MockAssetSearchService answers SearchAssets with Body or Err and records
+// what it was called with.
+type MockAssetSearchService struct {
+	Body        json.RawMessage
+	Err         error
+	Calls       int
+	LastNetwork string
+	LastParams  url.Values
+}
+
+func (m *MockAssetSearchService) Name() string { return "mock-asset-search" }
+
+func (m *MockAssetSearchService) SearchAssets(ctx context.Context, network string, params url.Values) (json.RawMessage, error) {
+	m.Calls++
+	m.LastNetwork = network
+	m.LastParams = params
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return m.Body, nil
 }
 
 type MockTokenStatsService struct {
