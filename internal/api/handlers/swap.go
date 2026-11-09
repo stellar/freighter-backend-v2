@@ -181,8 +181,10 @@ func (h *SwapHandler) Build(w http.ResponseWriter, r *http.Request) error {
 
 func mapSwapError(err error, build bool) *httperror.HttpError {
 	switch {
-	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+	case errors.Is(err, context.DeadlineExceeded):
 		return httperror.ServiceUnavailable("swap temporarily unavailable", err)
+	case errors.Is(err, context.Canceled):
+		return httperror.ClientClosedRequest("client closed request", err)
 	case errors.Is(err, swap.ErrAllSourcesFailed):
 		return httperror.BadGateway("swap sources unavailable", err)
 	case errors.Is(err, swap.ErrAccountNotFound):

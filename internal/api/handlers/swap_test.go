@@ -187,7 +187,7 @@ func TestSwapQuotes_ErrorMapping(t *testing.T) {
 		"bad request":   {swap.ErrBadRequest, http.StatusBadRequest},
 		"unsupported":   {fmt.Errorf("lifi: %w", swap.ErrUnsupportedToken), http.StatusBadRequest},
 		"deadline":      {context.DeadlineExceeded, http.StatusServiceUnavailable},
-		"canceled":      {context.Canceled, http.StatusServiceUnavailable},
+		"canceled":      {context.Canceled, 499},
 		"other":         {errors.New("boom"), http.StatusInternalServerError},
 		"wrapped moved": {fmt.Errorf("x: %w", swap.ErrQuoteMoved), http.StatusConflict},
 	}
@@ -344,6 +344,8 @@ func TestSwapBuild_ErrorMapping(t *testing.T) {
 		"upstream error":       {fmt.Errorf("lifi: %w", &metrics.UpstreamError{Kind: "http_error", Code: 424, Err: errors.New("x")}), http.StatusBadGateway},
 		"rate limited":         {swap.ErrRateLimited, http.StatusBadGateway},
 		"deadline":             {context.DeadlineExceeded, http.StatusServiceUnavailable},
+		"upstream deadline":    {&metrics.UpstreamError{Kind: "http_error", Err: fmt.Errorf("lifi /quote: %w", context.DeadlineExceeded)}, http.StatusServiceUnavailable},
+		"canceled":             {context.Canceled, 499},
 		"other":                {errors.New("boom"), http.StatusInternalServerError},
 	}
 	for name, tc := range cases {
