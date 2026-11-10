@@ -65,6 +65,7 @@ func TestClassicQuoteSend(t *testing.T) {
 		assert.Empty(t, h.Pool)
 	}
 	assert.Empty(t, rt.Fees)
+	assert.Empty(t, rt.ResourceFee, "a classic route's fee is the inclusion fee alone")
 }
 
 // The default client keeps a pool wide enough for a burst: Go's default

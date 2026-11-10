@@ -41,6 +41,9 @@ type SwapRoute struct {
 	ToAmount   string     `json:"toAmount"`
 	Paths      []SwapPath `json:"paths"`
 	Fees       []SwapFee  `json:"fees"`
+	// ResourceFee is the Soroban resource fee in XLM, from a transaction the
+	// source already simulated; the fee before review is it plus the inclusion fee.
+	ResourceFee string `json:"resourceFee,omitempty"`
 }
 
 type SwapUnavailable struct {

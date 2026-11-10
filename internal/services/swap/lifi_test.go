@@ -808,6 +808,7 @@ func slippageRecorder(t *testing.T, env xdr.TransactionEnvelope, body []byte) (*
 		PartnerID:    lifiPartnerID,
 		Aggregator:   lifiAggregator,
 		Now:          func() time.Time { return time.Unix(maxTime-300, 0) },
+		RPC:          &fakeDecimalsRPC{fn: decimalsOf(7)},
 	}, nil), &got
 }
 
@@ -982,4 +983,59 @@ func mustLifiCall(t *testing.T, env xdr.TransactionEnvelope) *lifiCall {
 	call, err := decodeLifiCall(env)
 	require.NoError(t, err)
 	return call
+}
+
+// LI.FI returns its transaction already simulated; the quote passes on the
+// resource fee it carries so clients can show the total before /swap/tx.
+func TestLifiQuoteResourceFee(t *testing.T) {
+	for name, want := range map[string]string{
+		"lifi_quote_xlm_usdc_trust.json": "0.0858459",
+		"lifi_quote_xlm_eurc_split.json": "0.0889579",
+		"lifi_quote_xlm_usdc_100k.json":  "0.0829193",
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := lifiFixture(t, name)
+			var q LifiQuote
+			require.NoError(t, json.Unmarshal(body, &q))
+			req := lifiReq(fmtRaw(t, q.Action.FromAmount, 7))
+			if name == "lifi_quote_xlm_eurc_split.json" {
+				req.ToAsset = eurcContract
+			}
+			rt, err := lifiServer(t, 200, body).Quote(context.Background(), req)
+			require.NoError(t, err)
+			assert.Equal(t, want, rt.ResourceFee)
+		})
+	}
+}
+
+// /swap/tx refuses a LI.FI transaction without a usable resource fee, so the
+// quote must not offer a route that can never build.
+func TestLifiQuoteRefusesTransactionWithoutResourceFee(t *testing.T) {
+	for name, mutate := range map[string]func(*xdr.TransactionEnvelope){
+		"no SorobanData": func(env *xdr.TransactionEnvelope) {
+			env.V1.Tx.Ext = xdr.TransactionExt{V: 0}
+		},
+		"negative resource fee": func(env *xdr.TransactionEnvelope) {
+			env.V1.Tx.Ext.SorobanData.ResourceFee = -1
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var raw map[string]any
+			require.NoError(t, json.Unmarshal(lifiFixture(t, "lifi_quote_xlm_usdc_trust.json"), &raw))
+			txReq := raw["transactionRequest"].(map[string]any)
+			var env xdr.TransactionEnvelope
+			require.NoError(t, xdr.SafeUnmarshalBase64(txReq["data"].(string), &env))
+			mutate(&env)
+			b64, err := xdr.MarshalBase64(env)
+			require.NoError(t, err)
+			txReq["data"] = b64
+			body, err := json.Marshal(raw)
+			require.NoError(t, err)
+
+			var q LifiQuote
+			require.NoError(t, json.Unmarshal(body, &q))
+			_, err = lifiServer(t, 200, body).Quote(context.Background(), lifiReq(fmtRaw(t, q.Action.FromAmount, 7)))
+			require.Error(t, err)
+		})
+	}
 }

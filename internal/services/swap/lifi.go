@@ -86,6 +86,7 @@ type LifiSource struct {
 	m        *metrics.Swap
 	decimals sync.Map // contract → int
 	sac      sync.Map // contract → bool: a non-native Stellar Asset Contract
+	labels   sync.Map // contract → its SAC's asset ID, or "" if it is not one
 }
 
 func NewLifiSource(cfg LifiConfig, m *metrics.Swap) *LifiSource {
@@ -172,12 +173,20 @@ func (s *LifiSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (*ty
 		}
 		fees = append(fees, types.SwapFee{Name: name, Amount: FormatUnits(amt, fromDecimals), Asset: req.FromAsset})
 	}
+	paths := lifiPaths(call, from, to, fromContract, toContract, s.m)
+	s.labelSACHops(ctx, req.Network, from, to, paths)
+	// BuildTx refuses this envelope too, so the route could never build.
+	if env.V1 == nil || env.V1.Tx.Ext.SorobanData == nil || env.V1.Tx.Ext.SorobanData.ResourceFee < 0 {
+		return nil, fmt.Errorf("lifi: transaction has no usable resource fee")
+	}
+	resourceFee := FormatUnits(big.NewInt(int64(env.V1.Tx.Ext.SorobanData.ResourceFee)), ClassicDecimals)
 	return &types.SwapRoute{
-		Source:     lifiName,
-		FromAmount: req.Amount,
-		ToAmount:   FormatUnits(toAmount, toDecimals),
-		Paths:      lifiPaths(call, from, to, fromContract, toContract, s.m),
-		Fees:       fees,
+		Source:      lifiName,
+		FromAmount:  req.Amount,
+		ToAmount:    FormatUnits(toAmount, toDecimals),
+		Paths:       paths,
+		Fees:        fees,
+		ResourceFee: resourceFee,
 	}, nil
 }
 
@@ -265,18 +274,9 @@ func (s *LifiSource) toClassic(ctx context.Context, net string, to Asset) (bool,
 	if v, ok := s.sac.Load(to.Contract); ok {
 		return v.(bool), nil
 	}
-	addr, err := utils.ScAddressFromString(to.Contract)
+	keyB64, err := instanceKey(to.Contract)
 	if err != nil {
 		return false, fmt.Errorf("%w: %v", ErrBadRequest, err)
-	}
-	key := xdr.LedgerKey{Type: xdr.LedgerEntryTypeContractData, ContractData: &xdr.LedgerKeyContractData{
-		Contract:   *addr,
-		Key:        xdr.ScVal{Type: xdr.ScValTypeScvLedgerKeyContractInstance},
-		Durability: xdr.ContractDataDurabilityPersistent,
-	}}
-	keyB64, err := xdr.MarshalBase64(key)
-	if err != nil {
-		return false, err
 	}
 	entries, err := s.cfg.RPC.GetLedgerEntriesXDR(ctx, []string{keyB64}, net)
 	if err != nil {
@@ -408,4 +408,17 @@ func (s *LifiSource) BuildTx(ctx context.Context, req types.SwapBuildRequest) (s
 	}
 	env.V1.Signatures = nil
 	return xdr.MarshalBase64(env)
+}
+
+// instanceKey is the base64 ledger key of a contract's instance entry.
+func instanceKey(contract string) (string, error) {
+	addr, err := utils.ScAddressFromString(contract)
+	if err != nil {
+		return "", err
+	}
+	return xdr.MarshalBase64(xdr.LedgerKey{Type: xdr.LedgerEntryTypeContractData, ContractData: &xdr.LedgerKeyContractData{
+		Contract:   *addr,
+		Key:        xdr.ScVal{Type: xdr.ScValTypeScvLedgerKeyContractInstance},
+		Durability: xdr.ContractDataDurabilityPersistent,
+	}})
 }
