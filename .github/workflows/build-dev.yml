@@ -9,6 +9,14 @@ name: Build and push freighter-backend-v2 (dev)
 
 on:
   workflow_dispatch:
+    inputs:
+      deploy_to_dev:
+        description: >-
+          Also deploy this image to the SHARED wallet-eng-dev environment.
+          Leave unchecked for sandbox/preview builds — the sandbox pins the
+          plain <sha> tag either way and does not need this.
+        type: boolean
+        default: false
 
 permissions:
   id-token: write
@@ -32,15 +40,43 @@ jobs:
         id: ecr-login
         uses: stellar/actions/sdf-ecr-login@main
 
+      # The plain <sha> tag is what per-engineer sandboxes pin, and is always
+      # pushed. The `dev-` prefixed tag is what the shared wallet-eng-dev
+      # ArgoCD ImageUpdater watches (allowTags: regexp:^dev-), so it is pushed
+      # only when this build explicitly opts in.
+      #
+      # Before this split, the updater followed the plain <sha> tags with
+      # newest-build and no filter, which meant ANY branch build captured
+      # shared dev — and, because forceUpdate re-asserts within seconds, could
+      # not be released by rebuilding main or by editing the pin by hand.
       - name: Build and push docker image
+        id: push
         env:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.ecr-registry }}
           LABEL: ${{ steps.vars.outputs.label }}
+          DEPLOY_TO_DEV: ${{ inputs.deploy_to_dev }}
         run: |
           set -eu
           export TAG="${ECR_REGISTRY}/dev/freighter-backend-v2:${LABEL}"
           make docker-build-tag
           ecr-push "${TAG}"
+
+          # `summary` is built by whichever branch actually ran, so the Slack
+          # message cannot drift from what was really pushed. Keep it on one
+          # line and free of double quotes — it is interpolated into the JSON
+          # payload below.
+          if [ "${DEPLOY_TO_DEV}" = "true" ]; then
+            DEV_TAG="${ECR_REGISTRY}/dev/freighter-backend-v2:dev-${LABEL}"
+            docker tag "${TAG}" "${DEV_TAG}"
+            ecr-push "${DEV_TAG}"
+            echo "Pushed ${TAG} and ${DEV_TAG}."
+            echo "The dev- tag is the one shared wallet-eng-dev follows."
+            echo "summary=pushed \`${LABEL}\` and \`dev-${LABEL}\` (opted in to shared wallet-eng-dev)" >> "$GITHUB_OUTPUT"
+          else
+            echo "Pushed ${TAG}. No dev- tag was published."
+            echo "Pin this tag in your sandbox."
+            echo "summary=pushed \`${LABEL}\` (no dev- tag; shared dev not targeted)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Slack notification — success
         if: success()
@@ -51,7 +87,7 @@ jobs:
           payload: |
             {
               "channel": "${{ env.SLACK_CHANNEL }}",
-              "text": "Freighter backend V2 *dev* build complete for ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}."
+              "text": "Freighter backend V2 *dev* build complete for ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }} — ${{ steps.push.outputs.summary }}."
             }
 
       - name: Slack notification — failure

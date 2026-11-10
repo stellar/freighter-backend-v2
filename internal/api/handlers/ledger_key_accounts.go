@@ -16,6 +16,7 @@ import (
 
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
+	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
@@ -171,7 +172,8 @@ func (h *LedgerKeyAccountHandler) GetLedgerKeyAccounts(w http.ResponseWriter, r 
 	ledgerKeyAccountsRpcData, e := h.RpcService.GetLedgerEntries(contextWithTimeout, ledgerKeyAccountKeys.LedgerKeys, network)
 
 	if e != nil && ledgerKeyAccountKeysError.ErrorMessage == "" {
-		ledgerKeyAccountError = LedgerKeyAccountError{ErrorMessage: e.Error()}
+		logger.ErrorWithContext(contextWithTimeout, "fetching ledger entries from RPC", "network", network, "error", e)
+		ledgerKeyAccountError = LedgerKeyAccountError{ErrorMessage: "unable to fetch ledger accounts"}
 	}
 
 	processedLedgerKeyAccountsMap, processedLedgerKeyAccountsError := processLedgerKeyAccountsEntries(deduplicatedPublicKeys.ToSlice(), ledgerKeyAccountsRpcData)

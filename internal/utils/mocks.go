@@ -2,23 +2,26 @@ package utils
 
 import (
 	"context"
+	"encoding/json"
+	"net/url"
 
-	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
-
-	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/go-stellar-sdk/clients/rpcclient"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
+	wbtypes "github.com/stellar/wallet-backend/pkg/wbclient/types"
+
+	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
 type MockRPCService struct {
-	SimulateError          error
-	SimulateResultOverride *xdr.ScVal
-	SimulatePanic          bool
-	TokenURIOverride       string
-	GetLedgerEntryOverride []types.LedgerEntryMap
-	GetLedgerEntryError    error
-	GetHealthFunc          func(network string) (types.GetHealthResponse, error)
+	SimulateError           error
+	SimulateResultOverride  *xdr.ScVal
+	SimulatePanic           bool
+	TokenURIOverride        string
+	GetLedgerEntryOverride  []types.LedgerEntryMap
+	GetLedgerEntryError     error
+	GetLedgerEntriesXDRFunc func(keys []string, network string) (map[string]string, error)
+	GetHealthFunc           func(network string) (types.GetHealthResponse, error)
 }
 
 func (m *MockRPCService) ConfigureNetworkClient(network string) *rpcclient.Client {
@@ -103,6 +106,13 @@ func (m *MockRPCService) GetLedgerEntries(ctx context.Context, keys []string, ne
 
 	if m.GetLedgerEntryError != nil {
 		return nil, m.GetLedgerEntryError
+	}
+	return nil, nil
+}
+
+func (m *MockRPCService) GetLedgerEntriesXDR(ctx context.Context, keys []string, network string) (map[string]string, error) {
+	if m.GetLedgerEntriesXDRFunc != nil {
+		return m.GetLedgerEntriesXDRFunc(keys, network)
 	}
 	return nil, nil
 }
@@ -262,4 +272,78 @@ func (m *MockPricesService) GetPrices(ctx context.Context, tokens []string, netw
 		return m.GetPricesOverride, nil
 	}
 	return map[string]*types.PriceEntry{}, nil
+}
+
+type MockPriceHistoryService struct {
+	GetPriceHistoryFunc     func(ctx context.Context, canonical, network, historyRange string) (*types.TokenPriceHistory, error)
+	GetPriceHistoryOverride *types.TokenPriceHistory
+	GetPriceHistoryError    error
+	LastCanonical           string
+	LastNetwork             string
+	LastRange               string
+}
+
+func (m *MockPriceHistoryService) Name() string { return "mock-price-history" }
+
+func (m *MockPriceHistoryService) GetPriceHistory(ctx context.Context, canonical, network, historyRange string) (*types.TokenPriceHistory, error) {
+	m.LastCanonical = canonical
+	m.LastNetwork = network
+	m.LastRange = historyRange
+	if m.GetPriceHistoryFunc != nil {
+		return m.GetPriceHistoryFunc(ctx, canonical, network, historyRange)
+	}
+	if m.GetPriceHistoryError != nil {
+		return nil, m.GetPriceHistoryError
+	}
+	if m.GetPriceHistoryOverride != nil {
+		return m.GetPriceHistoryOverride, nil
+	}
+	return &types.TokenPriceHistory{Range: historyRange, Currency: "USD", Points: []types.PricePoint{}}, nil
+}
+
+// MockAssetSearchService answers SearchAssets with Body or Err and records
+// what it was called with.
+type MockAssetSearchService struct {
+	Body        json.RawMessage
+	Err         error
+	Calls       int
+	LastNetwork string
+	LastParams  url.Values
+}
+
+func (m *MockAssetSearchService) Name() string { return "mock-asset-search" }
+
+func (m *MockAssetSearchService) SearchAssets(ctx context.Context, network string, params url.Values) (json.RawMessage, error) {
+	m.Calls++
+	m.LastNetwork = network
+	m.LastParams = params
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return m.Body, nil
+}
+
+type MockTokenStatsService struct {
+	GetTokenStatsFunc     func(ctx context.Context, canonical, network string) (*types.TokenStats, error)
+	GetTokenStatsOverride *types.TokenStats
+	GetTokenStatsError    error
+	LastCanonical         string
+	LastNetwork           string
+}
+
+func (m *MockTokenStatsService) Name() string { return "mock-token-stats" }
+
+func (m *MockTokenStatsService) GetTokenStats(ctx context.Context, canonical, network string) (*types.TokenStats, error) {
+	m.LastCanonical = canonical
+	m.LastNetwork = network
+	if m.GetTokenStatsFunc != nil {
+		return m.GetTokenStatsFunc(ctx, canonical, network)
+	}
+	if m.GetTokenStatsError != nil {
+		return nil, m.GetTokenStatsError
+	}
+	if m.GetTokenStatsOverride != nil {
+		return m.GetTokenStatsOverride, nil
+	}
+	return &types.TokenStats{}, nil
 }

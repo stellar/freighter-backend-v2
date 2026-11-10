@@ -87,6 +87,11 @@ func GatewayTimeout(message string, err error) *HttpError {
 	return NewHttpError(message, err, http.StatusGatewayTimeout, nil)
 }
 
+// ClientClosedRequest creates a 499 (nginx convention: the client hung up before the response)
+func ClientClosedRequest(message string, err error) *HttpError {
+	return NewHttpError(message, err, 499, nil)
+}
+
 // WithExtras adds extra data to any HttpError
 func WithExtras(err *HttpError, extras map[string]interface{}) *HttpError {
 	err.Extras = extras

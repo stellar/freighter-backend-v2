@@ -14,10 +14,13 @@ type Config struct {
 	DatabaseConfig      DatabaseConfig
 	HorizonConfig       HorizonConfig
 	PricesConfig        PricesConfig
+	PriceHistoryConfig  PriceHistoryConfig
+	AssetSearchConfig   AssetSearchConfig
 	BlockaidConfig      BlockaidConfig
 	CoinbaseConfig      CoinbaseConfig
 	WalletBackendConfig WalletBackendConfig
 	BlendConfig         BlendConfig
+	SwapConfig          SwapConfig
 }
 
 type AppConfig struct {
@@ -133,8 +136,19 @@ func (c DatabaseConfig) ValidatePoolConfig() error {
 }
 
 type HorizonConfig struct {
-	HorizonPubnetURL  string
-	HorizonTestnetURL string
+	HorizonPubnetURL    string
+	HorizonTestnetURL   string
+	HorizonFuturenetURL string
+}
+
+type SwapConfig struct {
+	LifiEnabled          bool
+	SourceTimeoutSeconds int
+	LifiAPIKey           string
+
+	SdexOrderbookPubnetURL    string
+	SdexOrderbookTestnetURL   string
+	SdexOrderbookFuturenetURL string
 }
 
 type PricesConfig struct {
@@ -146,6 +160,52 @@ type PricesConfig struct {
 	PriceFetchTimeoutSeconds  int
 	MaxTokensPerRequest       int
 	MaxConcurrentPriceFetches int
+}
+
+// AssetSearchConfig tunes GET /api/v1/assets/search, the cached StellarExpert
+// /asset proxy. Values are env-var backed (flag-name upper-snake) and
+// fail-fast validated in the serve command's PersistentPreRunE.
+type AssetSearchConfig struct {
+	// CacheTTLSeconds is how long one query's answer is reused
+	// (assetsearch:v1 entries). StellarExpert bills every call, so this sets
+	// the price of a popular query: one paid call per window.
+	CacheTTLSeconds int
+	// EmptyCacheTTLSeconds is how long an answer with no records is reused,
+	// so a token searched before StellarExpert indexes it shows up soon
+	// after. The service caps it at CacheTTLSeconds.
+	EmptyCacheTTLSeconds int
+	// MaxLimit is the largest `limit` forwarded upstream; larger values are
+	// clamped to it. The cost of one call grows with it.
+	MaxLimit int
+}
+
+// PriceHistoryConfig tunes the token-price-history and token-stats
+// endpoints. All values are env-var backed (flag-name upper-snake) and
+// fail-fast validated in the serve command's PersistentPreRunE.
+type PriceHistoryConfig struct {
+	// Per-range Redis TTLs (seconds) for pricehistory:v1 series entries.
+	// The defaults come from services.DefaultRangeCacheTTLSeconds rather
+	// than being restated here, and are pinned by the serve flag-default
+	// test; that function's doc comment carries the design-doc rationale.
+	CacheTTL1HSeconds  int
+	CacheTTL1DSeconds  int
+	CacheTTL1WSeconds  int
+	CacheTTL1MSeconds  int
+	CacheTTL1YSeconds  int
+	CacheTTLALLSeconds int
+	// FetchTimeoutSeconds bounds each upstream Stellar Expert fetch.
+	FetchTimeoutSeconds int
+	// MinVolume7dUSD is the §4.4 low-volume warning threshold in USD
+	// (0 disables the guard).
+	MinVolume7dUSD float64
+	// Volume7dConversionDivisor converts the raw upstream volume7d into USD
+	// (raw ÷ divisor). Stellar Expert reports it as USD scaled by 1e7, the
+	// default. 0 disables the conversion and makes the lowVolume verdict
+	// NULL — with no conversion there is no check to pass, and a false
+	// would assert one that never ran.
+	Volume7dConversionDivisor float64
+	// TokenStatsCacheTTLSeconds is the tokenstats:v1 asset-payload cache TTL.
+	TokenStatsCacheTTLSeconds int
 }
 
 type BlockaidConfig struct {

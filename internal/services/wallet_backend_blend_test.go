@@ -72,7 +72,7 @@ func TestGetBlendPositions(t *testing.T) {
 							}]
 						}],
 						"backstop": [],
-						"backstopClaimedLp": "0"
+						"backstopClaimed": []
 					}
 				}
 			}}`))
@@ -114,13 +114,16 @@ func TestGetBlendPools(t *testing.T) {
 		var req wbclient.GraphQLRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 		assert.Contains(t, req.Query, "blendPools")
-		_, _ = w.Write([]byte(`{"data": {"blendPools": [{
-			"address": "CB3447A446DY3USGWPIDXTNQHF5EX24XDQA2EN6TAZP62JTPBTNOA52Q",
-			"name": "Testnet v2.1",
-			"status": "ACTIVE",
-			"suppliedUsd": 2100000.5,
-			"reserves": []
-		}]}}`))
+		_, _ = w.Write([]byte(`{"data": {"blendPools": {
+			"edges": [{"cursor": "c1", "node": {
+				"address": "CB3447A446DY3USGWPIDXTNQHF5EX24XDQA2EN6TAZP62JTPBTNOA52Q",
+				"name": "Testnet v2.1",
+				"status": "ACTIVE",
+				"suppliedUsd": 2100000.5,
+				"reserves": []
+			}}],
+			"pageInfo": {"endCursor": "c1", "hasNextPage": false, "hasPreviousPage": false}
+		}}}`))
 	})
 
 	pools, err := svc.GetBlendPools(ctx, types.TESTNET)
@@ -181,7 +184,7 @@ func TestBlendRequestIsSigned(t *testing.T) {
 	var gotAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
-		_, _ = w.Write([]byte(`{"data":{"blendPools":[]}}`))
+		_, _ = w.Write([]byte(`{"data":{"blendPools":{"edges":[],"pageInfo":{"hasNextPage":false,"hasPreviousPage":false}}}}`))
 	}))
 	t.Cleanup(server.Close)
 

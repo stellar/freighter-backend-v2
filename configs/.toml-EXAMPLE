@@ -13,6 +13,7 @@ FUTURENET_RPC_URL = "not-set"
 # Horizon
 HORIZON_PUBNET_URL = "not-set"
 HORIZON_TESTNET_URL = "not-set"
+HORIZON_FUTURENET_URL = "not-set"
 
 # Redis
 REDIS_CONNECTION_NAME = "not-set"
@@ -38,8 +39,38 @@ STELLAR_EXPERT_TESTNET_URL = "not-set"
 STELLAR_EXPERT_API_KEY = "not-set"
 PRICE_CACHE_TTL_SECONDS = "not-set"
 PRICE_FETCH_TIMEOUT_SECONDS = "not-set"
+# The negative-cache TTL (120s) and the 24h-change candle resolution (900s,
+# the D8 alignment with the chart's 1D range) are compile-time constants, not
+# env vars: no environment has ever overridden either, and both are values
+# the design fixes rather than tunes. See negativeCacheTTL and
+# candlesResolutionSec in internal/services/prices.go.
 MAX_TOKENS_PER_REQUEST = "not-set"
 MAX_CONCURRENT_PRICE_FETCHES = "not-set"
+
+# Token Price History + Token Stats
+# Per-range series cache TTLs (seconds); defaults: 1H=300, 1D=900, 1W=3600,
+# 1M=21600, 1Y=86400, ALL=604800.
+PRICE_HISTORY_CACHE_TTL_1H_SECONDS = "300"
+PRICE_HISTORY_CACHE_TTL_1D_SECONDS = "900"
+PRICE_HISTORY_CACHE_TTL_1W_SECONDS = "3600"
+PRICE_HISTORY_CACHE_TTL_1M_SECONDS = "21600"
+PRICE_HISTORY_CACHE_TTL_1Y_SECONDS = "86400"
+PRICE_HISTORY_CACHE_TTL_ALL_SECONDS = "604800"
+# Budget for each uncached history/stats upstream fetch. The default is not a
+# literal: it is derived from handlers.TokenPriceHistoryContextTimeout, the
+# handler's request cap. Setting this ABOVE that cap only warms the cache —
+# the fetch is detached from the request, so the caller already has its 503.
+# Left unset here so this file cannot drift from the derived default.
+PRICE_HISTORY_FETCH_TIMEOUT_SECONDS = "not-set"
+# Low-volume warning threshold in USD 7-day volume; 0 disables the guard.
+PRICE_HISTORY_MIN_VOLUME_7D_USD = "7000"
+# Raw-volume7d → USD conversion divisor. Stellar Expert reports volume7d as
+# USD scaled by 1e7, the default. 0 disables the conversion and makes the
+# lowVolume verdict null — with no conversion there is no check, and a false
+# would claim every token passed one.
+PRICE_HISTORY_VOLUME_7D_CONVERSION_DIVISOR = "10000000"
+# TTL of the cached token-stats asset payload (shared with the volume verdict).
+TOKEN_STATS_CACHE_TTL_SECONDS = "3600"
 
 # Meridian Pay
 MERIDIAN_PAY_TREASURE_HUNT_ADDRESS = "not-set"
@@ -48,3 +79,11 @@ MERIDIAN_PAY_STELLAR_HOUSE = "not-set"
 
 # Collectibles
 MAX_CONCURRENT_RPC_CALLS = "10"
+
+# Swap routing
+SWAP_LIFI_ENABLED = "not-set"
+SWAP_SOURCE_TIMEOUT_SECONDS = "not-set"
+SWAP_LIFI_API_KEY = "not-set"
+SWAP_SDEX_ORDERBOOK_PUBNET_URL = "not-set"
+SWAP_SDEX_ORDERBOOK_TESTNET_URL = "not-set"
+SWAP_SDEX_ORDERBOOK_FUTURENET_URL = "not-set"

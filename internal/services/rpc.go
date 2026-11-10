@@ -35,30 +35,8 @@ type rpcService struct {
 	svcMetrics      *metrics.Service
 }
 
-func createDefaultClient() *http.Client {
-	return &http.Client{
-		Timeout: 30 * time.Second, // Overall request timeout
-		Transport: &http.Transport{
-			// Connection pooling settings
-			MaxIdleConns:        100,              // Total idle connections across all hosts
-			MaxIdleConnsPerHost: 10,               // Idle connections per host
-			MaxConnsPerHost:     50,               // Total connections per host (active + idle)
-			IdleConnTimeout:     90 * time.Second, // How long idle connections stay alive
-
-			// Timeout settings to prevent hung connections
-			ResponseHeaderTimeout: 10 * time.Second, // Timeout waiting for response headers
-			ExpectContinueTimeout: 1 * time.Second,  // Timeout for 100-continue
-
-			// Connection settings
-			DisableKeepAlives:  false, // Keep connections alive for reuse
-			DisableCompression: false, // Allow compression
-			ForceAttemptHTTP2:  true,  // Try HTTP/2
-		},
-	}
-}
-
 func NewRPCService(rpcURL string, testnetRPCURL string, futurenetRPCURL string, m *metrics.Service) types.RPCService {
-	httpClient := createDefaultClient()
+	httpClient := utils.NewUpstreamHTTPClient()
 
 	return &rpcService{
 		httpClient:      httpClient,
@@ -160,7 +138,11 @@ func (r *rpcService) SimulateInvocation(
 		metrics.Record(r.svcMetrics, serviceName, "SimulateInvocation", network, time.Since(start).Seconds(), err)
 	}()
 
-	contractHash := contractId.ContractId
+	// Only the contract arm carries a ContractId; every other arm (G, M, W, ...) leaves it nil.
+	contractHash, ok := contractId.GetContractId()
+	if !ok {
+		return nil, fmt.Errorf("invalid contract ID: address type %s is not a contract", contractId.Type)
+	}
 	contractIdStr, err := strkey.Encode(strkey.VersionByteContract, contractHash[:])
 	if err != nil || !utils.IsValidContractID(contractIdStr) {
 		return nil, fmt.Errorf("invalid contract ID: %w", err)
@@ -168,7 +150,7 @@ func (r *rpcService) SimulateInvocation(
 
 	invokeOp := txnbuild.InvokeHostFunction{
 		HostFunction: xdr.HostFunction{
-			Type: xdr.HostFunctionType(0),
+			Type: xdr.HostFunctionTypeHostFunctionTypeInvokeContract,
 			InvokeContract: &xdr.InvokeContractArgs{
 				ContractAddress: contractId,
 				FunctionName:    functionName,
@@ -208,7 +190,7 @@ func (r *rpcService) GetLedgerEntries(ctx context.Context, keys []string, networ
 	networkClient := r.configureNetworkClient(network)
 	response, err := networkClient.GetLedgerEntries(ctx, rpc.GetLedgerEntriesRequest{
 		Keys:   keys,
-		Format: "json",
+		Format: rpc.FormatJSON,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ledger entries: %w", err)
@@ -225,4 +207,29 @@ func (r *rpcService) GetLedgerEntries(ctx context.Context, keys []string, networ
 	}
 
 	return entries, nil
+}
+
+func (r *rpcService) GetLedgerEntriesXDR(ctx context.Context, keys []string, network string) (_ map[string]string, err error) {
+	start := time.Now()
+	defer func() {
+		metrics.Record(r.svcMetrics, serviceName, "GetLedgerEntriesXDR", network, time.Since(start).Seconds(), err)
+	}()
+
+	if len(keys) > MaxLedgerEntryKeys {
+		return nil, fmt.Errorf("too many ledger entry keys: maximum is %d, got %d", MaxLedgerEntryKeys, len(keys))
+	}
+
+	response, err := r.configureNetworkClient(network).GetLedgerEntries(ctx, rpc.GetLedgerEntriesRequest{
+		Keys:   keys,
+		Format: rpc.FormatBase64,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ledger entries: %w", err)
+	}
+
+	out := make(map[string]string, len(response.Entries))
+	for _, entry := range response.Entries {
+		out[entry.KeyXDR] = entry.DataXDR
+	}
+	return out, nil
 }

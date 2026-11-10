@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -321,12 +322,15 @@ func TestApiServer_initHandlers_UserFacingRoutesRespectAuthMode(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/feature-flags", nil))
 	assert.Equal(t, http.StatusOK, rec.Code, "permissive: anonymous must pass")
 
-	// Permissive: a present-but-invalid bearer token is rejected on that route.
+	// Permissive: an invalid token that is not a CLOCK failure is still rejected
+	// on that route. (Only expired and clock_ahead pass through anonymously in
+	// permissive; that fall-through is covered in the middleware truth table.
+	// "not-a-real-token" is `malformed`, so it stays a 401 here.)
 	rec = httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/feature-flags", nil)
 	req.Header.Set("Authorization", "Bearer not-a-real-token")
 	mux.ServeHTTP(rec, req)
-	assert.Equal(t, http.StatusUnauthorized, rec.Code, "permissive: invalid token must 401")
+	assert.Equal(t, http.StatusUnauthorized, rec.Code, "permissive: malformed token must 401")
 
 	// Strict: an anonymous request to a previously-open route is rejected.
 	mux, err = newTestAPIServer(t, testCfg("strict")).initHandlers()
@@ -366,6 +370,10 @@ func (stubRPCService) GetLedgerEntries(ctx context.Context, keys []string, netwo
 	return nil, nil
 }
 
+func (stubRPCService) GetLedgerEntriesXDR(ctx context.Context, keys []string, network string) (map[string]string, error) {
+	return nil, nil
+}
+
 func TestApiServer_initHandlers_HealthRoutesAnonymousInStrict(t *testing.T) {
 	s := newTestAPIServer(t, testCfg("strict"))
 	s.rpcService = stubRPCService{} // so /rpc-health can be invoked without a live RPC
@@ -386,7 +394,7 @@ func TestApiServer_initHandlers_HealthRoutesAnonymousInStrict(t *testing.T) {
 // helper, so this package and middleware can't drift on the claims format.
 func mintAPIToken(t *testing.T, priv ed25519.PrivateKey, sub, methodAndPath string) string {
 	t.Helper()
-	return authtest.MintToken(t, priv, sub, methodAndPath, auth.MaxTokenLifetime, time.Now())
+	return authtest.MintToken(t, priv, sub, methodAndPath, auth.MaxTokenLifetime, time.Now(), nil)
 }
 
 func TestApiServer_initHandlers_ValidTokenPopulatesWhoami(t *testing.T) {
@@ -473,4 +481,79 @@ func TestApiServer_initHandlers_AllUserFacingRoutesGatedInStrict(t *testing.T) {
 			rt.method, rt.pattern)
 	}
 	require.Positive(t, gated, "expected routes() to contain at least one gated route")
+}
+
+// The swap routes spend a rate-limited LI.FI key, so they reject anonymous
+// requests even while --auth-mode is permissive. A correctly signed token from
+// a device with a wrong clock still gets through, as on every other route.
+func TestApiServer_initHandlers_SwapRoutesRequireTokenInPermissive(t *testing.T) {
+	s := newTestAPIServer(t, testCfg("permissive"))
+	mux, err := s.initHandlers()
+	require.NoError(t, err)
+	pub, priv, err := ed25519.GenerateKey(nil)
+	require.NoError(t, err)
+	sub := hex.EncodeToString(pub)
+
+	for _, path := range []string{"/api/v1/swap/quotes", "/api/v1/swap/tx"} {
+		send := func(authz string) int {
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
+			if authz != "" {
+				req.Header.Set("Authorization", authz)
+			}
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			return rec.Code
+		}
+		assert.Equal(t, http.StatusUnauthorized, send(""), path+" no token")
+		assert.Equal(t, http.StatusUnauthorized, send("Basic dXNlcjpwdw=="), path+" non-bearer scheme")
+		assert.Equal(t, http.StatusUnauthorized, send("Bearer not-a-jwt"), path+" invalid bearer token")
+		skewed := authtest.MintToken(t, priv, sub, "POST "+path, auth.MaxTokenLifetime, time.Now().Add(-time.Hour), []byte("{}"))
+		// 400: past auth, rejected for the empty body.
+		assert.Equal(t, http.StatusBadRequest, send("Bearer "+skewed), path+" clock-skewed token")
+		stale := authtest.MintToken(t, priv, sub, "GET /api/v1/protocols", auth.MaxTokenLifetime, time.Now().Add(-time.Hour), nil)
+		assert.Equal(t, http.StatusUnauthorized, send("Bearer "+stale), path+" clock-skewed token signed for another request")
+	}
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/auth/whoami", nil))
+	assert.Equal(t, http.StatusOK, rec.Code, "other gated routes stay anonymous-friendly in permissive")
+}
+
+// The asset search is wired end to end from config: a cap set by flag reaches
+// the upstream call (not the service's own default), with our key, and the
+// route answers anonymous callers in permissive mode like its siblings.
+func TestApiServer_AssetSearchRouteIsWiredFromConfig(t *testing.T) {
+	var gotPath, gotLimit, gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotLimit = r.URL.Query().Get("limit")
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"_embedded":{"records":[]}}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	cfg := testCfg("permissive")
+	cfg.AppConfig.WalletBackendBalanceConcurrency = 10
+	cfg.PricesConfig = config.PricesConfig{
+		StellarExpertAPIKey:    "test-key",
+		StellarExpertPubnetURL: upstream.URL + "/explorer/public",
+	}
+	cfg.AssetSearchConfig = config.AssetSearchConfig{CacheTTLSeconds: 60, MaxLimit: 25}
+	// There is no Redis here, so the cache read and write each fail after
+	// go-redis's own retries (about 2s apiece): that is this test's runtime.
+	// A cache that cannot be reached only costs the cache, so the request
+	// still succeeds; the service tests cover the cache itself.
+	s := newTestAPIServer(t, cfg)
+	require.NoError(t, s.initServices())
+	mux, err := s.initHandlers()
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/assets/search?network=PUBLIC&sort=volume7d&limit=500", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.JSONEq(t, `{"data":{"_embedded":{"records":[]}}}`, rec.Body.String())
+	assert.Equal(t, "/explorer/public/asset", gotPath)
+	assert.Equal(t, "25", gotLimit, "--asset-search-max-limit must reach the service")
+	assert.Equal(t, "Bearer test-key", gotAuth)
 }

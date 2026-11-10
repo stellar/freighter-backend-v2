@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -115,6 +116,56 @@ func TestStellarExpert_GetAsset_Malformed(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrAssetMalformed))
 }
 
+// 401/402/403 are our credentials failing, not an answer about the asset.
+// They must be distinguishable from both the asset sentinels (which are
+// authoritative and get negatively cached) and the transient catch-all
+// (which self-heals) — a rotated key fails every asset until config changes.
+func TestStellarExpert_CredentialFailuresAreTheirOwnSentinel(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []int{http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			t.Parallel()
+			svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, `nope`, code)
+			}))
+
+			_, err := svc.GetAsset(context.Background(), types.PUBLIC, "XLM")
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrUpstreamAuth), "must match the credential sentinel")
+
+			// Never confusable with an authoritative answer about the asset:
+			// those two are what trigger negative caching.
+			assert.False(t, errors.Is(err, ErrAssetNotFound))
+			assert.False(t, errors.Is(err, ErrAssetMalformed))
+
+			// Still an UpstreamError carrying the exact code, so the
+			// dependency panels keep labelling it http_error:<code>.
+			var upErr *metrics.UpstreamError
+			require.True(t, errors.As(err, &upErr), "must stay wrapped for the metric")
+			assert.Equal(t, "http_error", upErr.Kind)
+			assert.Equal(t, code, upErr.Code)
+		})
+	}
+}
+
+// A transient 5xx must NOT match the credential sentinel — the whole point of
+// the split is that one self-heals and the other does not.
+func TestStellarExpert_ServerErrorIsNotACredentialFailure(t *testing.T) {
+	t.Parallel()
+
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `boom`, http.StatusBadGateway)
+	}))
+
+	_, err := svc.GetAsset(context.Background(), types.PUBLIC, "XLM")
+	require.Error(t, err)
+	assert.False(t, errors.Is(err, ErrUpstreamAuth))
+	var upErr *metrics.UpstreamError
+	require.True(t, errors.As(err, &upErr))
+	assert.Equal(t, http.StatusBadGateway, upErr.Code)
+}
+
 func TestStellarExpert_GetAsset_ServerError(t *testing.T) {
 	t.Parallel()
 
@@ -223,4 +274,184 @@ func TestStellarExpert_Name(t *testing.T) {
 	t.Parallel()
 	svc := NewStellarExpertService("a", "b", "test-key", "", nil)
 	assert.Equal(t, "stellar-expert", svc.Name())
+}
+
+// The regression this guards is not in the stats fields, it is in
+// /token-prices. GetAsset decodes one struct shared by all three endpoints,
+// so while every field decoded strictly, a single drifted stats field failed
+// the whole payload here, surfaced to fetchFromUpstream as a generic error,
+// and nulled the price of every token on the home screen — over a field
+// /token-prices never reads.
+func TestStellarExpert_GetAsset_StatsDriftStillYieldsAPrice(t *testing.T) {
+	t.Parallel()
+
+	// `trustlines` as an array: upstream has shipped both shapes for it.
+	body := `{"price":0.15968,"supply":"1054439020873472865","trustlines":[{"funded":9926520}]}`
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+
+	asset, err := svc.GetAsset(context.Background(), types.PUBLIC, "XLM")
+	require.NoError(t, err, "a drifted stats field must not fail the asset call")
+	assert.Equal(t, 0.15968, asset.Price)
+	assert.Nil(t, asset.Trustlines.Funded, "the drifted field is reported as absent")
+}
+
+// error_type="internal" is reserved for OUR defects — encoding, decoding,
+// validation. A 404 or 400 from upstream is neither, and on this service they
+// are not even rare: an unpriced SEP-41 contract token 404s by design, which
+// is why /token-price-history and /token-stats negatively cache the answer.
+//
+// Leaving them unwrapped classified every one of them as "internal", which
+// both slanders our own code and puts routine traffic onto
+// freighter_service_errors_total — the series
+// FreighterBackendV2StellarExpertDependencyErrors watches, and the only
+// outage signal /token-stats has left now that it degrades to an empty 200.
+// The 401/403 case already wraps for exactly this reason.
+func TestStellarExpert_NotFoundAndMalformedCarryTheirHTTPStatus(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		status    int
+		sentinel  error
+		wantLabel string
+	}{
+		{"404 is not-found", http.StatusNotFound, ErrAssetNotFound, "http_error:404"},
+		{"400 is malformed", http.StatusBadRequest, ErrAssetMalformed, "http_error:400"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, `nope`, tc.status)
+			}))
+
+			_, err := svc.GetAsset(context.Background(), types.PUBLIC, "BOGUS-G...-1")
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, tc.sentinel),
+				"the sentinel must still match through the wrapper — every caller branches on it")
+			assert.Equal(t, tc.wantLabel, metrics.ClassifyError(err),
+				"an upstream status must never be labelled as our own internal failure")
+		})
+	}
+}
+
+// ListAssets backs GET /api/v1/assets/search: it must call /asset with the
+// query it is given, carry our credentials, and hand the body back
+// untouched, because the route serves StellarExpert's records as they are.
+func TestStellarExpert_ListAssets_ForwardsQueryAndReturnsBodyVerbatim(t *testing.T) {
+	t.Parallel()
+
+	var gotPath, gotQuery, gotAuth, gotOrigin string
+	body := `{"_links":{"self":{"href":"/explorer/public/asset?search=usdc&order=desc&limit=50&cursor=0"}},"_embedded":{"records":[{"asset":"USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN-1","domain":"centre.io","price":1.0001,"tomlInfo":{"code":"USDC","issuer":"GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"}}]}}`
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotAuth = r.Header.Get("Authorization")
+		gotOrigin = r.Header.Get("Origin")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+
+	got, err := svc.ListAssets(context.Background(), types.PUBLIC, url.Values{"search": {"usdc"}, "limit": {"50"}})
+	require.NoError(t, err)
+	assert.Equal(t, "/explorer/public/asset", gotPath)
+	assert.Equal(t, "limit=50&search=usdc", gotQuery)
+	assert.Equal(t, "Bearer test-key", gotAuth)
+	assert.Equal(t, "https://stellar.expert", gotOrigin)
+	assert.Equal(t, body, string(got), "the body must come back byte-for-byte")
+}
+
+// A value is encoded as ONE value: a term containing & or = must not become
+// extra upstream parameters (for example a larger limit than we allow).
+func TestStellarExpert_ListAssets_EncodesValuesSoTheyCannotAddParams(t *testing.T) {
+	t.Parallel()
+
+	var gotQuery url.Values
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`{"_embedded":{"records":[]}}`))
+	}))
+
+	_, err := svc.ListAssets(context.Background(), types.PUBLIC, url.Values{"search": {"yieldblox dao&limit=10000"}})
+	require.NoError(t, err)
+	assert.Equal(t, url.Values{"search": {"yieldblox dao&limit=10000"}}, gotQuery)
+}
+
+func TestStellarExpert_ListAssets_TestnetURL(t *testing.T) {
+	t.Parallel()
+
+	var gotPath string
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"_embedded":{"records":[]}}`))
+	}))
+
+	_, err := svc.ListAssets(context.Background(), types.TESTNET, url.Values{"limit": {"50"}})
+	require.NoError(t, err)
+	assert.Equal(t, "/explorer/testnet/asset", gotPath)
+}
+
+// Upstream statuses keep the meanings callers branch on: 402 (a rejected key,
+// or an exhausted balance) is the loud credential sentinel, 400 is
+// StellarExpert rejecting the query, and 429/5xx are transient.
+func TestStellarExpert_ListAssets_MapsUpstreamStatuses(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		status   int
+		sentinel error // nil: a plain transient *metrics.UpstreamError
+	}{
+		{"402 is a credential failure", http.StatusPaymentRequired, ErrUpstreamAuth},
+		{"400 is a rejected query", http.StatusBadRequest, ErrAssetMalformed},
+		{"429 is transient", http.StatusTooManyRequests, nil},
+		{"503 is transient", http.StatusServiceUnavailable, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, `{"error":"nope"}`, tc.status)
+			}))
+
+			got, err := svc.ListAssets(context.Background(), types.PUBLIC, url.Values{"search": {"usdc"}})
+			require.Error(t, err)
+			assert.Nil(t, got)
+			var upErr *metrics.UpstreamError
+			require.True(t, errors.As(err, &upErr), "must stay an UpstreamError for the dependency metric")
+			assert.Equal(t, tc.status, upErr.Code)
+			if tc.sentinel != nil {
+				assert.ErrorIs(t, err, tc.sentinel)
+				return
+			}
+			assert.NotErrorIs(t, err, ErrUpstreamAuth)
+			assert.NotErrorIs(t, err, ErrAssetMalformed)
+		})
+	}
+}
+
+// A 200 that is not JSON (an HTML page from something in between) is an
+// error, never a body we would cache and serve as records.
+func TestStellarExpert_ListAssets_RejectsNonJSONBody(t *testing.T) {
+	t.Parallel()
+
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<html>maintenance</html>`))
+	}))
+
+	got, err := svc.ListAssets(context.Background(), types.PUBLIC, url.Values{"search": {"usdc"}})
+	require.Error(t, err)
+	assert.Nil(t, got)
+}
+
+func TestStellarExpert_ListAssets_RejectsUnknownNetwork(t *testing.T) {
+	t.Parallel()
+
+	svc, _ := newTestStellarExpert(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("an unconfigured network must not reach upstream")
+	}))
+
+	_, err := svc.ListAssets(context.Background(), types.FUTURENET, url.Values{})
+	require.ErrorIs(t, err, ErrNetworkNotConfigured)
 }

@@ -37,14 +37,79 @@ Shipped Freighter clients today send **no** JWT; newer client versions send a JW
 To avoid breaking old clients, auth has two modes, selected by one global config value
 (`AUTH_MODE` / `--auth-mode`, default `permissive`):
 
-| Mode | No `Authorization` header | Header present, valid | Header present, invalid |
-| --- | --- | --- | --- |
-| **permissive** (default) | pass (anonymous, no `userID`) | pass (+`userID`) | **401** |
-| **strict** (`auth.Required`) | **401** | pass (+`userID`) | **401** |
+| Mode | No `Authorization` header | Valid | Invalid: wrong clock | Invalid: any other reason |
+| --- | --- | --- | --- | --- |
+| **permissive** (default) | pass (anonymous, no `userID`) | pass (+`userID`) | pass (anonymous, no `userID`) | **401** |
+| **strict** (`auth.Required`) | **401** | pass (+`userID`) | **401** | **401** |
 
-A present-but-invalid token is **always** rejected (401) in both modes — only updated clients send
-tokens, so a bad token is a real bug or attack, and rejecting it gives clean adoption signal during
-rollout.
+"Wrong clock" is exactly two reasons, the two directions a clock can be wrong:
+
+| reason | meaning | signature verified? |
+| --- | --- | --- |
+| `expired` | clock lagging — `exp` already past | **yes** — raised by `jwtgo.ParseWithClaims`, and jwt/v5 returns on signature failure *before* validating claims |
+| `clock_ahead` | clock fast — `iat`/`exp` too far ahead | **no** — raised in `Claims.Validate`, which runs first |
+
+`clock_ahead` was split out of `bad_timing` for this. What remains in `bad_timing` — missing
+`exp`/`iat`, `exp` preceding `iat`, over-long lifetimes — is a malformed or abusive token rather
+than a wrong clock, and is still rejected. Serving those would make the permitted-skew rate
+meaningless in the exact counter that gates the strict flip.
+
+Because `clock_ahead` precedes signature verification, a **forged** token dated into the future is
+served too. That is safe rather than merely tolerated: permitting attaches no `userID`, so the
+request is byte-for-byte equivalent to one carrying no `Authorization` header — which these routes
+already serve. An attacker gains nothing they could not have by sending no token at all. The cost is
+measurement, not access: read `invalid_permitted{reason="clock_ahead"}` as an upper bound on
+fast-clock clients, not an exact count.
+
+This table originally rejected *every* present-but-invalid token in both modes, on the reasoning
+that "only updated clients send tokens, so a bad token is a real bug or attack." That reasoning
+enumerated two populations and missed a third: **a correct, up-to-date client running on a machine
+whose clock is wrong.** In the first 24h of real JWT traffic that third population was 100% of all
+rejections (335, from ~5 devices with fixed offsets of 3m04s, 11m05s, 15m14s, 3h01m20s, and exactly
+8h00m00s) — see [#147](https://github.com/stellar/freighter-backend-v2/issues/147). Those users were
+locked out of every gated route while sending cryptographically valid tokens, on endpoints that
+serve anonymous traffic freely. Rejecting them refused a request that would have succeeded had the
+client sent no token at all, which defeats the purpose of permissive mode.
+
+Note that rejecting was never what produced the adoption signal — `RecordAuth` fires before the
+render decision, so the metric and log are identical either way. Enforcement was coupled to
+measurement for no reason.
+
+Both clock directions are permitted. When that decision was made prod had shown only lagging clocks,
+and the argument was that five devices is far too small to conclude fast clocks do not occur. The
+data has since caught up with the argument: over the 7 days ending 2026-08-03, prd logged **442
+`expired` (84.4%), 78 `clock_ahead` (14.9%), and 4 `malformed` (0.8%)** out of 524 rejections — and
+`clock_ahead` was the *majority* on the two most recent days (08-02: 38 vs 44; 08-03: 20 vs 8). Had
+this shipped permitting only `expired`, ~15% of rejections and rising would still be 401ing.
+
+These are genuine wrong clocks rather than stale tokens replayed from a retry queue, which would look
+identical on the wire: within a single burst the offset stays flat to ±0.5s across spans up to 478s,
+whereas a replayed token's apparent offset grows 1s per elapsed second. Offsets are also stable per
+device across days.
+
+**Strict stays fail-closed for everything, timing included.** It has no anonymous path to fall back
+to, so this is a rollout-window mitigation only: skewed clients must be fixed client-side (deriving
+a clock offset from the `Date` response header) before the permissive→strict flip, and that flip
+should be gated on **both** timing reasons reaching ~0 across both `iss` values — not on the fix
+merely having shipped, since client rollout lags by days.
+
+The two reasons carry different evidential weight, and the criterion must not be narrowed to the
+stronger one:
+
+- `invalid_permitted{reason="expired"}` is **authentic per-client**. `ExpiredTokenError` carries the
+  signature-verified `iss` out of the failure, and the middleware labels from it rather than
+  re-parsing the token unverified — so this is the number to use when deciding *which client team*
+  still needs to ship the offset fix.
+- `invalid_permitted{reason="clock_ahead"}` is an **upper bound, and unattributable**. No signature
+  check ran, so the `iss` label is caller-chosen and one request per increment needs no key: a
+  future-dated token claiming any `iss` will do. It cannot distinguish five real fast-clock devices
+  from one script.
+
+It is tempting to gate only on `expired` for that reason. Don't: `clock_ahead` is 15% of rejections
+and rising, so an `expired`-only gate would read "ready to flip" while a growing fast-clock population
+is still broken — trading a fail-safe criterion for a fail-dangerous one. Keep both in the gate, and
+treat a nonzero `clock_ahead` as a signal to investigate logs and source IPs rather than something to
+read off a dashboard. On the rejection log, `iss_verified` distinguishes the two cases directly.
 
 All user-facing routes share one mode and flip together (client adoption is per-app-version, not
 per-endpoint), so the mode is a single global config value. The permissive→strict cutover is one
@@ -175,8 +240,14 @@ logging middleware.
 ## Observability
 
 - Metric: `freighter_auth_requests_total{result, reason}` counter.
-  - `result ∈ {authenticated, anonymous, rejected}` — adoption % during rollout.
-  - `reason ∈ {ok, no_token, expired, bad_signature, bad_timing, bad_method_path, bad_body_hash,
+  - `result ∈ {authenticated, anonymous, rejected, invalid_permitted}` — adoption % during rollout.
+    `invalid_permitted` is a wrong-clock token (`expired` or `clock_ahead`) served anonymously under
+    permissive — see the mode table above for which of the two implies a verified signature.
+    It is separate from both `rejected` (these requests succeed) and `anonymous` (a
+    client sending a broken token is a different population from one sending none). **Anything
+    watching the invalid-token rate — alerts, strict-flip readiness — must sum it with `rejected`,
+    or permitted skew will read as having disappeared rather than as still happening.**
+  - `reason ∈ {ok, no_token, expired, clock_ahead, bad_signature, bad_timing, bad_method_path, bad_body_hash,
     bad_subject, malformed, invalid, too_large, internal}` — a bounded set of fixed *categories*
     (never a request value like the path or body hash), so rejection spikes can be triaged by cause
     without high label cardinality.
@@ -191,7 +262,9 @@ logging middleware.
   wrong key, `alg=none`/HS256 rejected, expired, leeway boundary); `VerifyHTTPRequest` (missing
   header → `ErrNoToken`, bad Bearer prefix, body-hash binding, query-string binding, body reset).
 - **middleware tests:** the full truth table — for each mode × {no header, valid, expired,
-  tampered, wrong-key}, assert status (200/401) and presence/absence of `userID` in context.
+  future-dated, tampered, wrong-key}, assert status (200/401) and presence/absence of `userID` in
+  context. The `permissive/wrong-key` and `required/expired` rows are the load-bearing ones: they
+  prove the timing fall-through is narrow (a bad signature still 401s) and that strict is unchanged.
 - **route wiring tests** (`internal/api`): user-facing routes reject anonymous in strict, reject
   invalid tokens in permissive, and expose `userID` on a valid token; health probes stay anonymous
   in every mode; an authenticated request keeps its real route label in `freighter_http_requests_total`.

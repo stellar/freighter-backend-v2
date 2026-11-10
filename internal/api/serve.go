@@ -23,13 +23,16 @@ import (
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/services"
+	"github.com/stellar/freighter-backend-v2/internal/services/swap"
 	"github.com/stellar/freighter-backend-v2/internal/store"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
 const (
-	DefaultReadTimeout    = 10 * time.Second
-	DefaultWriteTimeout   = 10 * time.Second
+	DefaultReadTimeout  = 10 * time.Second
+	DefaultWriteTimeout = 10 * time.Second
+	// swapBuildTimeout leaves the handler time to write its error before the write timeout.
+	swapBuildTimeout      = DefaultWriteTimeout - 2*time.Second
 	DefaultIdleTimeout    = 120 * time.Second
 	ServerShutdownTimeout = 10 * time.Second
 	// DatabaseConnectTimeout bounds the boot-time connect + ping so a reachable
@@ -45,6 +48,10 @@ type ApiServer struct {
 	rpcService           types.RPCService
 	walletBackendService types.WalletBackendService
 	pricesService        types.PricesService
+	priceHistoryService  types.PriceHistoryService
+	tokenStatsService    types.TokenStatsService
+	swapService          types.SwapService
+	assetSearchService   types.AssetSearchService
 	registry             *prometheus.Registry
 	appMetrics           *metrics.Metrics
 	authMode             auth.Mode
@@ -135,6 +142,60 @@ func (s *ApiServer) initServices() error {
 		MaxConcurrent:    s.cfg.PricesConfig.MaxConcurrentPriceFetches,
 	}, s.appMetrics.Service, s.appMetrics.Prices)
 
+	// One implementation serves both the history and stats endpoints: they
+	// share the tokenstats:v1-cached asset payload, and the history delta
+	// anchors on the prices service's 30s-cached spot.
+	historyAndStats := services.NewPriceHistoryService(stellarExpert, s.redis, s.pricesService, services.PriceHistoryServiceConfig{
+		CacheTTLs: map[string]time.Duration{
+			"1H":  time.Duration(s.cfg.PriceHistoryConfig.CacheTTL1HSeconds) * time.Second,
+			"1D":  time.Duration(s.cfg.PriceHistoryConfig.CacheTTL1DSeconds) * time.Second,
+			"1W":  time.Duration(s.cfg.PriceHistoryConfig.CacheTTL1WSeconds) * time.Second,
+			"1M":  time.Duration(s.cfg.PriceHistoryConfig.CacheTTL1MSeconds) * time.Second,
+			"1Y":  time.Duration(s.cfg.PriceHistoryConfig.CacheTTL1YSeconds) * time.Second,
+			"ALL": time.Duration(s.cfg.PriceHistoryConfig.CacheTTLALLSeconds) * time.Second,
+		},
+		FetchTimeout:              time.Duration(s.cfg.PriceHistoryConfig.FetchTimeoutSeconds) * time.Second,
+		MinVolume7dUSD:            s.cfg.PriceHistoryConfig.MinVolume7dUSD,
+		Volume7dConversionDivisor: s.cfg.PriceHistoryConfig.Volume7dConversionDivisor,
+		TokenStatsCacheTTL:        time.Duration(s.cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds) * time.Second,
+	}, s.appMetrics.Service, s.appMetrics.Prices)
+	s.priceHistoryService = historyAndStats
+	s.tokenStatsService = historyAndStats
+
+	var sources []swap.Source
+	sources = append(sources, swap.NewClassicSource(swap.ClassicConfig{
+		HorizonURLs: map[string]string{
+			types.PUBLIC:    s.cfg.HorizonConfig.HorizonPubnetURL,
+			types.TESTNET:   s.cfg.HorizonConfig.HorizonTestnetURL,
+			types.FUTURENET: s.cfg.HorizonConfig.HorizonFuturenetURL,
+		},
+		OrderbookURLs: map[string]string{
+			types.PUBLIC:    s.cfg.SwapConfig.SdexOrderbookPubnetURL,
+			types.TESTNET:   s.cfg.SwapConfig.SdexOrderbookTestnetURL,
+			types.FUTURENET: s.cfg.SwapConfig.SdexOrderbookFuturenetURL,
+		},
+		Metrics: s.appMetrics.Swap,
+	}, s.rpcService))
+	if s.cfg.SwapConfig.LifiEnabled {
+		sources = append(sources, swap.NewLifiSource(swap.LifiConfig{
+			Client:       swap.NewLifiClient(swap.LifiBaseURL, s.cfg.SwapConfig.LifiAPIKey, nil),
+			SwapContract: swap.LifiSwapContract,
+			FeeRecipient: swap.LifiFeeRecipient,
+			PartnerID:    swap.LifiPartnerID,
+			Aggregator:   swap.SoroswapAggregator,
+			RPC:          s.rpcService,
+		}, s.appMetrics.Swap))
+	}
+	s.swapService = swap.NewRouter(sources,
+		time.Duration(s.cfg.SwapConfig.SourceTimeoutSeconds)*time.Second,
+		swapBuildTimeout, s.appMetrics.Swap)
+
+	s.assetSearchService = services.NewAssetSearchService(stellarExpert, s.redis, services.AssetSearchServiceConfig{
+		CacheTTL:      time.Duration(s.cfg.AssetSearchConfig.CacheTTLSeconds) * time.Second,
+		EmptyCacheTTL: time.Duration(s.cfg.AssetSearchConfig.EmptyCacheTTLSeconds) * time.Second,
+		MaxLimit:      s.cfg.AssetSearchConfig.MaxLimit,
+	}, s.appMetrics.Prices)
+
 	return nil
 }
 
@@ -217,7 +278,11 @@ func (s *ApiServer) routes() ([]route, error) {
 	ledgerKeyAccountsHandler := handlers.NewLedgerKeyAccountHandler(s.rpcService, s.cfg.AppConfig.MaxLedgerKeyAddresses)
 	featureFlagsHandler := handlers.NewFeatureFlagsHandler()
 	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
-	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest)
+	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest, s.appMetrics.Prices)
+	tokenPriceHistoryHandler := handlers.NewTokenPriceHistoryHandler(s.priceHistoryService)
+	tokenStatsHandler := handlers.NewTokenStatsHandler(s.tokenStatsService)
+	swapHandler := handlers.NewSwapHandler(s.swapService)
+	assetSearchHandler := handlers.NewAssetSearchHandler(s.assetSearchService)
 	accountHistoryHandler, err := handlers.NewAccountHistoryHandler(
 		s.walletBackendService,
 		s.cfg.AppConfig.AccountHistoryDefaultLimit,
@@ -285,6 +350,15 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodGet, "/api/v1/protocols/blend/earn-options", handlers.CustomHandler(blendCatalogHandler.GetEarnOptions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
 
 		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true, true},
+		{http.MethodPost, "/api/v1/swap/quotes", handlers.CustomHandler(swapHandler.Quotes), true, true},
+		{http.MethodPost, "/api/v1/swap/tx", handlers.CustomHandler(swapHandler.Build), true, true},
+		{http.MethodGet, "/api/v1/token-price-history", handlers.CustomHandler(tokenPriceHistoryHandler.GetTokenPriceHistory), true, true},
+		{http.MethodGet, "/api/v1/token-stats", handlers.CustomHandler(tokenStatsHandler.GetTokenStats), true, true},
+		// StellarExpert's /asset list (search, and sorted lists such as
+		// trending) behind our API key and a shared cache. The wallets call
+		// it instead of StellarExpert since anonymous access there ended on
+		// 2026-11-06.
+		{http.MethodGet, "/api/v1/assets/search", handlers.CustomHandler(assetSearchHandler.SearchAssets), true, true},
 		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, true},
 	}, nil
 }

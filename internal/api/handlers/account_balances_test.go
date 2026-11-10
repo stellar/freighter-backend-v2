@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -163,6 +164,21 @@ func TestGetAccountBalances(t *testing.T) {
 		body := `{
 			"addresses": ["invalid-address"]
 		}`
+		req, _ := http.NewRequest("POST", "/api/v1/accounts/balances?network=PUBLIC", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+
+		err := handler.GetAccountBalances(rr, req)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid Stellar address")
+	})
+
+	t.Run("should return error for wrong-length address with valid checksum", func(t *testing.T) {
+		t.Parallel()
+
+		mockService := &utils.MockWalletBackendService{}
+		handler := NewAccountBalancesHandler(mockService, 100)
+
+		body := fmt.Sprintf(`{"addresses": [%q]}`, wrongLengthAddress)
 		req, _ := http.NewRequest("POST", "/api/v1/accounts/balances?network=PUBLIC", strings.NewReader(body))
 		rr := httptest.NewRecorder()
 
