@@ -2,16 +2,14 @@ package swap
 
 import (
 	"context"
-	"errors"
-	"sync"
 	"time"
 
+	"github.com/stellar/go-stellar-sdk/ingest/sac"
 	"github.com/stellar/go-stellar-sdk/strkey"
-	"github.com/stellar/go-stellar-sdk/txnbuild"
+	"github.com/stellar/go-stellar-sdk/xdr"
 
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
-	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 // labelBudget caps what labelling may add to a quote, and labelling ends
@@ -25,96 +23,111 @@ const (
 // labelSACHops rewrites each hop token in the middle of a route that is a
 // Stellar Asset Contract to its asset ID (CODE:ISSUER or XLM), which clients
 // can name and find an icon for. The sold and bought tokens keep the IDs the
-// client asked for.
-func (s *LifiSource) labelSACHops(ctx context.Context, account, net string, from, to Asset, paths []types.SwapPath) {
-	var ids []string
-	seen := map[string]bool{}
+// client asked for. A SAC's instance entry holds its asset, and
+// sac.AssetFromContractData accepts it only when that asset derives back to
+// the contract ID, so no contract can pass itself off as another asset.
+func (s *LifiSource) labelSACHops(ctx context.Context, net string, from, to Asset, paths []types.SwapPath) {
+	native, err := Asset{ID: "XLM"}.ContractID(net)
+	if err != nil {
+		return
+	}
+	pass, err := Passphrase(net)
+	if err != nil {
+		return
+	}
+	labels := map[string]string{}
+	keyOf := map[string]string{}
+	var keys []string
 	for _, p := range paths {
 		for _, h := range p.Hops {
 			for _, t := range []string{h.From, h.To} {
-				if !seen[t] && t != from.ID && t != to.ID && strkey.IsValidContractAddress(t) {
-					seen[t] = true
-					ids = append(ids, t)
+				if _, seen := labels[t]; seen || keyOf[t] != "" || t == from.ID || t == to.ID || !strkey.IsValidContractAddress(t) {
+					continue
 				}
+				if t == native {
+					labels[t] = "XLM"
+					metrics.RecordSwapHopLabel(s.m, "labeled")
+					continue
+				}
+				if v, ok := s.labels.Load(t); ok {
+					labels[t] = v.(string)
+					metrics.RecordSwapHopLabel(s.m, labelResult(labels[t]))
+					continue
+				}
+				k, err := instanceKey(t)
+				if err != nil {
+					continue
+				}
+				keyOf[t] = k
+				keys = append(keys, k)
 			}
 		}
 	}
-	if len(ids) == 0 {
-		return
-	}
-	deadline := time.Now().Add(labelBudget)
-	if d, ok := ctx.Deadline(); ok && d.Add(-labelMargin).Before(deadline) {
-		deadline = d.Add(-labelMargin)
-	}
-	if !time.Now().Before(deadline) {
-		return
-	}
-	ctx, cancel := context.WithDeadline(ctx, deadline)
-	defer cancel()
-	labels := make([]string, len(ids))
-	var wg sync.WaitGroup
-	for i, id := range ids {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			labels[i] = s.sacLabel(ctx, account, net, id)
-		}()
-	}
-	wg.Wait()
-	byID := make(map[string]string, len(ids))
-	for i, id := range ids {
-		if labels[i] != "" {
-			byID[id] = labels[i]
-		}
+	if len(keys) > 0 {
+		s.readSACLabels(ctx, net, pass, keyOf, keys, labels)
 	}
 	for i := range paths {
 		for j := range paths[i].Hops {
 			h := &paths[i].Hops[j]
-			if l, ok := byID[h.From]; ok {
+			if l := labels[h.From]; l != "" {
 				h.From = l
 			}
-			if l, ok := byID[h.To]; ok {
+			if l := labels[h.To]; l != "" {
 				h.To = l
 			}
 		}
 	}
 }
 
-// sacLabel returns the asset ID of the SAC at contract, or "". A SAC's name()
-// is CODE:ISSUER or "native"; any contract can return that string, so it is
-// trusted only when the asset derives back to this contract ID.
-func (s *LifiSource) sacLabel(ctx context.Context, account, net, contract string) string {
-	if v, ok := s.labels.Load(contract); ok {
-		return v.(string)
+// readSACLabels reads every pending instance entry in one call. An answer,
+// SAC or not, is cached for the process: a contract can't become or stop
+// being a SAC. A failed read or a missing entry (archived, or a ledger the
+// node hasn't reached) is not cached.
+func (s *LifiSource) readSACLabels(ctx context.Context, net, pass string, keyOf map[string]string, keys []string, labels map[string]string) {
+	deadline := time.Now().Add(labelBudget)
+	if d, ok := ctx.Deadline(); ok && d.Add(-labelMargin).Before(deadline) {
+		deadline = d.Add(-labelMargin)
 	}
-	addr, err := utils.ScAddressFromString(contract)
+	unresolved := func(n int) {
+		for range n {
+			metrics.RecordSwapHopLabel(s.m, "unresolved")
+		}
+	}
+	if !time.Now().Before(deadline) {
+		unresolved(len(keys))
+		return
+	}
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	entries, err := s.cfg.RPC.GetLedgerEntriesXDR(ctx, keys, net)
 	if err != nil {
-		return ""
+		unresolved(len(keys))
+		return
 	}
-	res, err := s.cfg.RPC.SimulateInvocation(ctx, *addr, &txnbuild.SimpleAccount{AccountID: account}, "name", nil, txnbuild.NewTimeout(300), net)
-	if err != nil {
-		// A failed RPC call says nothing about the contract: not cached.
-		var ue *metrics.UpstreamError
-		if errors.As(err, &ue) && ue.Kind == "simulation_error" {
-			s.labels.Store(contract, "")
+	for contract, k := range keyOf {
+		b64, ok := entries[k]
+		if !ok {
+			unresolved(1)
+			continue
 		}
-		return ""
-	}
-	label := ""
-	if res == nil {
-		return ""
-	}
-	if str, ok := res.GetStr(); ok {
-		name := string(str)
-		if name == "native" {
-			name = "XLM"
+		var data xdr.LedgerEntryData
+		if err := xdr.SafeUnmarshalBase64(b64, &data); err != nil {
+			unresolved(1)
+			continue
 		}
-		if a, err := ParseAsset(name); err == nil && a.IsClassic() {
-			if id, err := a.ContractID(net); err == nil && id == contract {
-				label = a.ID
-			}
+		label := ""
+		if asset, ok := sac.AssetFromContractData(xdr.LedgerEntry{Data: data}, pass); ok {
+			label = asset.StringCanonical()
 		}
+		s.labels.Store(contract, label)
+		labels[contract] = label
+		metrics.RecordSwapHopLabel(s.m, labelResult(label))
 	}
-	s.labels.Store(contract, label)
-	return label
+}
+
+func labelResult(label string) string {
+	if label == "" {
+		return "not_sac"
+	}
+	return "labeled"
 }
