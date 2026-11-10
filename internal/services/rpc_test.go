@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -634,5 +635,41 @@ func TestNewRPCService_GetLedgerEntry(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "too many ledger entry keys")
 		assert.False(t, called.Load(), "upstream RPC must not be called when key count exceeds cap")
+	})
+}
+
+func TestRPCService_GetLedgerEntriesXDR(t *testing.T) {
+	t.Run("returns key to data map and omits missing keys", func(t *testing.T) {
+		var gotKeys []any
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				Params struct {
+					Keys   []any  `json:"keys"`
+					Format string `json:"xdrFormat"`
+				} `json:"params"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			gotKeys = body.Params.Keys
+			assert.NotEqual(t, "json", body.Params.Format)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"jsonrpc":"2.0","id":1,"result":{"entries":[{"key":"S0VZMQ==","xdr":"REFUQTE=","lastModifiedLedgerSeq":1}],"latestLedger":2}}`)
+		}))
+		defer server.Close()
+
+		service := NewRPCService(server.URL, "http://localhost:8001", "http://localhost:8002", nil)
+		got, err := service.GetLedgerEntriesXDR(context.Background(), []string{"S0VZMQ==", "S0VZMg=="}, types.PUBLIC)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"S0VZMQ==": "REFUQTE="}, got)
+		assert.Len(t, gotKeys, 2)
+	})
+
+	t.Run("rejects more than MaxLedgerEntryKeys without calling upstream", func(t *testing.T) {
+		var called atomic.Bool
+		upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called.Store(true) }))
+		defer upstream.Close()
+		service := NewRPCService(upstream.URL, "http://localhost:8001", "http://localhost:8002", nil)
+		_, err := service.GetLedgerEntriesXDR(context.Background(), make([]string, MaxLedgerEntryKeys+1), types.PUBLIC)
+		require.Error(t, err)
+		assert.False(t, called.Load())
 	})
 }

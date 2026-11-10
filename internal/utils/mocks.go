@@ -5,20 +5,22 @@ import (
 	"encoding/json"
 	"net/url"
 
-	"github.com/stellar/freighter-backend-v2/internal/types"
 	"github.com/stellar/go-stellar-sdk/clients/rpcclient"
 	"github.com/stellar/go-stellar-sdk/txnbuild"
 	"github.com/stellar/go-stellar-sdk/xdr"
+
+	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
 type MockRPCService struct {
-	SimulateError          error
-	SimulateResultOverride *xdr.ScVal
-	SimulatePanic          bool
-	TokenURIOverride       string
-	GetLedgerEntryOverride []types.LedgerEntryMap
-	GetLedgerEntryError    error
-	GetHealthFunc          func(network string) (types.GetHealthResponse, error)
+	SimulateError           error
+	SimulateResultOverride  *xdr.ScVal
+	SimulatePanic           bool
+	TokenURIOverride        string
+	GetLedgerEntryOverride  []types.LedgerEntryMap
+	GetLedgerEntryError     error
+	GetLedgerEntriesXDRFunc func(keys []string, network string) (map[string]string, error)
+	GetHealthFunc           func(network string) (types.GetHealthResponse, error)
 }
 
 func (m *MockRPCService) ConfigureNetworkClient(network string) *rpcclient.Client {
@@ -103,6 +105,13 @@ func (m *MockRPCService) GetLedgerEntries(ctx context.Context, keys []string, ne
 
 	if m.GetLedgerEntryError != nil {
 		return nil, m.GetLedgerEntryError
+	}
+	return nil, nil
+}
+
+func (m *MockRPCService) GetLedgerEntriesXDR(ctx context.Context, keys []string, network string) (map[string]string, error) {
+	if m.GetLedgerEntriesXDRFunc != nil {
+		return m.GetLedgerEntriesXDRFunc(keys, network)
 	}
 	return nil, nil
 }

@@ -13,6 +13,7 @@ FUTURENET_RPC_URL = "not-set"
 # Horizon
 HORIZON_PUBNET_URL = "not-set"
 HORIZON_TESTNET_URL = "not-set"
+HORIZON_FUTURENET_URL = "not-set"
 
 # Redis
 REDIS_CONNECTION_NAME = "not-set"
@@ -78,3 +79,11 @@ MERIDIAN_PAY_STELLAR_HOUSE = "not-set"
 
 # Collectibles
 MAX_CONCURRENT_RPC_CALLS = "10"
+
+# Swap routing
+SWAP_LIFI_ENABLED = "not-set"
+SWAP_SOURCE_TIMEOUT_SECONDS = "not-set"
+SWAP_LIFI_API_KEY = "not-set"
+SWAP_SDEX_ORDERBOOK_PUBNET_URL = "not-set"
+SWAP_SDEX_ORDERBOOK_TESTNET_URL = "not-set"
+SWAP_SDEX_ORDERBOOK_FUTURENET_URL = "not-set"

@@ -49,9 +49,8 @@ func (v *Verifier) VerifyHTTPRequest(r *http.Request) (Identity, error) {
 	if authHeader == "" {
 		return Identity{}, ErrNoToken
 	}
-	// RFC 6750: the "Bearer" auth scheme is case-insensitive.
-	scheme, token, _ := strings.Cut(authHeader, " ")
-	if !strings.EqualFold(scheme, "Bearer") {
+	token, ok := bearerCredential(authHeader)
+	if !ok {
 		// A different (or unparseable) auth scheme — not a bearer token this
 		// verifier handles, so treat it as no token (anonymous in permissive mode).
 		return Identity{}, ErrNoToken
@@ -91,6 +90,21 @@ func readAndResetBody(r *http.Request) ([]byte, error) {
 	}
 	r.Body = io.NopCloser(bytes.NewReader(b))
 	return b, nil
+}
+
+// HasBearerToken reports whether r carries a Bearer token, by the same rule the
+// verifier uses, so a caller can't count as a token what the verifier treats as
+// none.
+func HasBearerToken(r *http.Request) bool {
+	_, ok := bearerCredential(r.Header.Get("Authorization"))
+	return ok
+}
+
+// bearerCredential splits an Authorization header. RFC 6750: the "Bearer"
+// scheme is case-insensitive.
+func bearerCredential(authHeader string) (string, bool) {
+	scheme, token, _ := strings.Cut(authHeader, " ")
+	return token, strings.EqualFold(scheme, "Bearer")
 }
 
 var _ HTTPRequestVerifier = (*Verifier)(nil)
