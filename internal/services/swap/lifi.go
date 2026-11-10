@@ -175,10 +175,11 @@ func (s *LifiSource) Quote(ctx context.Context, req types.SwapQuoteRequest) (*ty
 	}
 	paths := lifiPaths(call, from, to, fromContract, toContract, s.m)
 	s.labelSACHops(ctx, req.Account, req.Network, from, to, paths)
-	var resourceFee string
-	if env.V1 != nil && env.V1.Tx.Ext.SorobanData != nil && env.V1.Tx.Ext.SorobanData.ResourceFee >= 0 {
-		resourceFee = FormatUnits(big.NewInt(int64(env.V1.Tx.Ext.SorobanData.ResourceFee)), ClassicDecimals)
+	// BuildTx refuses this envelope too, so the route could never build.
+	if env.V1 == nil || env.V1.Tx.Ext.SorobanData == nil || env.V1.Tx.Ext.SorobanData.ResourceFee < 0 {
+		return nil, fmt.Errorf("lifi: transaction has no usable resource fee")
 	}
+	resourceFee := FormatUnits(big.NewInt(int64(env.V1.Tx.Ext.SorobanData.ResourceFee)), ClassicDecimals)
 	return &types.SwapRoute{
 		Source:      lifiName,
 		FromAmount:  req.Amount,

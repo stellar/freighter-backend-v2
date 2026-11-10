@@ -1023,3 +1023,35 @@ func TestLifiQuoteResourceFee(t *testing.T) {
 		})
 	}
 }
+
+// /swap/tx refuses a LI.FI transaction without a usable resource fee, so the
+// quote must not offer a route that can never build.
+func TestLifiQuoteRefusesTransactionWithoutResourceFee(t *testing.T) {
+	for name, mutate := range map[string]func(*xdr.TransactionEnvelope){
+		"no SorobanData": func(env *xdr.TransactionEnvelope) {
+			env.V1.Tx.Ext = xdr.TransactionExt{V: 0}
+		},
+		"negative resource fee": func(env *xdr.TransactionEnvelope) {
+			env.V1.Tx.Ext.SorobanData.ResourceFee = -1
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var raw map[string]any
+			require.NoError(t, json.Unmarshal(lifiFixture(t, "lifi_quote_xlm_usdc_trust.json"), &raw))
+			txReq := raw["transactionRequest"].(map[string]any)
+			var env xdr.TransactionEnvelope
+			require.NoError(t, xdr.SafeUnmarshalBase64(txReq["data"].(string), &env))
+			mutate(&env)
+			b64, err := xdr.MarshalBase64(env)
+			require.NoError(t, err)
+			txReq["data"] = b64
+			body, err := json.Marshal(raw)
+			require.NoError(t, err)
+
+			var q LifiQuote
+			require.NoError(t, json.Unmarshal(body, &q))
+			_, err = lifiServer(t, 200, body).Quote(context.Background(), lifiReq(fmtRaw(t, q.Action.FromAmount, 7)))
+			require.Error(t, err)
+		})
+	}
+}
