@@ -54,6 +54,19 @@ func TestServeCmd_Command(t *testing.T) {
 	assert.Equal(t, "localhost", redisHostFlag)
 	redisPortFlag, _ := cmd.Flags().GetInt("redis-port")
 	assert.Equal(t, 6379, redisPortFlag)
+
+	// Cross Mesh: URLs default to the public endpoints; keys default empty so
+	// no environment is configured unless its key is set (TR-2).
+	for flag, want := range map[string]string{
+		"crossmesh-mainnet-url":     "https://ingress-api.crossmesh.xyz",
+		"crossmesh-testnet-url":     "https://ingress-api-testnet.crossmesh.xyz",
+		"crossmesh-mainnet-api-key": "",
+		"crossmesh-testnet-api-key": "",
+	} {
+		got, err := cmd.Flags().GetString(flag)
+		require.NoError(t, err, flag)
+		assert.Equal(t, want, got, flag)
+	}
 }
 
 func TestServeCmd_Execute(t *testing.T) {
