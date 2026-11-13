@@ -552,8 +552,8 @@ func TestApiServer_AssetSearchRouteIsWiredFromConfig(t *testing.T) {
 	assert.Equal(t, "Bearer test-key", gotAuth)
 }
 
-// The cross-chain chains list is public (D2); the two address routes act on
-// an account and sit behind the global auth mode like other user routes.
+// The cross-chain chains list is public (D2); the address and deposits routes
+// act on an account and sit behind the global auth mode like other user routes.
 // All three are always registered: an unconfigured network answers 404 from
 // the handler instead.
 func TestRoutes_CrossChainGating(t *testing.T) {
@@ -561,9 +561,10 @@ func TestRoutes_CrossChainGating(t *testing.T) {
 	require.NoError(t, err)
 
 	want := map[string]bool{
-		"GET /api/v1/cross-chain-deposit/chains":                     false,
-		"POST /api/v1/cross-chain-deposit/addresses":                 true,
-		"GET /api/v1/cross-chain-deposit/accounts/{account}/address": true,
+		"GET /api/v1/cross-chain-deposit/chains":                      false,
+		"POST /api/v1/cross-chain-deposit/addresses":                  true,
+		"GET /api/v1/cross-chain-deposit/accounts/{account}/address":  true,
+		"GET /api/v1/cross-chain-deposit/accounts/{account}/deposits": true,
 	}
 	for _, rt := range rts {
 		key := rt.method + " " + rt.pattern
