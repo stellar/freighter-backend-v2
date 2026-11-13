@@ -203,6 +203,22 @@ func (c StellarExpertCandle) TS() int64 { return int64(c[0]) }
 func (c StellarExpertCandle) Open() float64  { return c[1] }
 func (c StellarExpertCandle) Close() float64 { return c[4] }
 
+// CrossMeshService is the Cross Mesh Ingress API client. network is a Stellar
+// network (PUBLIC uses the mainnet environment, TESTNET the testnet one).
+// Address calls always use delivery_asset USDC and speed standard.
+type CrossMeshService interface {
+	GetChains(ctx context.Context, network string) (*CrossMeshChains, error)
+	// LookupDepositAddress returns the recipient's address, or nil when it
+	// has none yet. It never creates one.
+	LookupDepositAddress(ctx context.Context, network, recipient string) (*CrossMeshDepositAddress, error)
+	// CreateDepositAddress gets or creates the recipient's address.
+	CreateDepositAddress(ctx context.Context, network, recipient string) (*CrossMeshDepositAddress, error)
+	// ListDeposits returns one page of the recipient's deposits, newest
+	// first. An empty cursor requests the first page.
+	ListDeposits(ctx context.Context, network, recipient, cursor string, limit int) (*CrossMeshDepositPage, error)
+	GetSettlement(ctx context.Context, network, id string) (*CrossMeshSettlement, error)
+}
+
 type StellarExpertService interface {
 	Service
 	GetAsset(ctx context.Context, network, assetID string) (*StellarExpertAsset, error)
