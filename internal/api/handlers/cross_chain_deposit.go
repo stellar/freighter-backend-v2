@@ -1,4 +1,4 @@
-// ABOUTME: HTTP handlers for cross-chain deposits: the chains list and the two deposit address routes.
+// ABOUTME: HTTP handlers for cross-chain deposits: the chains list, the two deposit address routes, and the deposits view.
 // ABOUTME: Maps service errors to the feature's machine-readable codes, sent as `code` in the error extras.
 package handlers
 
@@ -94,6 +94,30 @@ func (h *CrossChainDepositHandler) CreateAddress(w http.ResponseWriter, r *http.
 // account's existing deposit address, never creating one.
 func (h *CrossChainDepositHandler) LookupAddress(w http.ResponseWriter, r *http.Request) error {
 	return h.address(w, r, r.PathValue("account"), h.service.LookupAddress)
+}
+
+// ListDeposits handles GET
+// /api/v1/cross-chain-deposit/accounts/{account}/deposits?network=: every
+// deposit of the account, newest first, with its user_state, fees and
+// remaining_to_minimum.
+func (h *CrossChainDepositHandler) ListDeposits(w http.ResponseWriter, r *http.Request) error {
+	account := r.PathValue("account")
+	if !utils.IsValidStellarPublicKey(account) {
+		return crossChainError(http.StatusBadRequest, "invalid_account", "account must be a Stellar G address", errors.New("invalid account"))
+	}
+	network := r.URL.Query().Get("network")
+	if !isValidNetwork(network) {
+		return crossChainError(http.StatusNotFound, "network_not_supported", "cross-chain deposits are not supported on this network", errors.New("invalid network"))
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), CrossChainDepositContextTimeout)
+	defer cancel()
+
+	deposits, err := h.service.ListDeposits(ctx, network, account)
+	if err != nil {
+		return crossChainHTTPError(ctx, err, network)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	return response.OK(w, HttpResponse{Data: map[string]any{"deposits": deposits}})
 }
 
 func (h *CrossChainDepositHandler) address(w http.ResponseWriter, r *http.Request, account string, get func(ctx context.Context, network, account string) (*services.DepositAddress, error)) error {

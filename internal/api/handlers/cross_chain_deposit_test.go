@@ -111,6 +111,19 @@ type ccFixture struct {
 	rpc           *utils.MockRPCService
 	cache         services.JSONCache
 	metrics       *metrics.CrossChain
+
+	// Deposits route: pages by cursor ("" is the first page) and settlements
+	// by id. settlementErr, when set, is consulted first with the 1-based call
+	// count for that id. A settlement missing from the map is a 404
+	// settlement_not_found. Settlement calls run concurrently, so mu guards
+	// settlementCalls.
+	pages           map[string]*types.CrossMeshDepositPage
+	listCursors     []string
+	listLimits      []int
+	settlements     map[string]*types.CrossMeshSettlement
+	settlementErr   func(id string, call int) error
+	mu              sync.Mutex
+	settlementCalls map[string]int
 }
 
 func newCCFixture(t *testing.T) *ccFixture {
@@ -120,6 +133,8 @@ func newCCFixture(t *testing.T) *ccFixture {
 		row:     ccStandardRow(ccDerived),
 		rpc:     ccLedger(t, true, limit(1)),
 		metrics: metrics.NewCrossChain(prometheus.NewRegistry()),
+
+		settlementCalls: map[string]int{},
 	}
 }
 
@@ -135,12 +150,33 @@ func (f *ccFixture) serve(method, target, body string) *httptest.ResponseRecorde
 		},
 		CreateDepositAddressFunc: fetch,
 		LookupDepositAddressFunc: fetch,
+		ListDepositsFunc: func(_ context.Context, _, _, cursor string, limit int) (*types.CrossMeshDepositPage, error) {
+			f.listCursors = append(f.listCursors, cursor)
+			f.listLimits = append(f.listLimits, limit)
+			return f.pages[cursor], nil
+		},
+		GetSettlementFunc: func(_ context.Context, _, id string) (*types.CrossMeshSettlement, error) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			f.settlementCalls[id]++
+			if f.settlementErr != nil {
+				if err := f.settlementErr(id, f.settlementCalls[id]); err != nil {
+					return nil, err
+				}
+			}
+			st, ok := f.settlements[id]
+			if !ok {
+				return nil, ccUpstreamError(http.StatusNotFound, "settlement_not_found")
+			}
+			return st, nil
+		},
 	}
 	h := NewCrossChainDepositHandler(services.NewCrossChainDepositService(cm, f.rpc, f.cache, ccConfig, f.metrics))
 	mux := http.NewServeMux()
 	mux.Handle("GET /chains", CustomHandler(h.GetChains))
 	mux.Handle("POST /addresses", CustomHandler(h.CreateAddress))
 	mux.Handle("GET /accounts/{account}/address", CustomHandler(h.LookupAddress))
+	mux.Handle("GET /accounts/{account}/deposits", CustomHandler(h.ListDeposits))
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(method, target, strings.NewReader(body)))
@@ -188,10 +224,16 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	return &logs
 }
 
-// ccMapCache is an in-memory JSON cache.
+// ccUpstreamError is a Cross Mesh error answer as the client returns it.
+func ccUpstreamError(status int, code string) error {
+	return &metrics.UpstreamError{Kind: "http_error", Code: status, Err: &services.CrossMeshError{Status: status, Code: code}}
+}
+
+// ccMapCache is an in-memory JSON cache. ttls records each key's TTL.
 type ccMapCache struct {
 	mu      sync.Mutex
 	entries map[string][]byte
+	ttls    map[string]time.Duration
 }
 
 func (c *ccMapCache) MGetJSON(_ context.Context, keys []string, makeDest func() any) (map[string]any, error) {
@@ -210,7 +252,7 @@ func (c *ccMapCache) MGetJSON(_ context.Context, keys []string, makeDest func() 
 	return out, nil
 }
 
-func (c *ccMapCache) SetJSON(_ context.Context, key string, value any, _ time.Duration) error {
+func (c *ccMapCache) SetJSON(_ context.Context, key string, value any, ttl time.Duration) error {
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -218,6 +260,10 @@ func (c *ccMapCache) SetJSON(_ context.Context, key string, value any, _ time.Du
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries[key] = raw
+	if c.ttls == nil {
+		c.ttls = map[string]time.Duration{}
+	}
+	c.ttls[key] = ttl
 	return nil
 }
 
@@ -271,7 +317,8 @@ func TestCrossChain_UnconfiguredNetworkReturns404(t *testing.T) {
 		for _, rt := range ccAddressRoutes {
 			requireCCError(t, rt.call(f, ccAccount, network), http.StatusNotFound, "network_not_supported")
 		}
-		assert.Zero(t, f.chainsCalls+f.upstreamCalls, network)
+		requireCCError(t, f.serve(http.MethodGet, "/accounts/"+ccAccount+"/deposits?network="+network, ""), http.StatusNotFound, "network_not_supported")
+		assert.Zero(t, f.chainsCalls+f.upstreamCalls+len(f.listCursors), network)
 	}
 }
 
