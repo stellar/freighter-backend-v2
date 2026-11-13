@@ -266,6 +266,15 @@ func TestCrossMesh_Errors(t *testing.T) {
 		assert.NotContains(t, err.Error(), testCrossMeshKey)
 	})
 
+	t.Run("undecodable success body is an error", func(t *testing.T) {
+		t.Parallel()
+		svc := newTestCrossMesh(t, serveJSON(t, http.StatusOK, `<html>maintenance</html>`, nil))
+		_, err := svc.GetChains(context.Background(), types.TESTNET)
+		require.Error(t, err)
+		var cmErr *CrossMeshError
+		assert.False(t, errors.As(err, &cmErr))
+	})
+
 	t.Run("timeout is distinguishable", func(t *testing.T) {
 		t.Parallel()
 		release := make(chan struct{})
