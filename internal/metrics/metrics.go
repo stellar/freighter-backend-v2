@@ -50,22 +50,52 @@ func (e *UpstreamError) Unwrap() error { return e.Err }
 
 // Metrics groups all Prometheus metrics. Must be created via NewMetrics.
 type Metrics struct {
-	HTTP    *HTTP
-	Service *Service
-	Auth    *Auth
-	Prices  *Prices
-	Swap    *Swap
+	HTTP       *HTTP
+	Service    *Service
+	Auth       *Auth
+	Prices     *Prices
+	Swap       *Swap
+	CrossChain *CrossChain
 }
 
 // NewMetrics creates and registers all application metrics with the given registerer.
 func NewMetrics(reg prometheus.Registerer) *Metrics {
 	return &Metrics{
-		HTTP:    NewHTTP(reg),
-		Service: NewService(reg),
-		Auth:    NewAuth(reg),
-		Prices:  NewPrices(reg),
-		Swap:    NewSwap(reg),
+		HTTP:       NewHTTP(reg),
+		Service:    NewService(reg),
+		Auth:       NewAuth(reg),
+		Prices:     NewPrices(reg),
+		Swap:       NewSwap(reg),
+		CrossChain: NewCrossChain(reg),
 	}
+}
+
+// CrossChain holds cross-chain deposit metrics.
+type CrossChain struct {
+	// VerificationFailures counts Cross Mesh deposit addresses that did not
+	// match the backend's own CREATE2 derivation, by network.
+	VerificationFailures *prometheus.CounterVec
+}
+
+// NewCrossChain creates and registers cross-chain deposit metrics with the given registerer.
+func NewCrossChain(reg prometheus.Registerer) *CrossChain {
+	c := &CrossChain{
+		VerificationFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_crosschain_verification_failures_total",
+			Help: "Cross Mesh deposit addresses that did not match the backend's CREATE2 derivation; each one was withheld from the user.",
+		}, []string{"network"}),
+	}
+	reg.MustRegister(c.VerificationFailures)
+	return c
+}
+
+// RecordVerificationFailure counts one deposit address that failed
+// verification. Nil-safe.
+func RecordVerificationFailure(c *CrossChain, network string) {
+	if c == nil {
+		return
+	}
+	c.VerificationFailures.WithLabelValues(sanitizeNetwork(network)).Inc()
 }
 
 // Client-type label values for the auth metric. The set is closed so a

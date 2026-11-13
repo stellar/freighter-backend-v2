@@ -447,3 +447,21 @@ func keysOf[V any](m map[string]V) []string {
 // Both are %q-formatted, so the captures are escape-aware and the caller
 // unquotes them.
 var descRE = regexp.MustCompile(`fqName: "((?:[^"\\]|\\.)*)", help: "((?:[^"\\]|\\.)*)"`)
+
+func TestRecordVerificationFailure(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewMetrics(reg)
+	require.NotNil(t, m.CrossChain)
+
+	RecordVerificationFailure(m.CrossChain, "TESTNET")
+	RecordVerificationFailure(m.CrossChain, "attacker-controlled")
+
+	assert.InDelta(t, 1, testutil.ToFloat64(m.CrossChain.VerificationFailures.WithLabelValues("TESTNET")), 0)
+	assert.InDelta(t, 1, testutil.ToFloat64(m.CrossChain.VerificationFailures.WithLabelValues("unknown")), 0)
+
+	problems, err := testutil.GatherAndLint(reg, "freighter_crosschain_verification_failures_total")
+	require.NoError(t, err)
+	assert.Empty(t, problems)
+
+	assert.NotPanics(t, func() { RecordVerificationFailure(nil, "TESTNET") })
+}
