@@ -282,7 +282,7 @@ func (s *ApiServer) routes() ([]route, error) {
 	protocolsHandler := handlers.NewProtocolsHandler(s.cfg.AppConfig.ProtocolsConfigPath)
 	collectiblesHandler := handlers.NewCollectiblesHandler(s.rpcService, s.cfg.AppConfig.MeridianPayTreasureHuntAddress, s.cfg.AppConfig.MeridianPayTreasurePoapAddress, s.cfg.AppConfig.MeridianPayStellarHouseAddress, s.cfg.RpcConfig.MaxConcurrentRPCCalls)
 	ledgerKeyAccountsHandler := handlers.NewLedgerKeyAccountHandler(s.rpcService, s.cfg.AppConfig.MaxLedgerKeyAddresses)
-	featureFlagsHandler := handlers.NewFeatureFlagsHandler()
+	featureFlagsHandler := handlers.NewFeatureFlagsHandler(services.CrossMeshConfiguredNetworks(s.cfg.CrossMeshConfig))
 	accountBalancesHandler := handlers.NewAccountBalancesHandler(s.walletBackendService, s.cfg.AppConfig.MaxBalanceAddresses)
 	tokenPricesHandler := handlers.NewTokenPricesHandler(s.pricesService, s.cfg.PricesConfig.MaxTokensPerRequest, s.appMetrics.Prices)
 	tokenPriceHistoryHandler := handlers.NewTokenPriceHistoryHandler(s.priceHistoryService)

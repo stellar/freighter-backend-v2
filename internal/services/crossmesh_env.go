@@ -59,6 +59,18 @@ func CrossMeshConfigured(cfg config.CrossMeshConfig, network string) bool {
 	return ok && key != "" && env.Factory != "" && env.Implementation != ""
 }
 
+// CrossMeshConfiguredNetworks lists the networks with a configured Cross Mesh
+// environment, PUBLIC before TESTNET. It is never nil, so it encodes as [].
+func CrossMeshConfiguredNetworks(cfg config.CrossMeshConfig) []string {
+	networks := []string{}
+	for _, network := range []string{types.PUBLIC, types.TESTNET} {
+		if CrossMeshConfigured(cfg, network) {
+			networks = append(networks, network)
+		}
+	}
+	return networks
+}
+
 // crossMeshEndpoint returns the base URL and API key serving network, or
 // empty strings for a network Cross Mesh does not serve. The URL's trailing
 // slashes are trimmed so joining it with a path never yields "//".
