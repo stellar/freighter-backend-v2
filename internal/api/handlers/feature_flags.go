@@ -11,16 +11,23 @@ const (
 	FeatureFlagsContextTimeout = 5 * time.Second
 )
 
-type FeatureFlagsHandler struct{}
+type FeatureFlagsHandler struct {
+	crossChainDepositNetworks []string
+}
 
 type FeatureFlagsResponse struct {
 	SwapEnabled     bool `json:"swap_enabled"`
 	DiscoverEnabled bool `json:"discover_enabled"`
 	OnrampEnabled   bool `json:"onramp_enabled"`
+	// CrossChainDepositNetworks lists the networks where cross-chain
+	// deposits are available (TR-2).
+	CrossChainDepositNetworks []string `json:"cross_chain_deposit_networks"`
 }
 
-func NewFeatureFlagsHandler() *FeatureFlagsHandler {
-	return &FeatureFlagsHandler{}
+// NewFeatureFlagsHandler builds the handler. crossChainDepositNetworks is
+// fixed at startup from config (see services.CrossMeshConfiguredNetworks).
+func NewFeatureFlagsHandler(crossChainDepositNetworks []string) *FeatureFlagsHandler {
+	return &FeatureFlagsHandler{crossChainDepositNetworks: crossChainDepositNetworks}
 }
 
 func (h *FeatureFlagsHandler) GetFeatureFlags(w http.ResponseWriter, r *http.Request) error {
@@ -34,6 +41,8 @@ func (h *FeatureFlagsHandler) GetFeatureFlags(w http.ResponseWriter, r *http.Req
 		SwapEnabled:     true,
 		DiscoverEnabled: true,
 		OnrampEnabled:   true,
+
+		CrossChainDepositNetworks: h.crossChainDepositNetworks,
 	}
 
 	if platform == "ios" && version == "1.6.23" {
