@@ -551,3 +551,29 @@ func TestApiServer_AssetSearchRouteIsWiredFromConfig(t *testing.T) {
 	assert.Equal(t, "25", gotLimit, "--asset-search-max-limit must reach the service")
 	assert.Equal(t, "Bearer test-key", gotAuth)
 }
+
+// The cross-chain chains list is public (D2); the two address routes act on
+// an account and sit behind the global auth mode like other user routes.
+// All three are always registered: an unconfigured network answers 404 from
+// the handler instead.
+func TestRoutes_CrossChainGating(t *testing.T) {
+	rts, err := newTestAPIServer(t, testCfg("strict")).routes()
+	require.NoError(t, err)
+
+	want := map[string]bool{
+		"GET /api/v1/cross-chain-deposit/chains":                     false,
+		"POST /api/v1/cross-chain-deposit/addresses":                 true,
+		"GET /api/v1/cross-chain-deposit/accounts/{account}/address": true,
+	}
+	for _, rt := range rts {
+		key := rt.method + " " + rt.pattern
+		gated, ok := want[key]
+		if !ok {
+			continue
+		}
+		assert.Equal(t, gated, rt.gated, "%s gated", key)
+		assert.True(t, rt.enabled, "%s enabled", key)
+		delete(want, key)
+	}
+	assert.Empty(t, want, "routes missing from routes()")
+}

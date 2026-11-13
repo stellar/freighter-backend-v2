@@ -52,6 +52,7 @@ type ApiServer struct {
 	tokenStatsService    types.TokenStatsService
 	swapService          types.SwapService
 	assetSearchService   types.AssetSearchService
+	crossChainDeposit    *services.CrossChainDepositService
 	registry             *prometheus.Registry
 	appMetrics           *metrics.Metrics
 	authMode             auth.Mode
@@ -196,6 +197,11 @@ func (s *ApiServer) initServices() error {
 		MaxLimit:      s.cfg.AssetSearchConfig.MaxLimit,
 	}, s.appMetrics.Prices)
 
+	s.crossChainDeposit = services.NewCrossChainDepositService(
+		services.NewCrossMeshService(s.cfg.CrossMeshConfig, s.appMetrics.Service),
+		s.rpcService, s.redis, s.cfg.CrossMeshConfig, s.appMetrics.CrossChain,
+	)
+
 	return nil
 }
 
@@ -292,6 +298,7 @@ func (s *ApiServer) routes() ([]route, error) {
 		return nil, fmt.Errorf("init account-history handler: %w", err)
 	}
 	whoamiHandler := handlers.NewWhoamiHandler()
+	crossChainDepositHandler := handlers.NewCrossChainDepositHandler(s.crossChainDeposit)
 
 	return []route{
 		// Health/liveness/readiness probes: gated=false, registered BARE — never
@@ -337,6 +344,13 @@ func (s *ApiServer) routes() ([]route, error) {
 		// 2026-11-06.
 		{http.MethodGet, "/api/v1/assets/search", handlers.CustomHandler(assetSearchHandler.SearchAssets), true, true},
 		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, true},
+		// Cross-chain deposits via Cross Mesh. The chains list is public
+		// reference data; the address routes act on an account. Always
+		// registered: a network without a configured Cross Mesh environment
+		// answers 404 network_not_supported from the handler.
+		{http.MethodGet, "/api/v1/cross-chain-deposit/chains", handlers.CustomHandler(crossChainDepositHandler.GetChains), false, true},
+		{http.MethodPost, "/api/v1/cross-chain-deposit/addresses", handlers.CustomHandler(crossChainDepositHandler.CreateAddress), true, true},
+		{http.MethodGet, "/api/v1/cross-chain-deposit/accounts/{account}/address", handlers.CustomHandler(crossChainDepositHandler.LookupAddress), true, true},
 	}, nil
 }
 
