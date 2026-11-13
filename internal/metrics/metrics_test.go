@@ -18,6 +18,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
 func TestNewMetrics_RegistersWithoutPanic(t *testing.T) {
@@ -453,15 +455,15 @@ func TestRecordVerificationFailure(t *testing.T) {
 	m := NewMetrics(reg)
 	require.NotNil(t, m.CrossChain)
 
-	RecordVerificationFailure(m.CrossChain, "TESTNET")
+	RecordVerificationFailure(m.CrossChain, types.TESTNET)
 	RecordVerificationFailure(m.CrossChain, "attacker-controlled")
 
-	assert.InDelta(t, 1, testutil.ToFloat64(m.CrossChain.VerificationFailures.WithLabelValues("TESTNET")), 0)
+	assert.InDelta(t, 1, testutil.ToFloat64(m.CrossChain.VerificationFailures.WithLabelValues(types.TESTNET)), 0)
 	assert.InDelta(t, 1, testutil.ToFloat64(m.CrossChain.VerificationFailures.WithLabelValues("unknown")), 0)
 
 	problems, err := testutil.GatherAndLint(reg, "freighter_crosschain_verification_failures_total")
 	require.NoError(t, err)
 	assert.Empty(t, problems)
 
-	assert.NotPanics(t, func() { RecordVerificationFailure(nil, "TESTNET") })
+	assert.NotPanics(t, func() { RecordVerificationFailure(nil, types.TESTNET) })
 }

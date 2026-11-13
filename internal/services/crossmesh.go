@@ -99,13 +99,19 @@ func (s *crossMeshService) GetSettlement(ctx context.Context, network, id string
 	return crossMeshCall[types.CrossMeshSettlement](ctx, s, "GetSettlement", network, http.MethodGet, "/v1/settlements/"+url.PathEscape(id), nil)
 }
 
+// recordCall records one call's count, duration and, on failure, its error
+// type into the service metrics. Every error counts: unlike wallet-backend's
+// account-not-found, no Cross Mesh outcome is a normal client result here.
+// metrics.Record is nil-safe and buckets unknown networks.
+func (s *crossMeshService) recordCall(method, network string, start time.Time, err error) {
+	metrics.Record(s.svcMetrics, crossMeshServiceName, method, network, time.Since(start).Seconds(), err)
+}
+
 // crossMeshCall sends one request (body, when non-nil, as JSON), decodes a 200
 // into T, and records the call metrics under method.
 func crossMeshCall[T any](ctx context.Context, s *crossMeshService, method, network, httpMethod, path string, body any) (_ *T, err error) {
 	start := time.Now()
-	defer func() {
-		metrics.Record(s.svcMetrics, crossMeshServiceName, method, network, time.Since(start).Seconds(), err)
-	}()
+	defer func() { s.recordCall(method, network, start, err) }()
 
 	baseURL, apiKey := crossMeshEndpoint(s.cfg, network)
 	if baseURL == "" {

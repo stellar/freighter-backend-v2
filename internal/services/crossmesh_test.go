@@ -8,13 +8,17 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stellar/freighter-backend-v2/internal/config"
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
 	"github.com/stellar/freighter-backend-v2/internal/types"
 )
 
@@ -299,4 +303,26 @@ func TestCrossMesh_Errors(t *testing.T) {
 		_, err := svc.GetChains(context.Background(), types.FUTURENET)
 		require.Error(t, err)
 	})
+}
+
+func TestCrossMesh_RecordsServiceMetrics(t *testing.T) {
+	t.Parallel()
+	var status atomic.Int32
+	status.Store(http.StatusOK)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(int(status.Load()))
+		_, _ = w.Write([]byte(`{"chains":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+	m := metrics.NewService(prometheus.NewRegistry())
+	svc := NewCrossMeshService(config.CrossMeshConfig{TestnetURL: srv.URL, TestnetAPIKey: testCrossMeshKey}, m)
+
+	_, err := svc.GetChains(context.Background(), types.TESTNET)
+	require.NoError(t, err)
+	status.Store(http.StatusConflict)
+	_, err = svc.GetChains(context.Background(), types.TESTNET)
+	require.Error(t, err)
+
+	assert.InDelta(t, 2, testutil.ToFloat64(m.CallsTotal.WithLabelValues("crossmesh", "GetChains", types.TESTNET)), 0)
+	assert.InDelta(t, 1, testutil.ToFloat64(m.ErrorsTotal.WithLabelValues("crossmesh", "GetChains", types.TESTNET, "http_error:409")), 0)
 }
