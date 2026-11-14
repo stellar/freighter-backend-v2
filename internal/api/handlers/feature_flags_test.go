@@ -8,10 +8,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/stellar/freighter-backend-v2/internal/config"
+	"github.com/stellar/freighter-backend-v2/internal/services"
 )
 
 func TestFeatureFlagsHandler(t *testing.T) {
-	handler := NewFeatureFlagsHandler()
+	handler := NewFeatureFlagsHandler(nil)
 
 	tests := []struct {
 		name             string
@@ -79,6 +82,29 @@ func TestFeatureFlagsHandler(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.expectedResponse, resp)
+		})
+	}
+}
+
+// TR-2: the flag lists exactly the networks with a configured Cross Mesh
+// environment; pubnet stays absent while its contracts are not pinned.
+func TestFeatureFlags_TR2_ListsConfiguredNetworks(t *testing.T) {
+	cases := map[string]struct {
+		cfg  config.CrossMeshConfig
+		want string
+	}{
+		"testnet key set": {config.CrossMeshConfig{TestnetAPIKey: "testnet-key", MainnetAPIKey: "mainnet-key"}, `["TESTNET"]`},
+		"no keys":         {config.CrossMeshConfig{}, `[]`},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			handler := NewFeatureFlagsHandler(services.CrossMeshConfiguredNetworks(tc.cfg))
+			rr := httptest.NewRecorder()
+			require.NoError(t, handler.GetFeatureFlags(rr, httptest.NewRequest(http.MethodGet, "/feature-flags", nil)))
+
+			var resp map[string]json.RawMessage
+			require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+			assert.JSONEq(t, tc.want, string(resp["cross_chain_deposit_networks"]))
 		})
 	}
 }
