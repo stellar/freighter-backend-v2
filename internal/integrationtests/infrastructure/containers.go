@@ -32,6 +32,18 @@ const (
 	FreighterContainerTag   = "integration-test"
 	FreighterDockerfilePath = "deployments/Dockerfile"
 
+	// A second backend, with its own Redis so it never shares the chains
+	// cache, runs against a fake Cross Mesh whose chains are all suspended.
+	SuspendedFreighterContainerName = "freighter-all-suspended"
+	SuspendedRedisContainerName     = "redis-all-suspended"
+
+	// Fake Cross Mesh Ingress API (fakecrossmesh/), built from this repo.
+	CrossMeshContainerName          = "crossmesh"
+	SuspendedCrossMeshContainerName = "crossmesh-all-suspended"
+	CrossMeshContainerPort          = "8080"
+	CrossMeshDockerfilePath         = "internal/integrationtests/infrastructure/fakecrossmesh/Dockerfile"
+	CrossMeshAPIKey                 = "test-key"
+
 	// App database: a dedicated Postgres for freighter-backend-v2 (separate from
 	// the Stellar Core DB above). serve requires DATABASE_URL and pings it on
 	// boot, so the integration harness must provide a reachable database.
@@ -129,11 +141,12 @@ func shouldRebuildImage(imageTag string) bool {
 	return !imageExists(imageTag)
 }
 
-// ensureFreighterBackendImage builds the freighter-backend Docker image if needed.
-// Building the image before starting containers gives Stellar Core time to advance ledgers.
-func ensureFreighterBackendImage(ctx context.Context, baseTag string) (string, error) {
+// ensureImage builds repository's Docker image from dockerfilePath, with the
+// repo root as context, if needed. Building the image before starting
+// containers gives Stellar Core time to advance ledgers.
+func ensureImage(ctx context.Context, repository, baseTag, dockerfilePath string) (string, error) {
 	commitHash := getGitCommitHash()
-	imageTag := fmt.Sprintf("freighter-backend:%s-%s", baseTag, commitHash)
+	imageTag := fmt.Sprintf("%s:%s-%s", repository, baseTag, commitHash)
 	if !shouldRebuildImage(imageTag) {
 		return imageTag, nil
 	}
@@ -144,24 +157,25 @@ func ensureFreighterBackendImage(ctx context.Context, baseTag string) (string, e
 
 	cmd := exec.CommandContext(ctx, "docker", "build",
 		"-t", imageTag,
-		"-f", filepath.Join(repoRoot, FreighterDockerfilePath),
+		"-f", filepath.Join(repoRoot, dockerfilePath),
 		repoRoot,
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("building freighter-backend image: %w", err)
+		return "", fmt.Errorf("building %s image: %w", repository, err)
 	}
 
 	return imageTag, nil
 }
 
-// createRedisContainer starts a Redis container for testing.
-func createRedisContainer(ctx context.Context, testNetwork *testcontainers.DockerNetwork) (*redis.RedisContainer, error) {
+// createRedisContainer starts a Redis container for testing, reachable on the
+// test network as alias.
+func createRedisContainer(ctx context.Context, alias string, testNetwork *testcontainers.DockerNetwork) (*redis.RedisContainer, error) {
 	container, err := redis.Run(ctx,
 		RedisContainerImage,
-		network.WithNetwork([]string{RedisContainerName}, testNetwork),
+		network.WithNetwork([]string{alias}, testNetwork),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating redis container: %w", err)
@@ -365,8 +379,39 @@ func createRPCContainer(ctx context.Context, testNetwork *testcontainers.DockerN
 	return &TestContainer{Container: container, MappedPortStr: "8000"}, nil
 }
 
-// createFreighterContainer creates a new Freighter container using a pre-built image.
-func createFreighterContainer(ctx context.Context, name string, imageName string, testNetwork *testcontainers.DockerNetwork) (*FreighterBackendContainer, error) {
+// createCrossMeshContainer starts the fake Cross Mesh on the testnet data set;
+// scenario is its SCENARIO env ("" or "all_suspended").
+func createCrossMeshContainer(ctx context.Context, name, imageName, scenario string, testNetwork *testcontainers.DockerNetwork) (*TestContainer, error) {
+	containerRequest := testcontainers.ContainerRequest{
+		Name:  name,
+		Image: imageName,
+		Labels: map[string]string{
+			"org.testcontainers.session-id": "freighter-integration-tests",
+		},
+		Env: map[string]string{
+			"ENV":      "testnet",
+			"SCENARIO": scenario,
+		},
+		Networks:     []string{testNetwork.Name},
+		ExposedPorts: []string{fmt.Sprintf("%s/tcp", CrossMeshContainerPort)},
+		WaitingFor:   wait.ForListeningPort(nat.Port(fmt.Sprintf("%s/tcp", CrossMeshContainerPort))),
+	}
+
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: containerRequest,
+		Reuse:            true,
+		Started:          true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating %s container: %w", name, err)
+	}
+
+	return &TestContainer{Container: container, MappedPortStr: CrossMeshContainerPort}, nil
+}
+
+// createFreighterContainer creates a new Freighter container using a pre-built
+// image, using the Redis at redisHost and the Cross Mesh testnet at crossMeshURL.
+func createFreighterContainer(ctx context.Context, name, imageName, redisHost, crossMeshURL string, testNetwork *testcontainers.DockerNetwork) (*FreighterBackendContainer, error) {
 	containerRequest := testcontainers.ContainerRequest{
 		Name:  name,
 		Image: imageName,
@@ -383,15 +428,19 @@ func createFreighterContainer(ctx context.Context, name string, imageName string
 			"FREIGHTER_BACKEND_PORT": FreighterContainerPort,
 			"METRICS_HOST":           FreighterMetricsHost,
 			"METRICS_PORT":           FreighterMetricsPort,
-			"REDIS_HOST":             RedisContainerName,
+			"REDIS_HOST":             redisHost,
 			"REDIS_PORT":             RedisContainerPort,
 			"DATABASE_URL":           AppDatabaseURL,
 			"PUBNET_RPC_URL":         "http://stellar-rpc:8000",
-			"TESTNET_RPC_URL":        "http://horizon-testnet.stellar.org",
-			"FUTURENET_RPC_URL":      "http://horizon-futurenet.stellar.org",
+			// TESTNET also reads the standalone network, so the cross-chain
+			// USDC trustline check sees accounts the tests create there.
+			"TESTNET_RPC_URL":   "http://stellar-rpc:8000",
+			"FUTURENET_RPC_URL": "http://horizon-futurenet.stellar.org",
 			// Token-prices endpoint isn't exercised by integration tests;
 			// the server still requires a non-empty key at startup.
-			"STELLAR_EXPERT_API_KEY": "integration-test-placeholder",
+			"STELLAR_EXPERT_API_KEY":    "integration-test-placeholder",
+			"CROSSMESH_TESTNET_URL":     crossMeshURL,
+			"CROSSMESH_TESTNET_API_KEY": CrossMeshAPIKey,
 		},
 		Networks:   []string{testNetwork.Name},
 		WaitingFor: wait.ForHTTP("/api/v1/ping"),
