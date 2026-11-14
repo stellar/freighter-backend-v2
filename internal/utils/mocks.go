@@ -262,3 +262,33 @@ func (m *MockTokenStatsService) GetTokenStats(ctx context.Context, canonical, ne
 	}
 	return &types.TokenStats{}, nil
 }
+
+// MockCrossMeshService answers each call with the matching func, which the
+// test must set for every method it exercises.
+type MockCrossMeshService struct {
+	GetChainsFunc            func(ctx context.Context, network string) (*types.CrossMeshChains, error)
+	LookupDepositAddressFunc func(ctx context.Context, network, recipient string) (*types.CrossMeshDepositAddress, error)
+	CreateDepositAddressFunc func(ctx context.Context, network, recipient string) (*types.CrossMeshDepositAddress, error)
+	ListDepositsFunc         func(ctx context.Context, network, recipient, cursor string, limit int) (*types.CrossMeshDepositPage, error)
+	GetSettlementFunc        func(ctx context.Context, network, id string) (*types.CrossMeshSettlement, error)
+}
+
+func (m *MockCrossMeshService) GetChains(ctx context.Context, network string) (*types.CrossMeshChains, error) {
+	return m.GetChainsFunc(ctx, network)
+}
+
+func (m *MockCrossMeshService) LookupDepositAddress(ctx context.Context, network, recipient string) (*types.CrossMeshDepositAddress, error) {
+	return m.LookupDepositAddressFunc(ctx, network, recipient)
+}
+
+func (m *MockCrossMeshService) CreateDepositAddress(ctx context.Context, network, recipient string) (*types.CrossMeshDepositAddress, error) {
+	return m.CreateDepositAddressFunc(ctx, network, recipient)
+}
+
+func (m *MockCrossMeshService) ListDeposits(ctx context.Context, network, recipient, cursor string, limit int) (*types.CrossMeshDepositPage, error) {
+	return m.ListDepositsFunc(ctx, network, recipient, cursor, limit)
+}
+
+func (m *MockCrossMeshService) GetSettlement(ctx context.Context, network, id string) (*types.CrossMeshSettlement, error) {
+	return m.GetSettlementFunc(ctx, network, id)
+}
