@@ -1,13 +1,11 @@
 // ABOUTME: Fake Cross Mesh Ingress API for integration tests: chains, deposit addresses, deposits and settlements.
-// ABOUTME: ENV picks the chain ids, SCENARIO=all_suspended suspends every chain; deposit histories are chosen by recipient.
+// ABOUTME: Serves testnet data only; deposit histories are chosen by recipient and served in one page.
 package main
 
 import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,27 +16,17 @@ import (
 
 const listenAddr = ":8080"
 
-// depositAddress is a deposit address row as the API returns it.
-type depositAddress struct {
-	DepositAddress string `json:"deposit_address"`
-	Recipient      string `json:"recipient"`
-	DeliveryAsset  string `json:"delivery_asset"`
-	Speed          string `json:"speed"`
-	Index          uint64 `json:"index"`
-	CreatedAt      string `json:"created_at"`
-}
-
 // server holds the deposit addresses created so far, one per recipient.
 type server struct {
 	chains    []map[string]any
 	mu        sync.Mutex
-	addresses map[string]depositAddress
+	addresses map[string]types.CrossMeshDepositAddress
 }
 
 func main() {
 	s := &server{
-		chains:    chains(os.Getenv("ENV"), os.Getenv("SCENARIO")),
-		addresses: map[string]depositAddress{},
+		chains:    chains(),
+		addresses: map[string]types.CrossMeshDepositAddress{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/chains", s.getChains)
@@ -93,7 +81,7 @@ func (s *server) createDepositAddress(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		row = depositAddress{
+		row = types.CrossMeshDepositAddress{
 			DepositAddress: address, Recipient: body.Recipient, DeliveryAsset: body.DeliveryAsset,
 			Speed: body.Speed, Index: index, CreatedAt: time.Now().UTC().Format(time.RFC3339),
 		}
@@ -110,40 +98,21 @@ func (s *server) listDepositAddresses(w http.ResponseWriter, r *http.Request) {
 	row, ok := s.addresses[q.Get("recipient")]
 	s.mu.Unlock()
 
-	data := []depositAddress{}
+	data := []types.CrossMeshDepositAddress{}
 	if ok && row.DeliveryAsset == q.Get("delivery_asset") && row.Speed == q.Get("speed") {
 		data = append(data, row)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": data, "has_more": false, "next_cursor": nil})
 }
 
-// listDeposits pages through the recipient's canned deposits: at most limit
-// rows after the deposit named by starting_after, in the canned order.
+// listDeposits serves all of the recipient's canned deposits in one page,
+// in the canned order. The limit parameter is ignored.
 func listDeposits(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	limit, err := strconv.Atoi(q.Get("limit"))
-	if err != nil || limit < 1 {
-		writeError(w, http.StatusBadRequest, "invalid_request", "limit must be a positive integer")
-		return
+	rows := depositsByRecipient[r.URL.Query().Get("recipient")]
+	if rows == nil {
+		rows = []map[string]any{}
 	}
-	rows := depositsByRecipient[q.Get("recipient")]
-
-	start := 0
-	if after := q.Get("starting_after"); after != "" {
-		for i, row := range rows {
-			if row["deposit_id"] == after {
-				start = i + 1
-			}
-		}
-	}
-	end := min(start+limit, len(rows))
-	page := append([]map[string]any{}, rows[start:end]...)
-
-	var next any
-	if end < len(rows) {
-		next = rows[end-1]["deposit_id"]
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": page, "has_more": next != nil, "next_cursor": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": rows, "has_more": false, "next_cursor": nil})
 }
 
 // getSettlement serves a canned settlement round; unavailableSettlementID

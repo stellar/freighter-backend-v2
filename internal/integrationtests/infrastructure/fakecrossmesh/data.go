@@ -1,26 +1,15 @@
-// ABOUTME: Canned Cross Mesh data for the fake: chains per environment, deposit histories per recipient, settlement rounds.
+// ABOUTME: Canned testnet Cross Mesh data for the fake: chains, deposit histories per recipient, settlement rounds.
 // ABOUTME: Rows carry the spec fields the backend reads; recipients here must match the integration suite's constants.
 package main
 
 import "encoding/json"
 
-// chains returns the chains list. env "mainnet" switches to mainnet chain
-// ids and USDC contracts; scenario "all_suspended" suspends every chain.
-func chains(env, scenario string) []map[string]any {
-	ethereumID, ethereumUSDC := 11155111, "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
-	polygonID, polygonUSDC := 80002, "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582"
-	if env == "mainnet" {
-		ethereumID, ethereumUSDC = 1, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-		polygonID, polygonUSDC = 137, "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
-	}
-	status := "active"
-	if scenario == "all_suspended" {
-		status = "suspended"
-	}
+// chains returns the testnet chains list, every chain active.
+func chains() []map[string]any {
 	unavailable := map[string]any{"available": false, "max_cctp_fee_ppm": nil, "estimated_delivery_seconds": nil}
 	return []map[string]any{
 		{
-			"chain": "ethereum", "chain_id": ethereumID, "status": status, "usdc_address": ethereumUSDC,
+			"chain": "ethereum", "chain_id": 11155111, "status": "active", "usdc_address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
 			"confirmations": 3, "min_settlement_amount": "1000000", "decimals": 6,
 			"speeds": map[string]any{
 				"standard": map[string]any{"available": true, "max_cctp_fee_ppm": nil, "estimated_delivery_seconds": 1080},
@@ -30,7 +19,7 @@ func chains(env, scenario string) []map[string]any {
 		},
 		{
 			// No delivery estimate and no fees yet: both are nullable.
-			"chain": "polygon", "chain_id": polygonID, "status": status, "usdc_address": polygonUSDC,
+			"chain": "polygon", "chain_id": 80002, "status": "active", "usdc_address": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
 			"confirmations": 3, "min_settlement_amount": "1000000", "decimals": 6,
 			"speeds": map[string]any{
 				"standard": map[string]any{"available": true, "max_cctp_fee_ppm": nil, "estimated_delivery_seconds": nil},

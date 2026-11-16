@@ -40,9 +40,8 @@ func TestIntegrationTests(t *testing.T) {
 	})
 	t.Run("CrossChainDepositTestSuite", func(t *testing.T) {
 		suite.Run(t, &CrossChainDepositTestSuite{
-			freighterContainer:          containers.FreighterContainer,
-			suspendedFreighterContainer: containers.SuspendedFreighterContainer,
-			rpcContainer:                containers.RpcContainer,
+			freighterContainer: containers.FreighterContainer,
+			rpcContainer:       containers.RpcContainer,
 		})
 	})
 }

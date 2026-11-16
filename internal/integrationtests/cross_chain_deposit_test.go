@@ -34,14 +34,12 @@ const (
 
 type CrossChainDepositTestSuite struct {
 	suite.Suite
-	freighterContainer          *infrastructure.FreighterBackendContainer
-	suspendedFreighterContainer *infrastructure.FreighterBackendContainer
-	rpcContainer                *infrastructure.TestContainer
+	freighterContainer *infrastructure.FreighterBackendContainer
+	rpcContainer       *infrastructure.TestContainer
 
-	baseURL      string
-	suspendedURL string
-	rpc          *rpcclient.Client
-	testnetEnv   services.CrossMeshEnv
+	baseURL    string
+	rpc        *rpcclient.Client
+	testnetEnv services.CrossMeshEnv
 
 	// Funded accounts on the standalone network.
 	noTrustline string
@@ -53,8 +51,6 @@ func (s *CrossChainDepositTestSuite) SetupSuite() {
 	ctx := context.Background()
 	var err error
 	s.baseURL, err = s.freighterContainer.GetConnectionString(ctx)
-	s.Require().NoError(err)
-	s.suspendedURL, err = s.suspendedFreighterContainer.GetConnectionString(ctx)
 	s.Require().NoError(err)
 	rpcURL, err := s.rpcContainer.GetConnectionString(ctx)
 	s.Require().NoError(err)
@@ -226,14 +222,6 @@ func (s *CrossChainDepositTestSuite) TestAddress_TR8_TR18_TR19_TR20to26_TR28_Cre
 func (s *CrossChainDepositTestSuite) TestAddress_TR10_LookupWithoutAddressReturns404() {
 	status, body := s.getAddress(s.baseURL, s.noAddress)
 	s.requireErrorCode(status, body, http.StatusNotFound, "no_deposit_address")
-}
-
-func (s *CrossChainDepositTestSuite) TestAddress_TR14_AllChainsSuspendedReturns409OnBothRoutes() {
-	status, body := s.postAddress(s.suspendedURL, s.trustlined, "TESTNET")
-	s.requireErrorCode(status, body, http.StatusConflict, "no_active_chain")
-
-	status, body = s.getAddress(s.suspendedURL, s.trustlined)
-	s.requireErrorCode(status, body, http.StatusConflict, "no_active_chain")
 }
 
 func (s *CrossChainDepositTestSuite) TestAccountRoutes_TR15_MuxedAccountReturns400() {

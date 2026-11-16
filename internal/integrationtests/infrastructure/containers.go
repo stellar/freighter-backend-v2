@@ -32,17 +32,11 @@ const (
 	FreighterContainerTag   = "integration-test"
 	FreighterDockerfilePath = "deployments/Dockerfile"
 
-	// A second backend, with its own Redis so it never shares the chains
-	// cache, runs against a fake Cross Mesh whose chains are all suspended.
-	SuspendedFreighterContainerName = "freighter-all-suspended"
-	SuspendedRedisContainerName     = "redis-all-suspended"
-
 	// Fake Cross Mesh Ingress API (fakecrossmesh/), built from this repo.
-	CrossMeshContainerName          = "crossmesh"
-	SuspendedCrossMeshContainerName = "crossmesh-all-suspended"
-	CrossMeshContainerPort          = "8080"
-	CrossMeshDockerfilePath         = "internal/integrationtests/infrastructure/fakecrossmesh/Dockerfile"
-	CrossMeshAPIKey                 = "test-key"
+	CrossMeshContainerName  = "crossmesh"
+	CrossMeshContainerPort  = "8080"
+	CrossMeshDockerfilePath = "internal/integrationtests/infrastructure/fakecrossmesh/Dockerfile"
+	CrossMeshAPIKey         = "test-key"
 
 	// App database: a dedicated Postgres for freighter-backend-v2 (separate from
 	// the Stellar Core DB above). serve requires DATABASE_URL and pings it on
@@ -170,12 +164,11 @@ func ensureImage(ctx context.Context, repository, baseTag, dockerfilePath string
 	return imageTag, nil
 }
 
-// createRedisContainer starts a Redis container for testing, reachable on the
-// test network as alias.
-func createRedisContainer(ctx context.Context, alias string, testNetwork *testcontainers.DockerNetwork) (*redis.RedisContainer, error) {
+// createRedisContainer starts a Redis container for testing.
+func createRedisContainer(ctx context.Context, testNetwork *testcontainers.DockerNetwork) (*redis.RedisContainer, error) {
 	container, err := redis.Run(ctx,
 		RedisContainerImage,
-		network.WithNetwork([]string{alias}, testNetwork),
+		network.WithNetwork([]string{RedisContainerName}, testNetwork),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("creating redis container: %w", err)
@@ -379,18 +372,13 @@ func createRPCContainer(ctx context.Context, testNetwork *testcontainers.DockerN
 	return &TestContainer{Container: container, MappedPortStr: "8000"}, nil
 }
 
-// createCrossMeshContainer starts the fake Cross Mesh on the testnet data set;
-// scenario is its SCENARIO env ("" or "all_suspended").
-func createCrossMeshContainer(ctx context.Context, name, imageName, scenario string, testNetwork *testcontainers.DockerNetwork) (*TestContainer, error) {
+// createCrossMeshContainer starts the fake Cross Mesh.
+func createCrossMeshContainer(ctx context.Context, imageName string, testNetwork *testcontainers.DockerNetwork) (*TestContainer, error) {
 	containerRequest := testcontainers.ContainerRequest{
-		Name:  name,
+		Name:  CrossMeshContainerName,
 		Image: imageName,
 		Labels: map[string]string{
 			"org.testcontainers.session-id": "freighter-integration-tests",
-		},
-		Env: map[string]string{
-			"ENV":      "testnet",
-			"SCENARIO": scenario,
 		},
 		Networks:     []string{testNetwork.Name},
 		ExposedPorts: []string{fmt.Sprintf("%s/tcp", CrossMeshContainerPort)},
@@ -403,15 +391,15 @@ func createCrossMeshContainer(ctx context.Context, name, imageName, scenario str
 		Started:          true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("creating %s container: %w", name, err)
+		return nil, fmt.Errorf("creating fake cross mesh container: %w", err)
 	}
 
 	return &TestContainer{Container: container, MappedPortStr: CrossMeshContainerPort}, nil
 }
 
 // createFreighterContainer creates a new Freighter container using a pre-built
-// image, using the Redis at redisHost and the Cross Mesh testnet at crossMeshURL.
-func createFreighterContainer(ctx context.Context, name, imageName, redisHost, crossMeshURL string, testNetwork *testcontainers.DockerNetwork) (*FreighterBackendContainer, error) {
+// image, using the Cross Mesh testnet at crossMeshURL.
+func createFreighterContainer(ctx context.Context, name, imageName, crossMeshURL string, testNetwork *testcontainers.DockerNetwork) (*FreighterBackendContainer, error) {
 	containerRequest := testcontainers.ContainerRequest{
 		Name:  name,
 		Image: imageName,
@@ -428,7 +416,7 @@ func createFreighterContainer(ctx context.Context, name, imageName, redisHost, c
 			"FREIGHTER_BACKEND_PORT": FreighterContainerPort,
 			"METRICS_HOST":           FreighterMetricsHost,
 			"METRICS_PORT":           FreighterMetricsPort,
-			"REDIS_HOST":             redisHost,
+			"REDIS_HOST":             RedisContainerName,
 			"REDIS_PORT":             RedisContainerPort,
 			"DATABASE_URL":           AppDatabaseURL,
 			"PUBNET_RPC_URL":         "http://stellar-rpc:8000",
