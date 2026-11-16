@@ -59,6 +59,11 @@ type LifiQuote struct {
 			} `json:"token"`
 		} `json:"feeCosts"`
 	} `json:"estimate"`
+	IncludedSteps []struct {
+		Estimate struct {
+			Hops []LifiHop `json:"hops"`
+		} `json:"estimate"`
+	} `json:"includedSteps"`
 	TransactionRequest *struct {
 		Data string `json:"data"`
 	} `json:"transactionRequest"`

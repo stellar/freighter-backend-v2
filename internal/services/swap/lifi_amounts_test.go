@@ -1,0 +1,137 @@
+package swap
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/stellar/freighter-backend-v2/internal/metrics"
+	"github.com/stellar/freighter-backend-v2/internal/types"
+)
+
+// lifi_quote_xlm_eurc_hops.json is a live /v1/quote: path 0 is XLM→EURC on
+// Aquarius, path 1 is XLM→USDC on Aquarius then USDC→EURC on Soroswap.
+const hopsFixture = "lifi_quote_xlm_eurc_hops.json"
+
+// hopsQuote quotes XLM→EURC from body, with USDC labelled when labelUSDC.
+func hopsQuote(t *testing.T, body []byte, labelUSDC bool) (*types.SwapRoute, *metrics.Swap) {
+	t.Helper()
+	var q LifiQuote
+	require.NoError(t, json.Unmarshal(body, &q))
+	rpc := &fakeDecimalsRPC{fn: decimalsOf(7)}
+	if labelUSDC {
+		rpc.ledger = instanceEntries(t, map[string]string{usdcContract: "USDC:" + usdcIssuer})
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(body) }))
+	t.Cleanup(srv.Close)
+	m := metrics.NewSwap(prometheus.NewRegistry())
+	src := NewLifiSource(LifiConfig{Client: NewLifiClient(srv.URL, "", srv.Client()), RPC: rpc}, m)
+	req := lifiReq(fmtRaw(t, q.Action.FromAmount, 7))
+	req.ToAsset = eurcContract
+	rt, err := src.Quote(context.Background(), req)
+	require.NoError(t, err)
+	return rt, m
+}
+
+// editHops rewrites the fixture's estimate.hops through edit.
+func editHops(t *testing.T, edit func(hops []any) []any) []byte {
+	t.Helper()
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(lifiFixture(t, hopsFixture), &raw))
+	for _, s := range raw["includedSteps"].([]any) {
+		est := s.(map[string]any)["estimate"].(map[string]any)
+		if hops, ok := est["hops"].([]any); ok {
+			est["hops"] = edit(hops)
+		}
+	}
+	body, err := json.Marshal(raw)
+	require.NoError(t, err)
+	return body
+}
+
+func hopAmounts(paths []types.SwapPath) [][]string {
+	out := make([][]string, len(paths))
+	for i, p := range paths {
+		for _, h := range p.Hops {
+			out[i] = append(out[i], h.ToAmount)
+		}
+	}
+	return out
+}
+
+func TestLifiHopAmountsAttached(t *testing.T) {
+	rt, m := hopsQuote(t, lifiFixture(t, hopsFixture), true)
+	assert.Equal(t, [][]string{{"39.7618746"}, {"130.1363633", "118.9939446"}}, hopAmounts(rt.Paths))
+	assert.Equal(t, "USDC:"+usdcIssuer, rt.Paths[1].Hops[0].To)
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.HopAmounts.WithLabelValues("attached")))
+}
+
+func TestLifiHopAmountsWithheld(t *testing.T) {
+	cases := map[string]struct {
+		body      func(t *testing.T) []byte
+		labelUSDC bool
+		result    string
+	}{
+		"no estimate.hops": {
+			body:      func(t *testing.T) []byte { return editHops(t, func([]any) []any { return nil }) },
+			labelUSDC: true, result: "missing",
+		},
+		"venue differs from the transaction": {
+			body: func(t *testing.T) []byte {
+				return editHops(t, func(h []any) []any { h[2].(map[string]any)["venue"] = "Comet"; return h })
+			},
+			labelUSDC: true, result: "mismatch",
+		},
+		"token differs from the transaction": {
+			body: func(t *testing.T) []byte {
+				return editHops(t, func(h []any) []any {
+					h[0].(map[string]any)["toToken"].(map[string]any)["address"] = usdcContract
+					return h
+				})
+			},
+			labelUSDC: true, result: "mismatch",
+		},
+		"a hop is missing": {
+			body:      func(t *testing.T) []byte { return editHops(t, func(h []any) []any { return h[:2] }) },
+			labelUSDC: true, result: "mismatch",
+		},
+		"an extra hop": {
+			body:      func(t *testing.T) []byte { return editHops(t, func(h []any) []any { return append(h, h[0]) }) },
+			labelUSDC: true, result: "mismatch",
+		},
+		"path index out of range": {
+			body: func(t *testing.T) []byte {
+				return editHops(t, func(h []any) []any { h[0].(map[string]any)["path"] = 2; return h })
+			},
+			labelUSDC: true, result: "mismatch",
+		},
+		"non-positive amount": {
+			body: func(t *testing.T) []byte {
+				return editHops(t, func(h []any) []any { h[1].(map[string]any)["toAmount"] = "0"; return h })
+			},
+			labelUSDC: true, result: "mismatch",
+		},
+		"middle token not labelled": {
+			body:      func(t *testing.T) []byte { return lifiFixture(t, hopsFixture) },
+			labelUSDC: false, result: "no_decimals",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			rt, m := hopsQuote(t, tc.body(t), tc.labelUSDC)
+			for _, p := range rt.Paths {
+				for _, h := range p.Hops {
+					assert.Empty(t, h.ToAmount)
+				}
+			}
+			assert.Equal(t, 1.0, testutil.ToFloat64(m.HopAmounts.WithLabelValues(tc.result)))
+		})
+	}
+}
