@@ -123,7 +123,7 @@ func crossChainError(status int, code, message string, err error) *httperror.Htt
 
 // crossChainHTTPError maps a service error to the feature's error codes.
 // Cross Mesh's own code and request_id are added to the extras when known.
-// Server-side failures (5xx) are logged.
+// Server-side failures (5xx) are logged, except a client cancellation.
 func crossChainHTTPError(ctx context.Context, err error, network string) *httperror.HttpError {
 	var cmErr *services.CrossMeshError
 	isCrossMesh := errors.As(err, &cmErr)
@@ -145,6 +145,9 @@ func crossChainHTTPError(ctx context.Context, err error, network string) *httper
 		herr.Extras["asset_issuer"] = env.USDCIssuer
 	case errors.Is(err, services.ErrVerificationFailed):
 		herr = crossChainError(http.StatusBadGateway, "verification_failed", "deposit address failed verification", err)
+	case errors.Is(err, context.Canceled):
+		// The client went away; this is not an upstream failure.
+		return crossChainError(http.StatusServiceUnavailable, "request_canceled", "request was canceled", err)
 	case errors.Is(err, context.DeadlineExceeded):
 		herr = crossChainError(http.StatusGatewayTimeout, "upstream_timeout", "upstream timed out", err)
 	case errors.Is(err, services.ErrChainsUnavailable):

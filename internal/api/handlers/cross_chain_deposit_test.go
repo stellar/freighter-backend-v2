@@ -434,3 +434,12 @@ func TestAddress_TR5_ErrorClasses(t *testing.T) {
 		}
 	}
 }
+
+func TestCrossChain_ClientCancelIsNotUpstreamError(t *testing.T) {
+	logs := captureLogs(t)
+	f := newCCFixture(t)
+	f.rowErr = fmt.Errorf("crossmesh CreateDepositAddress: %w", context.Canceled)
+
+	requireCCError(t, ccAddressRoutes[0].call(f, ccAccount, types.TESTNET), http.StatusServiceUnavailable, "request_canceled")
+	assert.NotContains(t, logs.String(), "level=ERROR")
+}
