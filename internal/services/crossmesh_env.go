@@ -3,6 +3,7 @@
 package services
 
 import (
+	"strings"
 	"time"
 
 	"github.com/stellar/freighter-backend-v2/internal/config"
@@ -59,13 +60,14 @@ func CrossMeshConfigured(cfg config.CrossMeshConfig, network string) bool {
 }
 
 // crossMeshEndpoint returns the base URL and API key serving network, or
-// empty strings for a network Cross Mesh does not serve.
+// empty strings for a network Cross Mesh does not serve. The URL's trailing
+// slashes are trimmed so joining it with a path never yields "//".
 func crossMeshEndpoint(cfg config.CrossMeshConfig, network string) (baseURL, apiKey string) {
 	switch network {
 	case types.PUBLIC:
-		return cfg.MainnetURL, cfg.MainnetAPIKey
+		return strings.TrimRight(cfg.MainnetURL, "/"), cfg.MainnetAPIKey
 	case types.TESTNET:
-		return cfg.TestnetURL, cfg.TestnetAPIKey
+		return strings.TrimRight(cfg.TestnetURL, "/"), cfg.TestnetAPIKey
 	default:
 		return "", ""
 	}

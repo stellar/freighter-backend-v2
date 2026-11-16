@@ -92,6 +92,18 @@ func TestCrossMesh_GetChains(t *testing.T) {
 	assert.Nil(t, got.Chains[1].Fees)
 }
 
+func TestCrossMesh_TrailingSlashBaseURL(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(serveJSON(t, http.StatusOK, `{"chains":[]}`, func(r *http.Request) {
+		assert.Equal(t, "/v1/chains", r.URL.Path)
+	}))
+	t.Cleanup(srv.Close)
+	svc := NewCrossMeshService(config.CrossMeshConfig{TestnetURL: srv.URL + "/", TestnetAPIKey: testCrossMeshKey}, nil)
+
+	_, err := svc.GetChains(context.Background(), types.TESTNET)
+	require.NoError(t, err)
+}
+
 const testDepositAddressRow = `{"deposit_address":"0x93845A25A3a5F9b15c25532797CE56fD4851Fcce",
 	"recipient":"GBRAD6AQVETCVZDBT3TLU3KXGPQIXOIQX5DLJYKHNZ4ZF6AWYQXEZGQD","delivery_asset":"USDC",
 	"speed":"standard","index":0,"created_at":"2026-11-13T00:00:00Z"`
