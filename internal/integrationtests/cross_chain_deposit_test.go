@@ -62,18 +62,22 @@ func (s *CrossChainDepositTestSuite) SetupSuite() {
 
 	// The backend's TESTNET RPC is the standalone network, so the USDC
 	// trustline check reads accounts created here. changeTrust needs the
-	// issuer to exist; its key is public, so root can create it.
+	// issuer to exist; its key is public, so root can create it. The issuer
+	// outlives a run on a reused network, so it is created only when missing.
 	root, ok := keypair.Master(standaloneNetworkPassphrase).(*keypair.Full)
 	s.Require().True(ok)
 	noTrustline, trustlined, noAddress := keypair.MustRandom(), keypair.MustRandom(), keypair.MustRandom()
 	s.noTrustline, s.trustlined, s.noAddress = noTrustline.Address(), trustlined.Address(), noAddress.Address()
 
-	s.submit(root, []txnbuild.Operation{
-		&txnbuild.CreateAccount{Destination: s.testnetEnv.USDCIssuer, Amount: "100"},
+	ops := []txnbuild.Operation{
 		&txnbuild.CreateAccount{Destination: s.noTrustline, Amount: "100"},
 		&txnbuild.CreateAccount{Destination: s.trustlined, Amount: "100"},
 		&txnbuild.CreateAccount{Destination: s.noAddress, Amount: "100"},
-	})
+	}
+	if _, lookupErr := s.rpc.LoadAccount(ctx, s.testnetEnv.USDCIssuer); lookupErr != nil {
+		ops = append(ops, &txnbuild.CreateAccount{Destination: s.testnetEnv.USDCIssuer, Amount: "100"})
+	}
+	s.submit(root, ops)
 	usdc := txnbuild.CreditAsset{Code: "USDC", Issuer: s.testnetEnv.USDCIssuer}.MustToChangeTrustAsset()
 	s.submit(trustlined, []txnbuild.Operation{
 		&txnbuild.ChangeTrust{Line: usdc},
