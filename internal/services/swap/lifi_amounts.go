@@ -19,15 +19,17 @@ type LifiHop struct {
 	ToToken struct {
 		Address string `json:"address"`
 	} `json:"toToken"`
-	ToAmount string `json:"toAmount"`
+	FromAmount string `json:"fromAmount"`
+	ToAmount   string `json:"toAmount"`
 }
 
 var lifiHopVenues = map[string]string{"Aquarius": "Aquarius", "Sushi": "SushiSwap", "Soroswap": "Soroswap"}
 
 // lifiHopAmounts returns each hop's raw output amount, aligned with paths, or
 // nil and the reason. Paths come from the signed transaction, so an estimate
-// is used only when its hops match them hop for hop; otherwise the route is
-// shown without amounts rather than with numbers for a route not being signed.
+// is used only when its hops match them hop for hop and its split matches
+// their shares; otherwise the route is shown without amounts rather than with
+// numbers for a route not being signed.
 // Call it before labelSACHops: it compares contract IDs.
 func lifiHopAmounts(q *LifiQuote, paths []types.SwapPath, label func(string) string) ([][]*big.Int, string) {
 	var hops []LifiHop
@@ -38,6 +40,7 @@ func lifiHopAmounts(q *LifiQuote, paths []types.SwapPath, label func(string) str
 		return nil, "missing"
 	}
 	out := make([][]*big.Int, len(paths))
+	firstIn := make([]*big.Int, len(paths))
 	for _, h := range hops {
 		if h.Path < 0 || h.Path >= len(paths) {
 			return nil, "mismatch"
@@ -48,14 +51,29 @@ func lifiHopAmounts(q *LifiQuote, paths []types.SwapPath, label func(string) str
 		}
 		want := paths[h.Path].Hops[j]
 		amt, ok := new(big.Int).SetString(h.ToAmount, 10)
-		if lifiHopVenues[h.Venue] != want.Venue || label(h.FromToken.Address) != want.From ||
+		// Every decoded hop has a pool; lifiPaths' fallback path does not.
+		if want.Pool == "" || lifiHopVenues[h.Venue] != want.Venue || label(h.FromToken.Address) != want.From ||
 			label(h.ToToken.Address) != want.To || !ok || amt.Sign() <= 0 {
 			return nil, "mismatch"
 		}
+		if j == 0 {
+			in, ok := new(big.Int).SetString(h.FromAmount, 10)
+			if !ok || in.Sign() <= 0 {
+				return nil, "mismatch"
+			}
+			firstIn[h.Path] = in
+		}
 		out[h.Path] = append(out[h.Path], amt)
 	}
+	total := new(big.Int)
 	for i := range paths {
 		if len(out[i]) != len(paths[i].Hops) {
+			return nil, "mismatch"
+		}
+		total.Add(total, firstIn[i])
+	}
+	for i := range paths {
+		if shareString(firstIn[i], total) != paths[i].Share {
 			return nil, "mismatch"
 		}
 	}
@@ -63,8 +81,9 @@ func lifiHopAmounts(q *LifiQuote, paths []types.SwapPath, label func(string) str
 }
 
 // setHopAmounts formats raw onto the labelled paths, or sets none: a route
-// with only some hop amounts would read as complete. A middle token left as a
-// contract ID is not a SAC, so its decimals are unknown here.
+// with only some hop amounts would read as complete. A middle token that
+// labelSACHops left as a contract ID (not a SAC, or its read failed) has no
+// known decimals here.
 func setHopAmounts(paths []types.SwapPath, raw [][]*big.Int, from, to Asset, fromDecimals, toDecimals int) string {
 	formatted := make([][]string, len(paths))
 	for i, p := range paths {

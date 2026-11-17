@@ -9,6 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -23,6 +24,13 @@ const hopsFixture = "lifi_quote_xlm_eurc_hops.json"
 // hopsQuote quotes XLM→EURC from body, with USDC labelled when labelUSDC.
 func hopsQuote(t *testing.T, body []byte, labelUSDC bool) (*types.SwapRoute, *metrics.Swap) {
 	t.Helper()
+	rt, m, err := hopsQuoteErr(t, body, labelUSDC)
+	require.NoError(t, err)
+	return rt, m
+}
+
+func hopsQuoteErr(t *testing.T, body []byte, labelUSDC bool) (*types.SwapRoute, *metrics.Swap, error) {
+	t.Helper()
 	var q LifiQuote
 	require.NoError(t, json.Unmarshal(body, &q))
 	rpc := &fakeDecimalsRPC{fn: decimalsOf(7)}
@@ -36,8 +44,7 @@ func hopsQuote(t *testing.T, body []byte, labelUSDC bool) (*types.SwapRoute, *me
 	req := lifiReq(fmtRaw(t, q.Action.FromAmount, 7))
 	req.ToAsset = eurcContract
 	rt, err := src.Quote(context.Background(), req)
-	require.NoError(t, err)
-	return rt, m
+	return rt, m, err
 }
 
 // editHops rewrites the fixture's estimate.hops through edit.
@@ -118,6 +125,12 @@ func TestLifiHopAmountsWithheld(t *testing.T) {
 			},
 			labelUSDC: true, result: "mismatch",
 		},
+		"split differs from the transaction": {
+			body: func(t *testing.T) []byte {
+				return editHops(t, func(h []any) []any { h[0].(map[string]any)["fromAmount"] = "1"; return h })
+			},
+			labelUSDC: true, result: "mismatch",
+		},
 		"middle token not labelled": {
 			body:      func(t *testing.T) []byte { return lifiFixture(t, hopsFixture) },
 			labelUSDC: false, result: "no_decimals",
@@ -134,4 +147,34 @@ func TestLifiHopAmountsWithheld(t *testing.T) {
 			assert.Equal(t, 1.0, testutil.ToFloat64(m.HopAmounts.WithLabelValues(tc.result)))
 		})
 	}
+}
+
+func TestLifiHopAmountsNotOnFallbackPath(t *testing.T) {
+	// lifiPaths' stand-in when it cannot read the distribution: not decoded
+	// from the transaction, so it has no pool.
+	fallback := []types.SwapPath{{Share: "1", Hops: []types.SwapHop{{Venue: "Soroswap", From: "XLM", To: "EURC"}}}}
+	var q LifiQuote
+	require.NoError(t, json.Unmarshal([]byte(`{"includedSteps":[{"estimate":{"hops":[{"venue":"Soroswap","path":0,
+		"fromToken":{"address":"XLM"},"toToken":{"address":"EURC"},"fromAmount":"10","toAmount":"9"}]}}]}`), &q))
+	raw, result := lifiHopAmounts(&q, fallback, func(c string) string { return c })
+	assert.Nil(t, raw)
+	assert.Equal(t, "mismatch", result)
+}
+
+func TestLifiHopAmountsNotCountedForRefusedRoute(t *testing.T) {
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(lifiFixture(t, hopsFixture), &raw))
+	txReq := raw["transactionRequest"].(map[string]any)
+	var env xdr.TransactionEnvelope
+	require.NoError(t, xdr.SafeUnmarshalBase64(txReq["data"].(string), &env))
+	env.V1.Tx.Ext.SorobanData.ResourceFee = -1
+	b64, err := xdr.MarshalBase64(env)
+	require.NoError(t, err)
+	txReq["data"] = b64
+	body, err := json.Marshal(raw)
+	require.NoError(t, err)
+
+	_, m, err := hopsQuoteErr(t, body, true)
+	require.Error(t, err)
+	assert.Equal(t, 0, testutil.CollectAndCount(m.HopAmounts))
 }
