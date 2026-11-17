@@ -23,7 +23,7 @@ type SwapHop struct {
 	To    string `json:"to"`
 	Pool  string `json:"pool,omitempty"`
 	// ToAmount is LI.FI's quote-time estimate of this hop's output, in To's
-	// units. Set on every hop of a route or on none.
+	// display units (not base units). Set on every hop of a route or on none.
 	ToAmount string `json:"toAmount,omitempty"`
 }
 
