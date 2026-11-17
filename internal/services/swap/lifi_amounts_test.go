@@ -178,3 +178,16 @@ func TestLifiHopAmountsNotCountedForRefusedRoute(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, 0, testutil.CollectAndCount(m.HopAmounts))
 }
+
+func TestLifiHopAmountsEmptyPathIsMismatch(t *testing.T) {
+	paths := []types.SwapPath{
+		{Share: "1", Hops: []types.SwapHop{{Venue: "Soroswap", From: "XLM", To: "EURC", Pool: "P"}}},
+		{Share: "0"},
+	}
+	var q LifiQuote
+	require.NoError(t, json.Unmarshal([]byte(`{"includedSteps":[{"estimate":{"hops":[{"venue":"Soroswap","path":0,
+		"fromToken":{"address":"XLM"},"toToken":{"address":"EURC"},"fromAmount":"10","toAmount":"9"}]}}]}`), &q))
+	raw, result := lifiHopAmounts(&q, paths, func(c string) string { return c })
+	assert.Nil(t, raw)
+	assert.Equal(t, "mismatch", result)
+}

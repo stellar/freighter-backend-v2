@@ -67,7 +67,7 @@ func lifiHopAmounts(q *LifiQuote, paths []types.SwapPath, label func(string) str
 	}
 	total := new(big.Int)
 	for i := range paths {
-		if len(out[i]) != len(paths[i].Hops) {
+		if len(out[i]) != len(paths[i].Hops) || firstIn[i] == nil {
 			return nil, "mismatch"
 		}
 		total.Add(total, firstIn[i])
