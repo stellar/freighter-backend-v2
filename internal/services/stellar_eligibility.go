@@ -18,11 +18,16 @@ var (
 	// ErrTrustlineMissing means the account has no USDC trustline, or one
 	// with a zero limit, so it cannot receive USDC.
 	ErrTrustlineMissing = errors.New("usdc trustline missing")
+	// ErrTrustlineNotAuthorized means the USDC trustline exists but the issuer
+	// has not authorized it (for example, Circle froze it), so it cannot
+	// receive USDC. Adding a trustline does not fix this.
+	ErrTrustlineNotAuthorized = errors.New("usdc trustline not authorized")
 )
 
-// CheckUSDCTrustline returns nil when account exists and holds a USDC
-// trustline (to issuer) with a non-zero limit, ErrAccountNotFound or
-// ErrTrustlineMissing otherwise, and a wrapped error when the RPC call fails.
+// CheckUSDCTrustline returns nil when account exists and holds an authorized
+// USDC trustline (to issuer) with a non-zero limit; ErrAccountNotFound,
+// ErrTrustlineMissing or ErrTrustlineNotAuthorized otherwise; and a wrapped
+// error when the RPC call fails.
 // account must be a G address.
 func CheckUSDCTrustline(ctx context.Context, rpc types.RPCService, network, account, issuer string) error {
 	accountID, err := xdr.AddressToAccountId(account)
@@ -65,8 +70,12 @@ func CheckUSDCTrustline(ctx context.Context, rpc types.RPCService, network, acco
 	if err = xdr.SafeUnmarshalBase64(trustlineB64, &data); err != nil {
 		return fmt.Errorf("decoding USDC trustline: %w", err)
 	}
-	if line, isLine := data.GetTrustLine(); !isLine || line.Limit == 0 {
+	line, isLine := data.GetTrustLine()
+	if !isLine || line.Limit == 0 {
 		return ErrTrustlineMissing
+	}
+	if line.Flags&xdr.Uint32(xdr.TrustLineFlagsAuthorizedFlag) == 0 {
+		return ErrTrustlineNotAuthorized
 	}
 	return nil
 }
