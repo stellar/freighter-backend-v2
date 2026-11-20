@@ -38,4 +38,10 @@ func TestIntegrationTests(t *testing.T) {
 			freighterContainer: containers.FreighterContainer,
 		})
 	})
+	t.Run("CrossChainDepositTestSuite", func(t *testing.T) {
+		suite.Run(t, &CrossChainDepositTestSuite{
+			freighterContainer: containers.FreighterContainer,
+			rpcContainer:       containers.RpcContainer,
+		})
+	})
 }

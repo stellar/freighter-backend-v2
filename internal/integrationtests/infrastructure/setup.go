@@ -16,24 +16,31 @@ import (
 // SharedContainers holds all containers used across integration test suites.
 type SharedContainers struct {
 	freighterBackendImage string
+	crossMeshImage        string
 	TestNetwork           *testcontainers.DockerNetwork
 	RedisContainer        *redis.RedisContainer
 	PostgresContainer     *TestContainer
 	AppPostgresContainer  *TestContainer
 	StellarCoreContainer  *TestContainer
 	RpcContainer          *TestContainer
+	CrossMeshContainer    *TestContainer
 	FreighterContainer    *FreighterBackendContainer
 }
 
-// initializeContainerInfrastructure builds the backend image and starts all
-// infrastructure containers (network, Redis, Postgres, Core, RPC).
+// initializeContainerInfrastructure builds the backend and fake Cross Mesh
+// images and starts all infrastructure containers (network, Redis, Postgres,
+// Core, RPC, fake Cross Mesh).
 func (s *SharedContainers) initializeContainerInfrastructure(ctx context.Context) error {
 	var err error
 
 	// Build freighter-backend image first so Core has time to advance ledgers
-	s.freighterBackendImage, err = ensureFreighterBackendImage(ctx, FreighterContainerTag)
+	s.freighterBackendImage, err = ensureImage(ctx, "freighter-backend", FreighterContainerTag, FreighterDockerfilePath)
 	if err != nil {
 		return fmt.Errorf("ensuring freighter backend image: %w", err)
+	}
+	s.crossMeshImage, err = ensureImage(ctx, "fakecrossmesh", FreighterContainerTag, CrossMeshDockerfilePath)
+	if err != nil {
+		return fmt.Errorf("ensuring fake cross mesh image: %w", err)
 	}
 
 	// Create network
@@ -73,6 +80,12 @@ func (s *SharedContainers) initializeContainerInfrastructure(ctx context.Context
 		return fmt.Errorf("creating RPC container: %w", err)
 	}
 
+	// Start the fake Cross Mesh
+	s.CrossMeshContainer, err = createCrossMeshContainer(ctx, s.crossMeshImage, s.TestNetwork)
+	if err != nil {
+		return fmt.Errorf("creating fake cross mesh container: %w", err)
+	}
+
 	return nil
 }
 
@@ -85,7 +98,9 @@ func NewSharedContainers(t *testing.T) *SharedContainers {
 	require.NoError(t, err, "failed to initialize container infrastructure")
 
 	// Start Freighter backend (uses pre-built image)
-	shared.FreighterContainer, err = createFreighterContainer(ctx, FreighterContainerName, shared.freighterBackendImage, shared.TestNetwork)
+	crossMeshURL := fmt.Sprintf("http://%s:%s", CrossMeshContainerName, CrossMeshContainerPort)
+	shared.FreighterContainer, err = createFreighterContainer(ctx, FreighterContainerName, shared.freighterBackendImage,
+		crossMeshURL, shared.TestNetwork)
 	require.NoError(t, err, "failed to create freighter container")
 
 	return shared
@@ -95,6 +110,9 @@ func NewSharedContainers(t *testing.T) *SharedContainers {
 func (s *SharedContainers) Cleanup(ctx context.Context) {
 	if s.FreighterContainer != nil {
 		_ = s.FreighterContainer.Terminate(ctx)
+	}
+	if s.CrossMeshContainer != nil {
+		_ = s.CrossMeshContainer.Terminate(ctx)
 	}
 	if s.RpcContainer != nil {
 		_ = s.RpcContainer.Terminate(ctx)
