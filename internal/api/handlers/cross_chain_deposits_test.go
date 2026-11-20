@@ -337,6 +337,11 @@ func TestDeposits_TR47_DecimalsMismatchReturns502(t *testing.T) {
 			f.onePage(ccHeld("dep_a", "below_minimum", "300000", "polygon-amoy"))
 			f.chains.Chains[0].Decimals = 7
 		},
+		"held recipient_not_ready decimals on a below_minimum chain": func(f *ccFixture) {
+			other := ccHeld("dep_b", "recipient_not_ready", "2000000", "polygon-amoy")
+			other.Decimals = 7
+			f.onePage(ccHeld("dep_a", "below_minimum", "300000", "polygon-amoy"), other)
+		},
 	}
 	for name, setup := range cases {
 		t.Run(name, func(t *testing.T) {
