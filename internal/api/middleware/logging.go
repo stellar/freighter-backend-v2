@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -43,6 +45,11 @@ func Logging() Middleware {
 			}
 
 			switch {
+			case errors.Is(r.Context().Err(), context.Canceled):
+				// The client went away; neither the status nor a failed flush
+				// is a server failure.
+				logger.InfoWithContext(r.Context(), "Request canceled by client",
+					withCommon("bodySize", len(body))...)
 			case err != nil:
 				logger.ErrorWithContext(r.Context(), "Request failed to flush response",
 					withCommon("error", err, "bodySize", len(body))...)
