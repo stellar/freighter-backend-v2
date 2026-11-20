@@ -18,8 +18,9 @@ import (
 )
 
 // CrossChainDepositContextTimeout is the deadline for each cross-chain
-// deposit request.
-const CrossChainDepositContextTimeout = 10 * time.Second
+// deposit request. It is 2s below the server's 10s write timeout so a 504
+// upstream_timeout still has time to reach the client.
+const CrossChainDepositContextTimeout = 8 * time.Second
 
 // CrossChainDepositHandler serves /api/v1/cross-chain-deposit.
 type CrossChainDepositHandler struct {
@@ -145,6 +146,14 @@ func crossChainError(status int, code, message string, err error) *httperror.Htt
 	return httperror.NewHttpError(message, err, status, map[string]any{"code": code})
 }
 
+// addUSDCExtras names the USDC asset the account must trust, so the client
+// can point the user at it.
+func addUSDCExtras(herr *httperror.HttpError, network string) {
+	env, _ := services.CrossMeshEnvFor(network)
+	herr.Extras["asset_code"] = "USDC"
+	herr.Extras["asset_issuer"] = env.USDCIssuer
+}
+
 // crossChainHTTPError maps a service error to the feature's error codes.
 // Cross Mesh's own code and request_id are added to the extras when known.
 // Server-side failures (5xx) are logged, except a client cancellation.
@@ -164,9 +173,10 @@ func crossChainHTTPError(ctx context.Context, err error, network string) *httper
 		herr = crossChainError(http.StatusUnprocessableEntity, "account_not_found", "account does not exist on the network", err)
 	case errors.Is(err, services.ErrTrustlineMissing):
 		herr = crossChainError(http.StatusUnprocessableEntity, "usdc_trustline_missing", "account needs a USDC trustline", err)
-		env, _ := services.CrossMeshEnvFor(network)
-		herr.Extras["asset_code"] = "USDC"
-		herr.Extras["asset_issuer"] = env.USDCIssuer
+		addUSDCExtras(herr, network)
+	case errors.Is(err, services.ErrTrustlineNotAuthorized):
+		herr = crossChainError(http.StatusUnprocessableEntity, "usdc_trustline_not_authorized", "the USDC issuer has not authorized this account's trustline", err)
+		addUSDCExtras(herr, network)
 	case errors.Is(err, services.ErrVerificationFailed):
 		herr = crossChainError(http.StatusBadGateway, "verification_failed", "deposit address failed verification", err)
 	case errors.Is(err, context.Canceled):

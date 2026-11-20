@@ -394,15 +394,20 @@ func (s *CrossChainDepositService) addRemainingToMinimum(ctx context.Context, ne
 		return err
 	}
 	for i := range rows {
-		if !isBelowMinimum(rows[i]) {
+		if rows[i].Status != "held" {
 			continue
 		}
 		for _, c := range chains.Chains {
 			if c.Chain != rows[i].SourceChain {
 				continue
 			}
+			// Every held row is in the sum, so each must share the chain's
+			// decimals or the sum mixes units (TR-47).
 			if c.Decimals != rows[i].Decimals {
 				return fmt.Errorf("chain %s decimals %d disagree with deposit %s decimals %d", c.Chain, c.Decimals, rows[i].DepositID, rows[i].Decimals)
+			}
+			if !isBelowMinimum(rows[i]) {
+				continue
 			}
 			remaining := new(big.Int)
 			if err = addAmount(remaining, c.MinSettlementAmount); err != nil {

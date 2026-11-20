@@ -67,6 +67,12 @@ func newTestAPIServer(t *testing.T, cfg *config.Config) *ApiServer {
 	}
 }
 
+// The cross-chain handler deadline must end before the server's write
+// deadline, or a 504 upstream_timeout cannot reach the client.
+func TestCrossChainDepositTimeoutLeavesTimeToWriteError(t *testing.T) {
+	assert.LessOrEqual(t, handlers.CrossChainDepositContextTimeout, DefaultWriteTimeout-2*time.Second)
+}
+
 func TestNewApiServer(t *testing.T) {
 	cfg := &config.Config{}
 	s := NewApiServer(cfg)

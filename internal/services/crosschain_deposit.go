@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/stellar/freighter-backend-v2/internal/config"
 	"github.com/stellar/freighter-backend-v2/internal/logger"
 	"github.com/stellar/freighter-backend-v2/internal/metrics"
@@ -49,6 +51,8 @@ type CrossChainDepositService struct {
 	cache     JSONCache
 	cfg       config.CrossMeshConfig
 	metrics   *metrics.CrossChain
+	// chainsGroup coalesces concurrent chains cache misses, keyed by network.
+	chainsGroup singleflight.Group
 }
 
 // NewCrossChainDepositService builds the service. cache and m may be nil:
@@ -78,18 +82,34 @@ func (s *CrossChainDepositService) GetChains(ctx context.Context, network string
 		}
 	}
 
-	chains, err := s.crossMesh.GetChains(ctx, network)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrChainsUnavailable, err)
-	}
-	if s.cache != nil {
-		wctx, cancel := cacheWriteContext(ctx)
-		defer cancel()
-		if err = s.cache.SetJSON(wctx, key, chains, CrossMeshChainsCacheTTL); err != nil {
-			logger.Warn("crosschain: redis SET failed", "network", network, "error", err)
+	// The shared fetch is detached from the caller, so one caller's
+	// cancellation cannot fail the others waiting on it, and the cache write
+	// never holds up a response. The Cross Mesh client bounds the call.
+	ch := s.chainsGroup.DoChan(network, func() (any, error) {
+		fctx := context.WithoutCancel(ctx)
+		chains, err := s.crossMesh.GetChains(fctx, network)
+		if err != nil {
+			return nil, err
 		}
+		if s.cache != nil {
+			wctx, cancel := cacheWriteContext(fctx)
+			defer cancel()
+			if err = s.cache.SetJSON(wctx, key, chains, CrossMeshChainsCacheTTL); err != nil {
+				logger.Warn("crosschain: redis SET failed", "network", network, "error", err)
+			}
+		}
+		return chains, nil
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrChainsUnavailable, res.Err)
+		}
+		chains, _ := res.Val.(*types.CrossMeshChains)
+		return chains, nil
 	}
-	return chains, nil
 }
 
 // GetOrCreateAddress returns the account's deposit address, creating it on
@@ -119,7 +139,7 @@ func (s *CrossChainDepositService) address(ctx context.Context, network, account
 
 	env, _ := CrossMeshEnvFor(network)
 	if err = CheckUSDCTrustline(ctx, s.rpc, network, account, env.USDCIssuer); err != nil {
-		if errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrTrustlineMissing) {
+		if errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrTrustlineMissing) || errors.Is(err, ErrTrustlineNotAuthorized) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("%w: %w", ErrTrustlineCheckFailed, err)

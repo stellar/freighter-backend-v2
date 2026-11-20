@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/hex"
 	"net/http"
@@ -36,6 +37,25 @@ func TestLogging_AnonymousLineUnchanged(t *testing.T) {
 	assert.Regexp(t, `\bstatus=\S+ method=\S+ url=\S+ duration=\S+ bodySize=\S+`, out)
 	assert.NotContains(t, out, "user_id=")
 	assert.NotContains(t, out, "iss=")
+}
+
+// A client cancellation is not a server failure: the line must not be logged
+// at ERROR, whatever status the handler wrote.
+func TestLogging_CanceledRequestNotLoggedAsError(t *testing.T) {
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	defer logger.SetOutput(os.Stdout)
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/cross-chain-deposit/chains", nil).WithContext(ctx)
+	Logging()(next).ServeHTTP(httptest.NewRecorder(), req)
+
+	out := buf.String()
+	assert.Contains(t, out, "Request canceled by client")
+	assert.Contains(t, out, "level=INFO")
+	assert.NotContains(t, out, "level=ERROR")
 }
 
 // Fields set by a downstream handler must appear on the emitted line.
