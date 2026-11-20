@@ -18,8 +18,9 @@ import (
 )
 
 // CrossChainDepositContextTimeout is the deadline for each cross-chain
-// deposit request.
-const CrossChainDepositContextTimeout = 10 * time.Second
+// deposit request. It is 2s below the server's 10s write timeout so a 504
+// upstream_timeout still has time to reach the client.
+const CrossChainDepositContextTimeout = 8 * time.Second
 
 // CrossChainDepositHandler serves /api/v1/cross-chain-deposit.
 type CrossChainDepositHandler struct {
