@@ -8,7 +8,10 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -86,6 +89,72 @@ func TestCrossChainDepositService_GetChains(t *testing.T) {
 			require.NoError(t, err)
 		}
 		assert.Equal(t, 2, calls)
+	})
+
+	// No cache here, so only request coalescing can hold this to one call.
+	t.Run("concurrent misses share one upstream call", func(t *testing.T) {
+		t.Parallel()
+		var calls atomic.Int32
+		cm := &utils.MockCrossMeshService{GetChainsFunc: func(context.Context, string) (*types.CrossMeshChains, error) {
+			calls.Add(1)
+			// Wide enough that every caller is waiting on the shared fetch
+			// before it completes.
+			time.Sleep(50 * time.Millisecond)
+			return activeChains(), nil
+		}}
+		svc := NewCrossChainDepositService(cm, nil, nil, testnetOnlyCfg, nil)
+
+		const n = 10
+		var wg sync.WaitGroup
+		errs := make([]error, n)
+		for i := range n {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, errs[i] = svc.GetChains(ctx, types.TESTNET)
+			}()
+		}
+		wg.Wait()
+
+		assert.Equal(t, int32(1), calls.Load())
+		for _, err := range errs {
+			require.NoError(t, err)
+		}
+	})
+
+	// A caller who gives up gets its own context error, but the fetch still
+	// finishes and lands in the cache for the next caller.
+	t.Run("caller leaving does not waste the fetch", func(t *testing.T) {
+		t.Parallel()
+		entered := make(chan struct{}, 1)
+		release := make(chan struct{})
+		var calls atomic.Int32
+		cm := &utils.MockCrossMeshService{GetChainsFunc: func(fctx context.Context, _ string) (*types.CrossMeshChains, error) {
+			calls.Add(1)
+			entered <- struct{}{}
+			<-release
+			return activeChains(), fctx.Err()
+		}}
+		cache := newFakeJSONCache()
+		svc := NewCrossChainDepositService(cm, nil, cache, testnetOnlyCfg, nil)
+
+		cctx, cancel := context.WithCancel(ctx)
+		errCh := make(chan error, 1)
+		go func() {
+			_, err := svc.GetChains(cctx, types.TESTNET)
+			errCh <- err
+		}()
+		<-entered
+		cancel()
+		require.ErrorIs(t, <-errCh, context.Canceled)
+
+		close(release)
+		require.Eventually(t, func() bool { return cacheLen(cache) == 1 }, time.Second, 5*time.Millisecond,
+			"the abandoned fetch must still be cached")
+
+		_, err := svc.GetChains(ctx, types.TESTNET)
+		require.NoError(t, err)
+		assert.Equal(t, int32(1), calls.Load())
 	})
 
 	t.Run("upstream error is chains unavailable", func(t *testing.T) {
