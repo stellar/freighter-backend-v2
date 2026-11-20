@@ -1,5 +1,5 @@
 // ABOUTME: Tests for the USDC trustline check run before a deposit address is shown.
-// ABOUTME: Covers TR-16: missing account, missing trustline, zero limit, present trustline, and RPC failure.
+// ABOUTME: Covers TR-16: missing account, missing trustline, zero limit, unauthorized, present trustline, and RPC failure.
 package services
 
 import (
@@ -45,7 +45,7 @@ func accountEntry(t *testing.T) string {
 	return b64
 }
 
-func trustlineEntry(t *testing.T, limit xdr.Int64) string {
+func trustlineEntry(t *testing.T, limit xdr.Int64, flags xdr.Uint32) string {
 	t.Helper()
 	b64, err := xdr.MarshalBase64(xdr.LedgerEntryData{
 		Type: xdr.LedgerEntryTypeTrustline,
@@ -53,6 +53,7 @@ func trustlineEntry(t *testing.T, limit xdr.Int64) string {
 			AccountId: xdr.MustAddress(eligibilityAccount),
 			Asset:     xdr.MustNewCreditAsset("USDC", eligibilityIssuer).ToTrustLineAsset(),
 			Limit:     limit,
+			Flags:     flags,
 		},
 	})
 	require.NoError(t, err)
@@ -63,17 +64,19 @@ func TestCheckUSDCTrustline_TR16(t *testing.T) {
 	t.Parallel()
 	accountKey, trustlineKey := eligibilityKeys(t)
 	rpcErr := errors.New("rpc down")
+	authorized := xdr.Uint32(xdr.TrustLineFlagsAuthorizedFlag)
 
 	cases := map[string]struct {
 		entries map[string]string
 		rpcErr  error
 		want    error
 	}{
-		"account missing":      {entries: map[string]string{}, want: ErrAccountNotFound},
-		"trustline missing":    {entries: map[string]string{accountKey: accountEntry(t)}, want: ErrTrustlineMissing},
-		"trustline limit zero": {entries: map[string]string{accountKey: accountEntry(t), trustlineKey: trustlineEntry(t, 0)}, want: ErrTrustlineMissing},
-		"trustline present":    {entries: map[string]string{accountKey: accountEntry(t), trustlineKey: trustlineEntry(t, 1)}, want: nil},
-		"rpc error is wrapped": {rpcErr: rpcErr, want: rpcErr},
+		"account missing":          {entries: map[string]string{}, want: ErrAccountNotFound},
+		"trustline missing":        {entries: map[string]string{accountKey: accountEntry(t)}, want: ErrTrustlineMissing},
+		"trustline limit zero":     {entries: map[string]string{accountKey: accountEntry(t), trustlineKey: trustlineEntry(t, 0, authorized)}, want: ErrTrustlineMissing},
+		"trustline not authorized": {entries: map[string]string{accountKey: accountEntry(t), trustlineKey: trustlineEntry(t, 1, 0)}, want: ErrTrustlineNotAuthorized},
+		"trustline present":        {entries: map[string]string{accountKey: accountEntry(t), trustlineKey: trustlineEntry(t, 1, authorized)}, want: nil},
+		"rpc error is wrapped":     {rpcErr: rpcErr, want: rpcErr},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -96,6 +99,7 @@ func TestCheckUSDCTrustline_TR16(t *testing.T) {
 			if tc.rpcErr != nil {
 				assert.NotErrorIs(t, err, ErrAccountNotFound)
 				assert.NotErrorIs(t, err, ErrTrustlineMissing)
+				assert.NotErrorIs(t, err, ErrTrustlineNotAuthorized)
 			}
 		})
 	}
