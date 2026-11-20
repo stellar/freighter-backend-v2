@@ -345,12 +345,13 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodGet, "/api/v1/assets/search", handlers.CustomHandler(assetSearchHandler.SearchAssets), true, true},
 		{http.MethodGet, "/api/v1/auth/whoami", handlers.CustomHandler(whoamiHandler.Whoami), true, true},
 		// Cross-chain deposits via Cross Mesh. The chains list is public
-		// reference data; the address routes act on an account. Always
+		// reference data; the address and deposits routes act on an account. Always
 		// registered: a network without a configured Cross Mesh environment
 		// answers 404 network_not_supported from the handler.
 		{http.MethodGet, "/api/v1/cross-chain-deposit/chains", handlers.CustomHandler(crossChainDepositHandler.GetChains), false, true},
 		{http.MethodPost, "/api/v1/cross-chain-deposit/addresses", handlers.CustomHandler(crossChainDepositHandler.CreateAddress), true, true},
 		{http.MethodGet, "/api/v1/cross-chain-deposit/accounts/{account}/address", handlers.CustomHandler(crossChainDepositHandler.LookupAddress), true, true},
+		{http.MethodGet, "/api/v1/cross-chain-deposit/accounts/{account}/deposits", handlers.CustomHandler(crossChainDepositHandler.ListDeposits), true, true},
 	}, nil
 }
 
