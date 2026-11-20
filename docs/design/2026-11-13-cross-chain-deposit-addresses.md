@@ -105,13 +105,13 @@ At this time, the backend does not send requests to Cross Mesh.
 | D2 | There are four routes. `GET …/chains` is public. `POST …/addresses`, `GET …/accounts/{account}/address`, and `GET …/accounts/{account}/deposits` are normal gated routes under the global `--auth-mode`. No route has its own override. |
 | D3 | The backend makes the deposits view. The view has `user_state`, the fee attribution across rounds (TR-39), and `remaining_to_minimum` (TR-49). There is no `partial` flag. If an upstream call fails while the backend makes the view, the route returns an error. There is no `hold_detail_code`, and the deposits route makes no Stellar RPC (Remote Procedure Call) call. For TR-48, the client uses its own balances. |
 | D4 | On each response of the two address routes, the backend calculates the CREATE2 address again (TR-25). The inputs are the requested account, the `index` from the response, `fast=false`, and the hardcoded contract addresses. The backend returns the EIP-55 string that it calculated. The upstream row must have `speed == "standard"` and `delivery_asset == "USDC"`. If not, the route returns 502 `upstream_error`. There is no `verified` field.<br><br>This document recommends that the client also does the address verification. The client can use the npm verify SDK (software development kit) with its own copy of the contract addresses (TR-23 "in its own release"). This document asks the requirements owner to make that an explicit client TR. |
-| D5 | "Issue" in TR-16 means "show". Both address routes do the USDC trustline check on each response. The check is one `getLedgerEntries` call for `LedgerKeyAccount` and `LedgerKeyTrustLine(USDC, issuer)`. If the account does not exist, the route returns 422 `account_not_found`. If there is no USDC trustline, or its limit is 0, the route returns 422 `usdc_trustline_missing`.<br><br>An RPC error gives 503 `upstream_unavailable`. Only `G` accounts are permitted (TR-15). |
+| D5 | "Issue" in TR-16 means "show". Both address routes do the USDC trustline check on each response. The check is one `getLedgerEntries` call for `LedgerKeyAccount` and `LedgerKeyTrustLine(USDC, issuer)`. If the account does not exist, the route returns 422 `account_not_found`. If there is no USDC trustline, or its limit is 0, the route returns 422 `usdc_trustline_missing`. If the issuer did not authorize the trustline (for example, Circle froze it), the route returns 422 `usdc_trustline_not_authorized`.<br><br>An RPC error gives 503 `upstream_unavailable`. Only `G` accounts are permitted (TR-15). |
 | D6 | The feature flag `cross_chain_deposit_networks` lists the networks that have a configured environment (D1). The backend calculates the list from config, and there is no separate config value or bool. The config has four flags: `--crossmesh-mainnet-url` and `--crossmesh-testnet-url` with defaults, and `--crossmesh-mainnet-api-key` and `--crossmesh-testnet-api-key`, which are empty. The constants in code are the USDC issuers, the TTLs, the fan-out concurrency, and the hardcoded contract addresses for each environment. The chains TTL (time to live) is 60s, the settlement TTL is 24h, and the fan-out concurrency is 2. The backend never logs the API keys. |
 | D7 | The backend is stateless. Redis is only a cache. If Redis fails, the backend continues without it, as the prices service does. There is no Postgres and no poller. |
 | D8 | The integration tests use one fake Cross Mesh image and four scenarios. The scenarios are the happy path, a lookup with no deposit address, a two-round settlement, and one upstream 5xx. The handler test against the real service covers the 409 when all chains are suspended. |
 | D9 | There are two caches. The backend caches chains for 60s for each network, with no stale fallback. Thus, if an outage is longer than 60s, the routes return 502. The backend caches each completed settlement for 24h by its id. A completed settlement has non-null `delivery` and `fees.cctp_fee`. The backend caches nothing else. |
-| D10 | The deposits route requests `limit=100` and uses `next_cursor` to read all pages. It sorts by `created_at` descending, with `deposit_id` descending as the tiebreak. Each upstream call has a 10s timeout, and each route has a 10s handler deadline. If one of the two occurs, the route returns 504 `upstream_timeout`. |
-| D11 | Eleven error codes are in the table below. The backend maps unknown upstream codes by HTTP (Hypertext Transfer Protocol) status. The error extras contain the Cross Mesh `request_id`. The code `request_canceled` (503) is for a client that disconnects before the answer is ready. The backend does not log `request_canceled` as an error. |
+| D10 | The deposits route requests `limit=100` and uses `next_cursor` to read all pages. It sorts by `created_at` descending, with `deposit_id` descending as the tiebreak. Each upstream call has a 10s timeout, and each route has an 8s handler deadline. The deadline is 2s less than the 10s server write timeout, so that the error response can get to the client. If one of the two occurs, the route returns 504 `upstream_timeout`. |
+| D11 | Twelve error codes are in the table below. The backend maps unknown upstream codes by HTTP (Hypertext Transfer Protocol) status. The error extras contain the Cross Mesh `request_id`. The code `request_canceled` (503) is for a client that disconnects before the answer is ready. The backend does not log `request_canceled` as an error. |
 | D12 | Each response uses a `{"data": …}` envelope. Amounts stay as base-unit strings with `decimals`. |
 | D13 | For metrics, the Cross Mesh service in the backend uses the current service-call metrics. The design adds one counter, `verification_failures{network}`. This design has no alert rules. |
 | D14 | The backend has no rate limiter. A Traefik middleware at the edge protects the per-key budget of Cross Mesh on the cross-chain path prefix (see Rate limit at the edge). If an address route returns 422 or 409, the client still loads the deposits route. The deposits route has no trustline gate and no active-chain gate. Thus, held deposits show as Action needed beside the trustline prompt. |
@@ -371,6 +371,7 @@ have all fields.
 | `no_active_chain` | 409 | No chain is `active` (TR-14) |
 | `account_not_found` | 422 | The account is not on the ledger |
 | `usdc_trustline_missing` | 422 | No USDC trustline, or limit 0. Extras `{asset_code, asset_issuer}` |
+| `usdc_trustline_not_authorized` | 422 | The issuer did not authorize the USDC trustline. Extras `{asset_code, asset_issuer}` |
 | `verification_failed` | 502 | CREATE2 mismatch. The backend also counts it and logs it as an error |
 | `upstream_error` | 502 | Upstream 4xx (also `address_limit_reached` and `authentication_failed`), decode failure, speed or asset mismatch, decimals mismatch, settlement not found after one more list request, chains not available |
 | `upstream_unavailable` | 503 | Upstream 5xx, or Stellar RPC is down for the trustline check |
@@ -403,13 +404,13 @@ The constants in code are:
 - The hardcoded contract addresses for each environment. The mainnet values are empty.
 - Chains TTL 60s. Completed settlement TTL 24h.
 - Settlement fan-out concurrency 2.
-- A 10s upstream timeout for each call, and a 10s deadline for each route.
+- A 10s upstream timeout for each call, and an 8s deadline for each route.
 
 ### Cache
 
 | Resource | Key | TTL | Why |
 | --- | --- | --- | --- |
-| Chains | per network | 60s | Each address request reads the chains, and Cross Mesh says that fees and minimums can change. A change shows in 1 minute or less. There is no stale fallback, because TR-12 and TR-45 ask for current values. |
+| Chains | per network | 60s | Each address request reads the chains, and Cross Mesh says that fees and minimums can change. A change shows in 1 minute or less. There is no stale fallback, because TR-12 and TR-45 ask for current values. When the cache has no entry, concurrent requests for one network share one upstream call. |
 | Completed settlement | per settlement id | 24h | A settlement with recorded `delivery` and `fees.cctp_fee` never changes. The deposits route reads each round on each poll, thus this cache removes most upstream load. |
 
 The backend caches nothing else. It does not cache deposit addresses, because TR-25 asks
@@ -584,6 +585,8 @@ other change is necessary.
   `recipient_not_ready`. Per TR-36, this state is Action needed, not Pending. In this
   state, the address routes return 422. Thus, load the transfer list and show those rows
   beside the trustline prompt.
+- `usdc_trustline_not_authorized` means that the issuer froze the trustline. A new
+  trustline does not correct this. Do not show the trustline prompt for this code.
 - Below-minimum deposits cannot go back to the sender. Self-rescue is out of scope. The
   user adds more USDC on the same chain.
 - The client can get the deposit address when the app opens (pre-provision), because the
@@ -608,6 +611,9 @@ other change is necessary.
   ExternalSecret already supplies that secret to `envFrom`.
 - **Staging and production Traefik rules** for the cross-chain path prefix, when we
   promote the feature.
+- **Full trustline limit.** The address routes do not find a trustline that has no space
+  left, because the deposit amount is not known at that time. Cross Mesh holds such a
+  deposit as `recipient_not_ready`, and the deposits route shows it.
 
 ## Rollout
 
