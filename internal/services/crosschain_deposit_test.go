@@ -12,6 +12,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -32,10 +33,10 @@ func activeChains() *types.CrossMeshChains {
 }
 
 // trustlinedRPC answers the trustline check with an existing account holding
-// a USDC trustline with a non-zero limit.
+// an authorized USDC trustline with a non-zero limit.
 func trustlinedRPC(t *testing.T) *utils.MockRPCService {
 	t.Helper()
-	acct, tl := accountEntry(t), trustlineEntry(t, 1)
+	acct, tl := accountEntry(t), trustlineEntry(t, 1, xdr.Uint32(xdr.TrustLineFlagsAuthorizedFlag))
 	return &utils.MockRPCService{GetLedgerEntriesXDRFunc: func(keys []string, _ string) (map[string]string, error) {
 		return map[string]string{keys[0]: acct, keys[1]: tl}, nil
 	}}

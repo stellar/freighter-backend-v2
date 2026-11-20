@@ -119,7 +119,7 @@ func (s *CrossChainDepositService) address(ctx context.Context, network, account
 
 	env, _ := CrossMeshEnvFor(network)
 	if err = CheckUSDCTrustline(ctx, s.rpc, network, account, env.USDCIssuer); err != nil {
-		if errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrTrustlineMissing) {
+		if errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrTrustlineMissing) || errors.Is(err, ErrTrustlineNotAuthorized) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("%w: %w", ErrTrustlineCheckFailed, err)

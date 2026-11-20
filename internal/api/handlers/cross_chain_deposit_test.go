@@ -73,8 +73,8 @@ func ccLedgerEntry(t *testing.T, data xdr.LedgerEntryData) string {
 }
 
 // ccLedger answers the trustline check's getLedgerEntries call (keys[0] is
-// the account, keys[1] the USDC trustline). A nil limit leaves the trustline
-// out; account=false leaves both out.
+// the account, keys[1] the USDC trustline, always authorized). A nil limit
+// leaves the trustline out; account=false leaves both out.
 func ccLedger(t *testing.T, account bool, limit *xdr.Int64) *utils.MockRPCService {
 	t.Helper()
 	entries := func(keys []string) map[string]string {
@@ -88,6 +88,7 @@ func ccLedger(t *testing.T, account bool, limit *xdr.Int64) *utils.MockRPCServic
 				AccountId: xdr.MustAddress(ccAccount),
 				Asset:     xdr.MustNewCreditAsset("USDC", ccTestnetIssuer).ToTrustLineAsset(),
 				Limit:     *limit,
+				Flags:     xdr.Uint32(xdr.TrustLineFlagsAuthorizedFlag),
 			}})
 		}
 		return out
@@ -333,6 +334,27 @@ func TestAddress_TR16_LimitZero(t *testing.T) {
 			f := newCCFixture(t)
 			f.rpc = ccLedger(t, true, limit(0))
 			requireCCError(t, rt.call(f, ccAccount, types.TESTNET), http.StatusUnprocessableEntity, "usdc_trustline_missing")
+		})
+	}
+}
+
+func TestAddress_TrustlineNotAuthorizedReturns422(t *testing.T) {
+	for _, rt := range ccAddressRoutes {
+		t.Run(rt.name, func(t *testing.T) {
+			f := newCCFixture(t)
+			acct := ccLedgerEntry(t, xdr.LedgerEntryData{Type: xdr.LedgerEntryTypeAccount, Account: &xdr.AccountEntry{AccountId: xdr.MustAddress(ccAccount)}})
+			tl := ccLedgerEntry(t, xdr.LedgerEntryData{Type: xdr.LedgerEntryTypeTrustline, TrustLine: &xdr.TrustLineEntry{
+				AccountId: xdr.MustAddress(ccAccount),
+				Asset:     xdr.MustNewCreditAsset("USDC", ccTestnetIssuer).ToTrustLineAsset(),
+				Limit:     1,
+			}})
+			f.rpc = &utils.MockRPCService{GetLedgerEntriesXDRFunc: func(keys []string, _ string) (map[string]string, error) {
+				return map[string]string{keys[0]: acct, keys[1]: tl}, nil
+			}}
+			extras := requireCCError(t, rt.call(f, ccAccount, types.TESTNET), http.StatusUnprocessableEntity, "usdc_trustline_not_authorized")
+			assert.Equal(t, "USDC", extras["asset_code"])
+			assert.Equal(t, ccTestnetIssuer, extras["asset_issuer"])
+			assert.Zero(t, f.upstreamCalls)
 		})
 	}
 }
