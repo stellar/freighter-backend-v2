@@ -20,6 +20,7 @@ type Config struct {
 	CoinbaseConfig      CoinbaseConfig
 	WalletBackendConfig WalletBackendConfig
 	SwapConfig          SwapConfig
+	CrossMeshConfig     CrossMeshConfig
 }
 
 type AppConfig struct {
@@ -148,6 +149,17 @@ type SwapConfig struct {
 	SdexOrderbookPubnetURL    string
 	SdexOrderbookTestnetURL   string
 	SdexOrderbookFuturenetURL string
+}
+
+// CrossMeshConfig holds the Cross Mesh Ingress API endpoints and keys, one
+// pair per environment (mainnet serves pubnet, testnet serves testnet). An
+// empty key leaves that environment unconfigured. The keys are secrets: never
+// log them or include them in any config dump.
+type CrossMeshConfig struct {
+	MainnetURL    string
+	TestnetURL    string
+	MainnetAPIKey string
+	TestnetAPIKey string
 }
 
 type PricesConfig struct {

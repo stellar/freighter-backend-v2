@@ -253,6 +253,13 @@ func (s *ServeCmd) Command() *cobra.Command {
 	cmd.Flags().Float64Var(&s.Cfg.PriceHistoryConfig.Volume7dConversionDivisor, "price-history-volume-7d-conversion-divisor", 10_000_000, "Divisor converting the raw upstream volume7d into USD (raw ÷ divisor). Stellar Expert reports volume7d as USD scaled by 1e7, whatever the token's decimals; 0 disables the conversion and the lowVolume verdict is reported null")
 	cmd.Flags().IntVar(&s.Cfg.PriceHistoryConfig.TokenStatsCacheTTLSeconds, "token-stats-cache-ttl-seconds", 3600, "Redis TTL for the cached token-stats asset payload (seconds), shared with the history service's volume verdict")
 
+	// Cross Mesh Config (cross-chain deposit addresses). An environment is
+	// configured only when its key is set and its contracts are pinned in code.
+	cmd.Flags().StringVar(&s.Cfg.CrossMeshConfig.MainnetURL, "crossmesh-mainnet-url", "https://ingress-api.crossmesh.xyz", "Cross Mesh Ingress API base URL for mainnet (serves pubnet)")
+	cmd.Flags().StringVar(&s.Cfg.CrossMeshConfig.TestnetURL, "crossmesh-testnet-url", "https://ingress-api-testnet.crossmesh.xyz", "Cross Mesh Ingress API base URL for testnet")
+	cmd.Flags().StringVar(&s.Cfg.CrossMeshConfig.MainnetAPIKey, "crossmesh-mainnet-api-key", "", "Cross Mesh mainnet API key; empty leaves pubnet unconfigured")
+	cmd.Flags().StringVar(&s.Cfg.CrossMeshConfig.TestnetAPIKey, "crossmesh-testnet-api-key", "", "Cross Mesh testnet API key; empty leaves testnet unconfigured")
+
 	// Asset Search Config (GET /api/v1/assets/search)
 	cmd.Flags().IntVar(&s.Cfg.AssetSearchConfig.CacheTTLSeconds, "asset-search-cache-ttl-seconds", int(services.DefaultAssetSearchCacheTTL/time.Second), "Redis TTL for cached /assets/search answers (seconds). StellarExpert bills every call, so each distinct query costs one paid call per window")
 	cmd.Flags().IntVar(&s.Cfg.AssetSearchConfig.EmptyCacheTTLSeconds, "asset-search-empty-cache-ttl-seconds", int(services.DefaultAssetSearchEmptyCacheTTL/time.Second), "Redis TTL for /assets/search answers with no records (seconds), so a token searched before StellarExpert indexes it shows up soon after. Capped at --asset-search-cache-ttl-seconds")
