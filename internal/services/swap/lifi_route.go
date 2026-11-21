@@ -77,15 +77,7 @@ func lifiPaths(call *lifiCall, from, to Asset, fromContract, toContract string, 
 	if call == nil || len(call.Args) != 7 {
 		return fallback("")
 	}
-	label := func(c string) string {
-		switch c {
-		case fromContract:
-			return from.ID
-		case toContract:
-			return to.ID
-		}
-		return c
-	}
+	label := endpointLabel(from, to, fromContract, toContract)
 
 	entries := scVec(call.Args[5])
 	amounts := make([]*big.Int, len(entries))
@@ -127,6 +119,20 @@ func lifiPaths(call *lifiCall, from, to Asset, fromContract, toContract string, 
 		paths[i].Share = shareString(amounts[i], total)
 	}
 	return paths
+}
+
+// endpointLabel maps the sold and bought contracts to the IDs the client asked
+// for and leaves every other token as its contract ID.
+func endpointLabel(from, to Asset, fromContract, toContract string) func(string) string {
+	return func(c string) string {
+		switch c {
+		case fromContract:
+			return from.ID
+		case toContract:
+			return to.ID
+		}
+		return c
+	}
 }
 
 // readHop reads one venue hop; From/To are contract IDs.

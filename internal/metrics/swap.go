@@ -14,6 +14,7 @@ type Swap struct {
 	SourceRequests *prometheus.CounterVec
 	UnknownHops    *prometheus.CounterVec
 	HopLabels      *prometheus.CounterVec
+	HopAmounts     *prometheus.CounterVec
 	Winners        *prometheus.CounterVec
 	MarginBps      *prometheus.HistogramVec
 
@@ -35,6 +36,10 @@ func NewSwap(reg prometheus.Registerer) *Swap {
 			Name: "freighter_swap_lifi_hop_label_total",
 			Help: "Middle tokens of LI.FI routes by label result (labeled|not_sac|unresolved); unresolved hops are served as contract IDs.",
 		}, []string{"result"}),
+		HopAmounts: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "freighter_swap_lifi_hop_amounts_total",
+			Help: "LI.FI routes by per-hop amount result (attached|missing|mismatch|no_decimals); only attached routes carry hop amounts.",
+		}, []string{"result"}),
 		Winners: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "freighter_swap_quote_winner_total",
 			Help: "Winning source when two or more sources quoted, by pair kind (classic|soroban).",
@@ -49,7 +54,7 @@ func NewSwap(reg prometheus.Registerer) *Swap {
 			Help: "Classic quotes answered by Horizon because sdex-orderbook could not, by network and reason (not_ready|timeout|error).",
 		}, []string{"network", "reason"}),
 	}
-	reg.MustRegister(s.SourceRequests, s.UnknownHops, s.HopLabels, s.Winners, s.MarginBps, s.OrderbookFallbacks)
+	reg.MustRegister(s.SourceRequests, s.UnknownHops, s.HopLabels, s.HopAmounts, s.Winners, s.MarginBps, s.OrderbookFallbacks)
 	return s
 }
 
@@ -98,4 +103,12 @@ func RecordSwapHopLabel(m *Swap, result string) {
 		return
 	}
 	m.HopLabels.WithLabelValues(result).Inc()
+}
+
+// RecordSwapHopAmounts records whether a LI.FI route got per-hop amounts. Nil-safe.
+func RecordSwapHopAmounts(m *Swap, result string) {
+	if m == nil {
+		return
+	}
+	m.HopAmounts.WithLabelValues(result).Inc()
 }
