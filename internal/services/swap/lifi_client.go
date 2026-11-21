@@ -59,11 +59,9 @@ type LifiQuote struct {
 			} `json:"token"`
 		} `json:"feeCosts"`
 	} `json:"estimate"`
-	IncludedSteps []struct {
-		Estimate struct {
-			Hops []LifiHop `json:"hops"`
-		} `json:"estimate"`
-	} `json:"includedSteps"`
+	// Decoded by lifiHopAmounts: a shape change there must cost only the hop
+	// amounts, not the quote.
+	IncludedSteps      json.RawMessage `json:"includedSteps"`
 	TransactionRequest *struct {
 		Data string `json:"data"`
 	} `json:"transactionRequest"`

@@ -125,6 +125,19 @@ func TestLifiHopAmountsWithheld(t *testing.T) {
 			},
 			labelUSDC: true, result: "mismatch",
 		},
+		// The Aquarius pool is never compared, so only the decode error can withhold.
+		"estimate in an unexpected shape": {
+			body: func(t *testing.T) []byte {
+				return editHops(t, func(h []any) []any { h[0].(map[string]any)["pool"] = 7; return h })
+			},
+			labelUSDC: true, result: "mismatch",
+		},
+		"pool differs from the transaction": {
+			body: func(t *testing.T) []byte {
+				return editHops(t, func(h []any) []any { h[2].(map[string]any)["pool"] = h[0].(map[string]any)["pool"]; return h })
+			},
+			labelUSDC: true, result: "mismatch",
+		},
 		"split differs from the transaction": {
 			body: func(t *testing.T) []byte {
 				return editHops(t, func(h []any) []any { h[0].(map[string]any)["fromAmount"] = "1"; return h })
@@ -147,6 +160,13 @@ func TestLifiHopAmountsWithheld(t *testing.T) {
 			assert.Equal(t, 1.0, testutil.ToFloat64(m.HopAmounts.WithLabelValues(tc.result)))
 		})
 	}
+}
+
+func TestLifiHopAmountsAttachedWithoutEstimatePool(t *testing.T) {
+	body := editHops(t, func(h []any) []any { delete(h[2].(map[string]any), "pool"); return h })
+	rt, m := hopsQuote(t, body, true)
+	assert.Equal(t, [][]string{{"39.7618746"}, {"130.1363633", "118.9939446"}}, hopAmounts(rt.Paths))
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.HopAmounts.WithLabelValues("attached")))
 }
 
 func TestLifiHopAmountsNotOnFallbackPath(t *testing.T) {

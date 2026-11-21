@@ -1,6 +1,7 @@
 package swap
 
 import (
+	"encoding/json"
 	"math/big"
 
 	"github.com/stellar/go-stellar-sdk/strkey"
@@ -12,6 +13,7 @@ import (
 // part of the transaction.
 type LifiHop struct {
 	Venue     string `json:"venue"`
+	Pool      string `json:"pool"`
 	Path      int    `json:"path"`
 	FromToken struct {
 		Address string `json:"address"`
@@ -32,8 +34,16 @@ var lifiHopVenues = map[string]string{"Aquarius": "Aquarius", "Sushi": "SushiSwa
 // numbers for a route not being signed.
 // Call it before labelSACHops: it compares contract IDs.
 func lifiHopAmounts(q *LifiQuote, paths []types.SwapPath, label func(string) string) ([][]*big.Int, string) {
+	var steps []struct {
+		Estimate struct {
+			Hops []LifiHop `json:"hops"`
+		} `json:"estimate"`
+	}
+	if len(q.IncludedSteps) > 0 && json.Unmarshal(q.IncludedSteps, &steps) != nil {
+		return nil, "mismatch"
+	}
 	var hops []LifiHop
-	for _, s := range q.IncludedSteps {
+	for _, s := range steps {
 		hops = append(hops, s.Estimate.Hops...)
 	}
 	if len(hops) == 0 {
@@ -52,7 +62,10 @@ func lifiHopAmounts(q *LifiQuote, paths []types.SwapPath, label func(string) str
 		want := paths[h.Path].Hops[j]
 		amt, ok := new(big.Int).SetString(h.ToAmount, 10)
 		// Every decoded hop has a pool; lifiPaths' fallback path does not.
-		if want.Pool == "" || lifiHopVenues[h.Venue] != want.Venue || label(h.FromToken.Address) != want.From ||
+		// Aquarius pools are only a hash prefix in the transaction, so only
+		// contract-ID pools can be compared, and only when the estimate names one.
+		poolDiffers := strkey.IsValidContractAddress(want.Pool) && h.Pool != "" && h.Pool != want.Pool
+		if want.Pool == "" || poolDiffers || lifiHopVenues[h.Venue] != want.Venue || label(h.FromToken.Address) != want.From ||
 			label(h.ToToken.Address) != want.To || !ok || amt.Sign() <= 0 {
 			return nil, "mismatch"
 		}
