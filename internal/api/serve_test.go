@@ -199,6 +199,7 @@ var walletBackendRoutes = []struct {
 }{
 	{"balances", http.MethodPost, "/api/v1/accounts/balances"},
 	{"account-history", http.MethodGet, "/api/v1/accounts/GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF/transactions"},
+	{"simulate-state-changes", http.MethodPost, "/api/v1/simulate-state-changes"},
 }
 
 // TestApiServer_initHandlers_WalletBackendRoutesDisabledNotRegistered pins the off
@@ -272,6 +273,7 @@ func TestApiServer_initHandlers_WalletBackendRoutesGatedTogether(t *testing.T) {
 	assert.Equal(t, map[string]bool{
 		"POST /api/v1/accounts/balances":              true,
 		"GET /api/v1/accounts/{address}/transactions": true,
+		"POST /api/v1/simulate-state-changes":         true,
 	}, disabled, "exactly the wallet-backend-fronted routes must be disabled by the flag")
 }
 

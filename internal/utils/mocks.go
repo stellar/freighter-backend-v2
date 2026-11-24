@@ -131,6 +131,12 @@ type MockWalletBackendService struct {
 	GetAccountTransactionsError error
 	// GetAccountTransactionsFunc overrides Result/Error when set.
 	GetAccountTransactionsFunc func(ctx context.Context, address, network string, params types.AccountHistoryParams) (*types.PaginatedResponse[*types.AccountTransaction], error)
+
+	// SimulateStateChangesResult/Error are returned by SimulateStateChanges
+	// unless SimulateStateChangesFunc is set.
+	SimulateStateChangesResult *types.SimulatedStateChanges
+	SimulateStateChangesError  error
+	SimulateStateChangesFunc   func(ctx context.Context, transactionXDR, network string) (*types.SimulatedStateChanges, error)
 }
 
 func (m *MockWalletBackendService) Name() string {
@@ -162,6 +168,17 @@ func (m *MockWalletBackendService) GetAccountTransactions(ctx context.Context, a
 		return nil, m.GetAccountTransactionsError
 	}
 	return m.GetAccountTransactionsResult, nil
+}
+
+// SimulateStateChanges returns a stubbed simulation result.
+func (m *MockWalletBackendService) SimulateStateChanges(ctx context.Context, transactionXDR, network string) (*types.SimulatedStateChanges, error) {
+	if m.SimulateStateChangesFunc != nil {
+		return m.SimulateStateChangesFunc(ctx, transactionXDR, network)
+	}
+	if m.SimulateStateChangesError != nil {
+		return nil, m.SimulateStateChangesError
+	}
+	return m.SimulateStateChangesResult, nil
 }
 
 type MockPricesService struct {
