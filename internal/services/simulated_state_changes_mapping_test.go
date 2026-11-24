@@ -142,20 +142,34 @@ func TestMapSimulatedStateChanges_Envelope(t *testing.T) {
 
 	t.Run("copies ledger, state changes and tokens", func(t *testing.T) {
 		t.Parallel()
+		opIndex := int32(0)
 		got := mapSimulatedStateChanges(&wbtypes.SimulatedStateChanges{
 			LatestLedger: 7,
 			StateChanges: []wbtypes.SimulatedStateChangeNode{
 				&wbtypes.SimulatedBalanceChange{BaseSimulatedStateChangeFields: wbtypes.BaseSimulatedStateChangeFields{AccountAddress: "GFEE"}, TokenID: "CXLM", Amount: "100"},
 				nil,
+				&wbtypes.SimulatedBalanceChange{BaseSimulatedStateChangeFields: wbtypes.BaseSimulatedStateChangeFields{AccountAddress: "GSENDER", OperationIndex: &opIndex}, TokenID: "CUSDC", Amount: "5"},
 			},
 			Tokens: []wbtypes.SimulatedTokenMetadata{{TokenID: "CUSDC", Code: &code, Decimals: 7}},
 		})
 		assert.Equal(t, uint32(7), got.LatestLedger)
-		require.Len(t, got.StateChanges, 1, "nil entries are skipped")
-		fee, ok := got.StateChanges[0].(*types.SimulatedBalanceChange)
+		require.Len(t, got.StateChanges, 1, "the fee row and nil entries are skipped")
+		debit, ok := got.StateChanges[0].(*types.SimulatedBalanceChange)
 		require.True(t, ok)
-		assert.Nil(t, fee.OperationIndex, "the fee row has no operation")
+		assert.Equal(t, "GSENDER", debit.AccountAddress)
+		require.NotNil(t, debit.OperationIndex)
 		assert.Equal(t, []types.SimulatedToken{{TokenID: "CUSDC", Code: &code, Decimals: 7}}, got.Tokens)
+	})
+
+	t.Run("a result with only the fee row maps to no state changes", func(t *testing.T) {
+		t.Parallel()
+		got := mapSimulatedStateChanges(&wbtypes.SimulatedStateChanges{
+			StateChanges: []wbtypes.SimulatedStateChangeNode{
+				&wbtypes.SimulatedBalanceChange{BaseSimulatedStateChangeFields: wbtypes.BaseSimulatedStateChangeFields{AccountAddress: "GFEE"}, TokenID: "CXLM", Amount: "100"},
+			},
+		})
+		assert.NotNil(t, got.StateChanges)
+		assert.Empty(t, got.StateChanges)
 	})
 
 	t.Run("empty result encodes as empty slices, not nil", func(t *testing.T) {

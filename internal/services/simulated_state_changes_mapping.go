@@ -9,11 +9,12 @@ import (
 )
 
 // mapSimulatedStateChanges copies an SDK simulation result into the REST
-// shape. The result slices are always non-nil so they encode as [].
+// shape. It drops the fee row, which is the only row with no operation index:
+// no client shows it. The result slices are always non-nil so they encode as [].
 func mapSimulatedStateChanges(r *wbtypes.SimulatedStateChanges) *types.SimulatedStateChanges {
 	stateChanges := make([]types.SimulatedStateChange, 0, len(r.StateChanges))
 	for _, sc := range r.StateChanges {
-		if sc == nil {
+		if sc == nil || sc.GetOperationIndex() == nil {
 			continue
 		}
 		stateChanges = append(stateChanges, mapSimulatedStateChange(sc))

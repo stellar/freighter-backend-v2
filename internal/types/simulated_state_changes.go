@@ -48,7 +48,8 @@ type SimulatedStateChange interface{ isSimulatedStateChange() }
 // SimulatedStateChangeBase holds the fields common to every simulated variant.
 // Variant uses the same names as the history endpoint ("BalanceChange", ...),
 // so clients share one switch. OperationIndex is the zero-based index of the
-// operation that would produce the change; it is null only for the fee row.
+// operation that would produce the change. It is always set: the fee row, the
+// only row without one, is dropped before the response is built.
 type SimulatedStateChangeBase struct {
 	Variant        string `json:"variant"`
 	Type           string `json:"type"`

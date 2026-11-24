@@ -19,10 +19,6 @@ func TestSimulatedStateChanges_JSONWireContract(t *testing.T) {
 		LatestLedger: 123,
 		StateChanges: []types.SimulatedStateChange{
 			&types.SimulatedBalanceChange{
-				SimulatedStateChangeBase: types.SimulatedStateChangeBase{Variant: "BalanceChange", Type: "BALANCE", Reason: "DEBIT", AccountAddress: "GSENDER"},
-				TokenID:                  "CXLM", Amount: "100",
-			},
-			&types.SimulatedBalanceChange{
 				SimulatedStateChangeBase: types.SimulatedStateChangeBase{Variant: "BalanceChange", Type: "BALANCE", Reason: "DEBIT", AccountAddress: "GSENDER", OperationIndex: &opIndex},
 				TokenID:                  "CUSDC", Amount: "5000000",
 			},
@@ -35,9 +31,8 @@ func TestSimulatedStateChanges_JSONWireContract(t *testing.T) {
 	assert.JSONEq(t, `{
 		"latest_ledger": 123,
 		"state_changes": [
-			{"variant": "BalanceChange", "type": "BALANCE", "reason": "DEBIT", "account_address": "GSENDER", "operation_index": null, "token_id": "CXLM", "amount": "100"},
 			{"variant": "BalanceChange", "type": "BALANCE", "reason": "DEBIT", "account_address": "GSENDER", "operation_index": 0, "token_id": "CUSDC", "amount": "5000000"}
 		],
 		"tokens": [{"token_id": "CUSDC", "code": "USDC", "issuer": "GISSUER", "decimals": 7}]
-	}`, string(b), "the fee row keeps an explicit null operation_index")
+	}`, string(b))
 }
