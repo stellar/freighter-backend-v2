@@ -51,14 +51,15 @@ type AppConfig struct {
 	//
 	//	POST /api/v1/accounts/balances
 	//	GET  /api/v1/accounts/{address}/transactions
+	//	POST /api/v1/simulate-state-changes
 	//
-	// When false neither is added to the mux, so both paths 404 exactly as an unknown
+	// When false none is added to the mux, so these paths 404 exactly as an unknown
 	// path would: no handler runs and no wallet-backend call is attempted. Production
-	// sets it false while wallet-backend is unconfigured there — without a client both
+	// sets it false while wallet-backend is unconfigured there — without a client these
 	// routes 500 on every request. Flipping it back on is an env-var change and a
 	// restart, not a release.
 	//
-	// One flag covers both because they share one dependency and one failure mode;
+	// One flag covers all of them because they share one dependency and one failure mode;
 	// enabling exactly one is never the correct state.
 	WalletBackendRoutesEnabled bool
 	// WalletBackendBalanceConcurrency caps the number of concurrent wallet-backend

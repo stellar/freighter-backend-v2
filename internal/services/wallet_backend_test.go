@@ -996,3 +996,95 @@ func TestToPaginationInfo_NilSafe(t *testing.T) {
 	got := toPaginationInfo(nil)
 	assert.Equal(t, types.PaginationInfo{}, got, "nil pi must return zero PaginationInfo")
 }
+
+func TestSimulateStateChanges(t *testing.T) {
+	const happyBody = `{"data": {"simulateStateChanges": {
+		"latestLedger": 123,
+		"stateChanges": [
+			{"__typename": "SimulatedBalanceChange", "category": "BALANCE", "reason": "DEBIT", "accountAddress": "GSENDER", "operationIndex": null, "balanceTokenId": "CXLM", "amount": "100"},
+			{"__typename": "SimulatedBalanceChange", "category": "BALANCE", "reason": "DEBIT", "accountAddress": "GSENDER", "operationIndex": 0, "balanceTokenId": "CUSDC", "amount": "5000000"}
+		],
+		"tokens": [{"tokenId": "CUSDC", "code": "USDC", "issuer": "GISSUER", "name": null, "symbol": null, "decimals": 7}]
+	}}}`
+
+	t.Run("happy path forwards the XDR and maps the result", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, vars map[string]interface{}) (int, string) {
+			assert.Equal(t, "AAAA", vars["transactionXdr"])
+			return 200, happyBody
+		})
+		defer server.Close()
+
+		got, err := newTestWalletBackendService(t, server.URL).SimulateStateChanges(context.Background(), "AAAA", "GSENDER", types.PUBLIC)
+		require.NoError(t, err)
+		assert.Equal(t, uint32(123), got.LatestLedger)
+		require.Len(t, got.StateChanges, 1, "the fee row is dropped")
+		debit, ok := got.StateChanges[0].(*types.SimulatedBalanceChange)
+		require.True(t, ok, "expected *SimulatedBalanceChange, got %T", got.StateChanges[0])
+		assert.Equal(t, "BalanceChange", debit.Variant)
+		require.NotNil(t, debit.OperationIndex)
+		assert.Equal(t, int32(0), *debit.OperationIndex)
+		assert.Equal(t, "GSENDER", debit.AccountAddress)
+		require.Len(t, got.Tokens, 1)
+		assert.Equal(t, "CUSDC", got.Tokens[0].TokenID)
+	})
+
+	for _, code := range []string{types.SimulationCodeInvalidTransactionXDR, types.SimulationCodeUnsupportedTransaction, types.SimulationCodeSimulationFailed} {
+		t.Run(code+" is a rejection, not an upstream error", func(t *testing.T) {
+			t.Parallel()
+			server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+				return 200, `{"data": null, "errors": [{"message": "cannot preview", "extensions": {"code": "` + code + `"}}]}`
+			})
+			defer server.Close()
+
+			reg := prometheus.NewRegistry()
+			svc := newTestWalletBackendServiceWithMetrics(t, server.URL, metrics.NewService(reg))
+			got, err := svc.SimulateStateChanges(context.Background(), "AAAA", "GSENDER", types.PUBLIC)
+			assert.Nil(t, got)
+			var rejected *types.SimulationRejectedError
+			require.True(t, errors.As(err, &rejected), "expected SimulationRejectedError, got %v", err)
+			assert.Equal(t, code, rejected.Code)
+			assert.Equal(t, "cannot preview", rejected.Message)
+			var upErr *metrics.UpstreamError
+			assert.False(t, errors.As(err, &upErr))
+			assert.Equal(t, float64(1), testutilCounterValue(t, reg, "freighter_service_calls_total", map[string]string{"service": "wallet-backend", "method": "SimulateStateChanges", "network": types.PUBLIC}))
+			assert.Equal(t, float64(0), testutilCounterValue(t, reg, "freighter_service_errors_total", nil))
+		})
+	}
+
+	t.Run("any other GraphQL error is an upstream error", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 200, `{"data": null, "errors": [{"message": "boom", "extensions": {"code": "INTERNAL_ERROR"}}]}`
+		})
+		defer server.Close()
+
+		reg := prometheus.NewRegistry()
+		svc := newTestWalletBackendServiceWithMetrics(t, server.URL, metrics.NewService(reg))
+		_, err := svc.SimulateStateChanges(context.Background(), "AAAA", "GSENDER", types.PUBLIC)
+		var upErr *metrics.UpstreamError
+		require.True(t, errors.As(err, &upErr), "expected UpstreamError, got %v", err)
+		assert.Equal(t, "graphql_error", upErr.Kind)
+		assert.Equal(t, float64(1), testutilCounterValue(t, reg, "freighter_service_errors_total", nil))
+	})
+
+	t.Run("HTTP 500 is an upstream error", func(t *testing.T) {
+		t.Parallel()
+		server := newTxFakeServer(t, func(_ string, _ map[string]interface{}) (int, string) {
+			return 500, `oops`
+		})
+		defer server.Close()
+
+		_, err := newTestWalletBackendService(t, server.URL).SimulateStateChanges(context.Background(), "AAAA", "GSENDER", types.PUBLIC)
+		var upErr *metrics.UpstreamError
+		require.True(t, errors.As(err, &upErr), "expected UpstreamError, got %v", err)
+		assert.Equal(t, 500, upErr.Code)
+	})
+
+	t.Run("unconfigured network errors before any call", func(t *testing.T) {
+		t.Parallel()
+		_, err := newTestWalletBackendService(t, "http://unused.invalid").SimulateStateChanges(context.Background(), "AAAA", "GSENDER", types.TESTNET)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not configured")
+	})
+}

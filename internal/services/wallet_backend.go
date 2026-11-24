@@ -304,7 +304,8 @@ func (w *walletBackendService) recordWBCall(method, network string, start time.T
 	dur := time.Since(start).Seconds()
 	w.svcMetrics.CallsTotal.WithLabelValues(walletBackendServiceName, method, network).Inc()
 	w.svcMetrics.CallDuration.WithLabelValues(walletBackendServiceName, method, network).Observe(dur)
-	if err != nil && !errors.Is(err, wbclient.ErrAccountNotFound) {
+	var rejected *types.SimulationRejectedError
+	if err != nil && !errors.Is(err, wbclient.ErrAccountNotFound) && !errors.As(err, &rejected) {
 		w.svcMetrics.ErrorsTotal.WithLabelValues(walletBackendServiceName, method, network, metrics.ClassifyError(err)).Inc()
 	}
 }
@@ -343,6 +344,46 @@ func (w *walletBackendService) GetAccountTransactions(ctx context.Context, addre
 		Data:       items,
 		Pagination: toPaginationInfo(conn.PageInfo),
 	}, nil
+}
+
+// SimulateStateChanges previews the state changes an unsubmitted transaction
+// would produce on accountAddress. A transaction wallet-backend cannot preview
+// is returned as a *types.SimulationRejectedError so callers can tell it from
+// an upstream failure.
+func (w *walletBackendService) SimulateStateChanges(ctx context.Context, transactionXDR, accountAddress, network string) (_ *types.SimulatedStateChanges, err error) {
+	start := time.Now()
+	defer func() { w.recordWBCall("SimulateStateChanges", network, start, err) }()
+
+	client := w.configureNetworkClient(network)
+	if client == nil {
+		return nil, fmt.Errorf("wallet backend client not configured for network: %s", network)
+	}
+
+	result, err := client.SimulateStateChanges(ctx, transactionXDR)
+	if err != nil {
+		if rejected := simulationRejection(err); rejected != nil {
+			return nil, rejected
+		}
+		return nil, classifyWBError(err)
+	}
+	return mapSimulatedStateChanges(result, accountAddress), nil
+}
+
+// simulationRejection returns the "cannot preview" outcome carried by a
+// wbclient error, or nil when the error is anything else.
+func simulationRejection(err error) *types.SimulationRejectedError {
+	var gqlErrs wbclient.GraphQLErrors
+	if !errors.As(err, &gqlErrs) {
+		return nil
+	}
+	for _, gqlErr := range gqlErrs {
+		code, _ := gqlErr.Extensions["code"].(string)
+		switch code {
+		case types.SimulationCodeInvalidTransactionXDR, types.SimulationCodeUnsupportedTransaction, types.SimulationCodeSimulationFailed:
+			return &types.SimulationRejectedError{Code: code, Message: gqlErr.Message}
+		}
+	}
+	return nil
 }
 
 // classifyWBError wraps a systemic wbclient error with an UpstreamError so

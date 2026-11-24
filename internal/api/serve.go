@@ -291,6 +291,7 @@ func (s *ApiServer) routes() ([]route, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init account-history handler: %w", err)
 	}
+	simulateStateChangesHandler := handlers.NewSimulateStateChangesHandler(s.walletBackendService)
 	whoamiHandler := handlers.NewWhoamiHandler()
 
 	return []route{
@@ -312,12 +313,12 @@ func (s *ApiServer) routes() ([]route, error) {
 		{http.MethodPost, "/api/v1/ledger-key/accounts", handlers.CustomHandler(ledgerKeyAccountsHandler.GetLedgerKeyAccounts), true, true},
 		{http.MethodGet, "/api/v1/feature-flags", handlers.CustomHandler(featureFlagsHandler.GetFeatureFlags), true, true},
 		// The wallet-backend-fronted routes, config-gated together by
-		// --wallet-backend-routes-enabled. These are the ONLY two routes that touch
-		// walletBackendService, and both fail identically when it is unconfigured:
+		// --wallet-backend-routes-enabled. These are the ONLY routes that touch
+		// walletBackendService, and all fail identically when it is unconfigured:
 		// configureNetworkClient returns nil and the handler errors before any network
 		// call, so every request 500s. wallet-backend is configured only in dev, so
 		// they are disabled in production until that upstream is wired up.
-		// enabled=false leaves both paths 404ing.
+		// enabled=false leaves all of these paths 404ing.
 		//
 		// They share one flag deliberately: they share one dependency and one failure
 		// mode, so there is no state where enabling exactly one is correct. If a route
@@ -325,6 +326,7 @@ func (s *ApiServer) routes() ([]route, error) {
 		// gate rather than widening this one.
 		{http.MethodPost, "/api/v1/accounts/balances", handlers.CustomHandler(accountBalancesHandler.GetAccountBalances), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
 		{http.MethodGet, "/api/v1/accounts/{address}/transactions", handlers.CustomHandler(accountHistoryHandler.GetAccountTransactions), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
+		{http.MethodPost, "/api/v1/simulate-state-changes", handlers.CustomHandler(simulateStateChangesHandler.SimulateStateChanges), true, s.cfg.AppConfig.WalletBackendRoutesEnabled},
 
 		{http.MethodPost, "/api/v1/token-prices", handlers.CustomHandler(tokenPricesHandler.GetPrices), true, true},
 		{http.MethodPost, "/api/v1/swap/quotes", handlers.CustomHandler(swapHandler.Quotes), true, true},

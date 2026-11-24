@@ -54,6 +54,10 @@ type WalletBackendService interface {
 	GetHealth(ctx context.Context, network string) (GetHealthResponse, error)
 	GetBalancesByAccountAddresses(ctx context.Context, addresses []string, network string) (interface{}, error)
 	GetAccountTransactions(ctx context.Context, address, network string, params AccountHistoryParams) (*PaginatedResponse[*AccountTransaction], error)
+	// SimulateStateChanges previews the state changes an unsubmitted transaction
+	// would produce on accountAddress. A transaction that cannot be previewed is
+	// returned as a *SimulationRejectedError.
+	SimulateStateChanges(ctx context.Context, transactionXDR, accountAddress, network string) (*SimulatedStateChanges, error)
 }
 
 // StellarExpertAsset is the subset of the Stellar Expert /asset/{id} response
