@@ -151,7 +151,7 @@ func TestMapSimulatedStateChanges_Envelope(t *testing.T) {
 				&wbtypes.SimulatedBalanceChange{BaseSimulatedStateChangeFields: wbtypes.BaseSimulatedStateChangeFields{AccountAddress: "GSENDER", OperationIndex: &opIndex}, TokenID: "CUSDC", Amount: "5"},
 			},
 			Tokens: []wbtypes.SimulatedTokenMetadata{{TokenID: "CUSDC", Code: &code, Decimals: 7}},
-		})
+		}, "GSENDER")
 		assert.Equal(t, uint32(7), got.LatestLedger)
 		require.Len(t, got.StateChanges, 1, "the fee row and nil entries are skipped")
 		debit, ok := got.StateChanges[0].(*types.SimulatedBalanceChange)
@@ -167,14 +167,60 @@ func TestMapSimulatedStateChanges_Envelope(t *testing.T) {
 			StateChanges: []wbtypes.SimulatedStateChangeNode{
 				&wbtypes.SimulatedBalanceChange{BaseSimulatedStateChangeFields: wbtypes.BaseSimulatedStateChangeFields{AccountAddress: "GFEE"}, TokenID: "CXLM", Amount: "100"},
 			},
-		})
+		}, "GFEE")
 		assert.NotNil(t, got.StateChanges)
 		assert.Empty(t, got.StateChanges)
 	})
 
+	t.Run("keeps only rows on the requested account and the tokens they use", func(t *testing.T) {
+		t.Parallel()
+		opIndex := int32(0)
+		usdc, eurc := "CUSDC", "CEURC"
+		row := func(account, tokenID string) *wbtypes.SimulatedBalanceChange {
+			return &wbtypes.SimulatedBalanceChange{
+				BaseSimulatedStateChangeFields: wbtypes.BaseSimulatedStateChangeFields{AccountAddress: account, OperationIndex: &opIndex},
+				TokenID:                        tokenID, Amount: "1",
+			}
+		}
+		got := mapSimulatedStateChanges(&wbtypes.SimulatedStateChanges{
+			StateChanges: []wbtypes.SimulatedStateChangeNode{
+				row("GSIGNER", "CUSDC"),
+				row("CPOOL", "CUSDC"),
+				row("CPOOL", "CEURC"),
+				&wbtypes.SimulatedTrustlineAddedChange{
+					BaseSimulatedStateChangeFields: wbtypes.BaseSimulatedStateChangeFields{AccountAddress: "GOTHER", OperationIndex: &opIndex},
+					TokenID:                        &eurc,
+				},
+			},
+			Tokens: []wbtypes.SimulatedTokenMetadata{{TokenID: "CUSDC", Code: &usdc, Decimals: 7}, {TokenID: "CEURC", Code: &eurc, Decimals: 7}},
+		}, "GSIGNER")
+		require.Len(t, got.StateChanges, 1)
+		kept, ok := got.StateChanges[0].(*types.SimulatedBalanceChange)
+		require.True(t, ok)
+		assert.Equal(t, "GSIGNER", kept.AccountAddress)
+		assert.Equal(t, []types.SimulatedToken{{TokenID: "CUSDC", Code: &usdc, Decimals: 7}}, got.Tokens)
+	})
+
+	t.Run("keeps the token of a pointer-typed token row", func(t *testing.T) {
+		t.Parallel()
+		opIndex := int32(0)
+		eurc := "CEURC"
+		got := mapSimulatedStateChanges(&wbtypes.SimulatedStateChanges{
+			StateChanges: []wbtypes.SimulatedStateChangeNode{
+				&wbtypes.SimulatedTrustlineAddedChange{
+					BaseSimulatedStateChangeFields: wbtypes.BaseSimulatedStateChangeFields{AccountAddress: "GSIGNER", OperationIndex: &opIndex},
+					TokenID:                        &eurc,
+				},
+			},
+			Tokens: []wbtypes.SimulatedTokenMetadata{{TokenID: "CEURC", Code: &eurc, Decimals: 7}},
+		}, "GSIGNER")
+		require.Len(t, got.StateChanges, 1)
+		assert.Equal(t, []types.SimulatedToken{{TokenID: "CEURC", Code: &eurc, Decimals: 7}}, got.Tokens)
+	})
+
 	t.Run("empty result encodes as empty slices, not nil", func(t *testing.T) {
 		t.Parallel()
-		got := mapSimulatedStateChanges(&wbtypes.SimulatedStateChanges{})
+		got := mapSimulatedStateChanges(&wbtypes.SimulatedStateChanges{}, "GSIGNER")
 		assert.NotNil(t, got.StateChanges)
 		assert.Empty(t, got.StateChanges)
 		assert.NotNil(t, got.Tokens)

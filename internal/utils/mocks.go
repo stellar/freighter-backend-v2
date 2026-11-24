@@ -136,7 +136,7 @@ type MockWalletBackendService struct {
 	// unless SimulateStateChangesFunc is set.
 	SimulateStateChangesResult *types.SimulatedStateChanges
 	SimulateStateChangesError  error
-	SimulateStateChangesFunc   func(ctx context.Context, transactionXDR, network string) (*types.SimulatedStateChanges, error)
+	SimulateStateChangesFunc   func(ctx context.Context, transactionXDR, accountAddress, network string) (*types.SimulatedStateChanges, error)
 }
 
 func (m *MockWalletBackendService) Name() string {
@@ -171,9 +171,9 @@ func (m *MockWalletBackendService) GetAccountTransactions(ctx context.Context, a
 }
 
 // SimulateStateChanges returns a stubbed simulation result.
-func (m *MockWalletBackendService) SimulateStateChanges(ctx context.Context, transactionXDR, network string) (*types.SimulatedStateChanges, error) {
+func (m *MockWalletBackendService) SimulateStateChanges(ctx context.Context, transactionXDR, accountAddress, network string) (*types.SimulatedStateChanges, error) {
 	if m.SimulateStateChangesFunc != nil {
-		return m.SimulateStateChangesFunc(ctx, transactionXDR, network)
+		return m.SimulateStateChangesFunc(ctx, transactionXDR, accountAddress, network)
 	}
 	if m.SimulateStateChangesError != nil {
 		return nil, m.SimulateStateChangesError

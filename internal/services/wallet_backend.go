@@ -347,9 +347,10 @@ func (w *walletBackendService) GetAccountTransactions(ctx context.Context, addre
 }
 
 // SimulateStateChanges previews the state changes an unsubmitted transaction
-// would produce. A transaction wallet-backend cannot preview is returned as a
-// *types.SimulationRejectedError so callers can tell it from an upstream failure.
-func (w *walletBackendService) SimulateStateChanges(ctx context.Context, transactionXDR, network string) (_ *types.SimulatedStateChanges, err error) {
+// would produce on accountAddress. A transaction wallet-backend cannot preview
+// is returned as a *types.SimulationRejectedError so callers can tell it from
+// an upstream failure.
+func (w *walletBackendService) SimulateStateChanges(ctx context.Context, transactionXDR, accountAddress, network string) (_ *types.SimulatedStateChanges, err error) {
 	start := time.Now()
 	defer func() { w.recordWBCall("SimulateStateChanges", network, start, err) }()
 
@@ -365,7 +366,7 @@ func (w *walletBackendService) SimulateStateChanges(ctx context.Context, transac
 		}
 		return nil, classifyWBError(err)
 	}
-	return mapSimulatedStateChanges(result), nil
+	return mapSimulatedStateChanges(result, accountAddress), nil
 }
 
 // simulationRejection returns the "cannot preview" outcome carried by a

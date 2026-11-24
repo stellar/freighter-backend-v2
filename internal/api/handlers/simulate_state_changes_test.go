@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stellar/go-stellar-sdk/xdr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -29,10 +30,10 @@ func TestSimulateStateChanges_Handler(t *testing.T) {
 	t.Run("happy path 200 forwards the XDR and network", func(t *testing.T) {
 		t.Parallel()
 		opIndex := int32(0)
-		var gotXDR, gotNetwork string
+		var gotXDR, gotAccount, gotNetwork string
 		mockSvc := &utils.MockWalletBackendService{
-			SimulateStateChangesFunc: func(_ context.Context, transactionXDR, network string) (*types.SimulatedStateChanges, error) {
-				gotXDR, gotNetwork = transactionXDR, network
+			SimulateStateChangesFunc: func(_ context.Context, transactionXDR, accountAddress, network string) (*types.SimulatedStateChanges, error) {
+				gotXDR, gotAccount, gotNetwork = transactionXDR, accountAddress, network
 				return &types.SimulatedStateChanges{
 					LatestLedger: 123,
 					StateChanges: []types.SimulatedStateChange{
@@ -46,10 +47,11 @@ func TestSimulateStateChanges_Handler(t *testing.T) {
 			},
 		}
 		rr := httptest.NewRecorder()
-		err := NewSimulateStateChangesHandler(mockSvc).SimulateStateChanges(rr, simulateRequest("/x?network=TESTNET", `{"transaction_xdr":"AAAA"}`))
+		err := NewSimulateStateChangesHandler(mockSvc).SimulateStateChanges(rr, simulateRequest("/x?network=TESTNET", `{"transaction_xdr":"AAAA","account_address":"GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"}`))
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, rr.Code)
 		assert.Equal(t, "AAAA", gotXDR)
+		assert.Equal(t, "GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF", gotAccount)
 		assert.Equal(t, types.TESTNET, gotNetwork)
 		assert.JSONEq(t, `{"data": {
 			"latest_ledger": 123,
@@ -58,20 +60,59 @@ func TestSimulateStateChanges_Handler(t *testing.T) {
 		}}`, rr.Body.String())
 	})
 
+	t.Run("a muxed account_address is resolved to its base account", func(t *testing.T) {
+		t.Parallel()
+		var base xdr.MuxedAccount
+		require.NoError(t, base.SetAddress("GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"))
+		muxed := xdr.MuxedAccount{
+			Type:     xdr.CryptoKeyTypeKeyTypeMuxedEd25519,
+			Med25519: &xdr.MuxedAccountMed25519{Id: 7, Ed25519: *base.Ed25519},
+		}
+		var gotAccount string
+		mockSvc := &utils.MockWalletBackendService{
+			SimulateStateChangesFunc: func(_ context.Context, _, accountAddress, _ string) (*types.SimulatedStateChanges, error) {
+				gotAccount = accountAddress
+				return &types.SimulatedStateChanges{StateChanges: []types.SimulatedStateChange{}, Tokens: []types.SimulatedToken{}}, nil
+			},
+		}
+		body := `{"transaction_xdr":"AAAA","account_address":"` + muxed.Address() + `"}`
+		err := NewSimulateStateChangesHandler(mockSvc).SimulateStateChanges(httptest.NewRecorder(), simulateRequest("/x?network=PUBLIC", body))
+		require.NoError(t, err)
+		assert.Equal(t, "GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF", gotAccount)
+	})
+
+	t.Run("a contract account_address is accepted as is", func(t *testing.T) {
+		t.Parallel()
+		const contract = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
+		var gotAccount string
+		mockSvc := &utils.MockWalletBackendService{
+			SimulateStateChangesFunc: func(_ context.Context, _, accountAddress, _ string) (*types.SimulatedStateChanges, error) {
+				gotAccount = accountAddress
+				return &types.SimulatedStateChanges{StateChanges: []types.SimulatedStateChange{}, Tokens: []types.SimulatedToken{}}, nil
+			},
+		}
+		body := `{"transaction_xdr":"AAAA","account_address":"` + contract + `"}`
+		err := NewSimulateStateChangesHandler(mockSvc).SimulateStateChanges(httptest.NewRecorder(), simulateRequest("/x?network=PUBLIC", body))
+		require.NoError(t, err)
+		assert.Equal(t, contract, gotAccount)
+	})
+
 	badRequests := []struct {
 		name, target, body string
 	}{
-		{"missing network", "/x", `{"transaction_xdr":"AAAA"}`},
-		{"unsupported network", "/x?network=FUTURENET", `{"transaction_xdr":"AAAA"}`},
+		{"missing network", "/x", `{"transaction_xdr":"AAAA","account_address":"GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"}`},
+		{"unsupported network", "/x?network=FUTURENET", `{"transaction_xdr":"AAAA","account_address":"GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"}`},
 		{"malformed JSON", "/x?network=PUBLIC", `{`},
-		{"missing transaction_xdr", "/x?network=PUBLIC", `{}`},
-		{"empty transaction_xdr", "/x?network=PUBLIC", `{"transaction_xdr":""}`},
+		{"missing transaction_xdr", "/x?network=PUBLIC", `{"account_address":"GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"}`},
+		{"empty transaction_xdr", "/x?network=PUBLIC", `{"transaction_xdr":"","account_address":"GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"}`},
+		{"missing account_address", "/x?network=PUBLIC", `{"transaction_xdr":"AAAA"}`},
+		{"invalid account_address", "/x?network=PUBLIC", `{"transaction_xdr":"AAAA","account_address":"GNOTANADDRESS"}`},
 	}
 	for _, tc := range badRequests {
 		t.Run(tc.name+" is a 400 without calling the service", func(t *testing.T) {
 			t.Parallel()
 			mockSvc := &utils.MockWalletBackendService{
-				SimulateStateChangesFunc: func(context.Context, string, string) (*types.SimulatedStateChanges, error) {
+				SimulateStateChangesFunc: func(context.Context, string, string, string) (*types.SimulatedStateChanges, error) {
 					t.Error("service must not be called")
 					return nil, nil
 				},
@@ -97,7 +138,7 @@ func TestSimulateStateChanges_Handler(t *testing.T) {
 			mockSvc := &utils.MockWalletBackendService{
 				SimulateStateChangesError: &types.SimulationRejectedError{Code: tc.code, Message: "cannot preview"},
 			}
-			err := NewSimulateStateChangesHandler(mockSvc).SimulateStateChanges(httptest.NewRecorder(), simulateRequest("/x?network=PUBLIC", `{"transaction_xdr":"AAAA"}`))
+			err := NewSimulateStateChangesHandler(mockSvc).SimulateStateChanges(httptest.NewRecorder(), simulateRequest("/x?network=PUBLIC", `{"transaction_xdr":"AAAA","account_address":"GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"}`))
 			var herr *httperror.HttpError
 			require.True(t, errors.As(err, &herr), "expected HttpError, got %v", err)
 			assert.Equal(t, tc.status, herr.StatusCode)
@@ -119,7 +160,7 @@ func TestSimulateStateChanges_Handler(t *testing.T) {
 		t.Run(tc.name+" maps through translateServiceError", func(t *testing.T) {
 			t.Parallel()
 			mockSvc := &utils.MockWalletBackendService{SimulateStateChangesError: tc.err}
-			err := NewSimulateStateChangesHandler(mockSvc).SimulateStateChanges(httptest.NewRecorder(), simulateRequest("/x?network=PUBLIC", `{"transaction_xdr":"AAAA"}`))
+			err := NewSimulateStateChangesHandler(mockSvc).SimulateStateChanges(httptest.NewRecorder(), simulateRequest("/x?network=PUBLIC", `{"transaction_xdr":"AAAA","account_address":"GBTYAFHGNZSTE4VBWZYAGB3SRGJEPTI5I4Y22KZ4JTVAN56LESB6JZOF"}`))
 			var herr *httperror.HttpError
 			require.True(t, errors.As(err, &herr), "expected HttpError, got %v", err)
 			assert.Equal(t, tc.status, herr.StatusCode)

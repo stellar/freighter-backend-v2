@@ -10,10 +10,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/stellar/go-stellar-sdk/xdr"
+
 	"github.com/stellar/freighter-backend-v2/internal/api/httperror"
 	response "github.com/stellar/freighter-backend-v2/internal/api/httpresponse"
 	"github.com/stellar/freighter-backend-v2/internal/api/middleware"
 	"github.com/stellar/freighter-backend-v2/internal/types"
+	"github.com/stellar/freighter-backend-v2/internal/utils"
 )
 
 // SimulateStateChangesContextTimeout caps each preview request. A preview that
@@ -28,13 +31,18 @@ func NewSimulateStateChangesHandler(walletBackendService types.WalletBackendServ
 	return &SimulateStateChangesHandler{WalletBackendService: walletBackendService}
 }
 
+// SimulateStateChangesRequest carries the transaction to preview and the
+// account the preview is for: the wallet account asked to sign. Only state
+// changes on that account are returned. A muxed (M...) address is treated as
+// its base account, which is where state changes are recorded.
 type SimulateStateChangesRequest struct {
 	TransactionXDR string `json:"transaction_xdr"`
+	AccountAddress string `json:"account_address"`
 }
 
 // SimulateStateChanges returns the state changes an unsubmitted transaction
-// would produce. A transaction that cannot be previewed is a 4xx whose
-// extras.code carries wallet-backend's code.
+// would produce on one account. A transaction that cannot be previewed is a
+// 4xx whose extras.code carries wallet-backend's code.
 func (h *SimulateStateChangesHandler) SimulateStateChanges(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := context.WithTimeout(r.Context(), SimulateStateChangesContextTimeout)
 	defer cancel()
@@ -56,7 +64,13 @@ func (h *SimulateStateChangesHandler) SimulateStateChanges(w http.ResponseWriter
 		return httperror.BadRequest(errStr, errors.New(errStr))
 	}
 
-	result, err := h.WalletBackendService.SimulateStateChanges(ctx, req.TransactionXDR, network)
+	accountAddress, ok := baseAccountAddress(req.AccountAddress)
+	if !ok {
+		errStr := "account_address must be a valid account or contract address"
+		return httperror.BadRequest(errStr, errors.New(errStr))
+	}
+
+	result, err := h.WalletBackendService.SimulateStateChanges(ctx, req.TransactionXDR, accountAddress, network)
 	if err != nil {
 		var rejected *types.SimulationRejectedError
 		if errors.As(err, &rejected) {
@@ -67,6 +81,20 @@ func (h *SimulateStateChangesHandler) SimulateStateChanges(w http.ResponseWriter
 
 	w.Header().Set("Content-Type", "application/json")
 	return response.OK(w, HttpResponse{Data: result})
+}
+
+// baseAccountAddress returns the address state changes are recorded under:
+// G... and C... addresses as given, and a muxed M... address as its base G...
+// account. It reports false for anything else.
+func baseAccountAddress(address string) (string, bool) {
+	if utils.IsValidAccount(address) {
+		return address, true
+	}
+	var muxed xdr.MuxedAccount
+	if err := muxed.SetAddress(address); err != nil {
+		return "", false
+	}
+	return muxed.ToAccountId().Address(), true
 }
 
 // simulationRejectedHTTPError maps a transaction that cannot be previewed to

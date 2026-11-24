@@ -9,18 +9,28 @@ import (
 )
 
 // mapSimulatedStateChanges copies an SDK simulation result into the REST
-// shape. It drops the fee row, which is the only row with no operation index:
-// no client shows it. The result slices are always non-nil so they encode as [].
-func mapSimulatedStateChanges(r *wbtypes.SimulatedStateChanges) *types.SimulatedStateChanges {
+// shape, keeping only what a sign view shows for accountAddress. It drops the
+// fee row (the only row with no operation index), rows on other accounts, and
+// tokens no remaining row references. The result slices are always non-nil so
+// they encode as [].
+func mapSimulatedStateChanges(r *wbtypes.SimulatedStateChanges, accountAddress string) *types.SimulatedStateChanges {
 	stateChanges := make([]types.SimulatedStateChange, 0, len(r.StateChanges))
+	usedTokens := make(map[string]struct{})
 	for _, sc := range r.StateChanges {
-		if sc == nil || sc.GetOperationIndex() == nil {
+		if sc == nil || sc.GetOperationIndex() == nil || sc.GetAccountAddress() != accountAddress {
 			continue
 		}
-		stateChanges = append(stateChanges, mapSimulatedStateChange(sc))
+		mapped := mapSimulatedStateChange(sc)
+		if tokenID := simulatedTokenID(mapped); tokenID != "" {
+			usedTokens[tokenID] = struct{}{}
+		}
+		stateChanges = append(stateChanges, mapped)
 	}
-	tokens := make([]types.SimulatedToken, 0, len(r.Tokens))
+	tokens := make([]types.SimulatedToken, 0, len(usedTokens))
 	for _, t := range r.Tokens {
+		if _, used := usedTokens[t.TokenID]; !used {
+			continue
+		}
 		tokens = append(tokens, types.SimulatedToken{
 			TokenID: t.TokenID, Code: t.Code, Issuer: t.Issuer, Name: t.Name, Symbol: t.Symbol, Decimals: t.Decimals,
 		})
@@ -30,6 +40,30 @@ func mapSimulatedStateChanges(r *wbtypes.SimulatedStateChanges) *types.Simulated
 		StateChanges: stateChanges,
 		Tokens:       tokens,
 	}
+}
+
+// simulatedTokenID returns the token a mapped state change references, or ""
+// when it references none.
+func simulatedTokenID(sc types.SimulatedStateChange) string {
+	var tokenID *string
+	switch v := sc.(type) {
+	case *types.SimulatedBalanceChange:
+		return v.TokenID
+	case *types.SimulatedAllowanceChange:
+		return v.TokenID
+	case *types.SimulatedTrustlineAddedChange:
+		tokenID = v.TokenID
+	case *types.SimulatedTrustlineUpdatedChange:
+		tokenID = v.TokenID
+	case *types.SimulatedTrustlineRemovedChange:
+		tokenID = v.TokenID
+	case *types.SimulatedBalanceAuthorizationChange:
+		tokenID = v.TokenID
+	}
+	if tokenID == nil {
+		return ""
+	}
+	return *tokenID
 }
 
 // mapSimulatedStateChange dispatches an SDK simulated state change to the

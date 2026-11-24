@@ -1015,7 +1015,7 @@ func TestSimulateStateChanges(t *testing.T) {
 		})
 		defer server.Close()
 
-		got, err := newTestWalletBackendService(t, server.URL).SimulateStateChanges(context.Background(), "AAAA", types.PUBLIC)
+		got, err := newTestWalletBackendService(t, server.URL).SimulateStateChanges(context.Background(), "AAAA", "GSENDER", types.PUBLIC)
 		require.NoError(t, err)
 		assert.Equal(t, uint32(123), got.LatestLedger)
 		require.Len(t, got.StateChanges, 1, "the fee row is dropped")
@@ -1039,7 +1039,7 @@ func TestSimulateStateChanges(t *testing.T) {
 
 			reg := prometheus.NewRegistry()
 			svc := newTestWalletBackendServiceWithMetrics(t, server.URL, metrics.NewService(reg))
-			got, err := svc.SimulateStateChanges(context.Background(), "AAAA", types.PUBLIC)
+			got, err := svc.SimulateStateChanges(context.Background(), "AAAA", "GSENDER", types.PUBLIC)
 			assert.Nil(t, got)
 			var rejected *types.SimulationRejectedError
 			require.True(t, errors.As(err, &rejected), "expected SimulationRejectedError, got %v", err)
@@ -1061,7 +1061,7 @@ func TestSimulateStateChanges(t *testing.T) {
 
 		reg := prometheus.NewRegistry()
 		svc := newTestWalletBackendServiceWithMetrics(t, server.URL, metrics.NewService(reg))
-		_, err := svc.SimulateStateChanges(context.Background(), "AAAA", types.PUBLIC)
+		_, err := svc.SimulateStateChanges(context.Background(), "AAAA", "GSENDER", types.PUBLIC)
 		var upErr *metrics.UpstreamError
 		require.True(t, errors.As(err, &upErr), "expected UpstreamError, got %v", err)
 		assert.Equal(t, "graphql_error", upErr.Kind)
@@ -1075,7 +1075,7 @@ func TestSimulateStateChanges(t *testing.T) {
 		})
 		defer server.Close()
 
-		_, err := newTestWalletBackendService(t, server.URL).SimulateStateChanges(context.Background(), "AAAA", types.PUBLIC)
+		_, err := newTestWalletBackendService(t, server.URL).SimulateStateChanges(context.Background(), "AAAA", "GSENDER", types.PUBLIC)
 		var upErr *metrics.UpstreamError
 		require.True(t, errors.As(err, &upErr), "expected UpstreamError, got %v", err)
 		assert.Equal(t, 500, upErr.Code)
@@ -1083,7 +1083,7 @@ func TestSimulateStateChanges(t *testing.T) {
 
 	t.Run("unconfigured network errors before any call", func(t *testing.T) {
 		t.Parallel()
-		_, err := newTestWalletBackendService(t, "http://unused.invalid").SimulateStateChanges(context.Background(), "AAAA", types.TESTNET)
+		_, err := newTestWalletBackendService(t, "http://unused.invalid").SimulateStateChanges(context.Background(), "AAAA", "GSENDER", types.TESTNET)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not configured")
 	})
